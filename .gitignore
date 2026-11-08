@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+.venv/
+venv/
+env/
+
+# PyInstaller / Build outputs
+build/
+dist/
+*.spec
+
+# OS / Editor
+.vscode/
+.idea/
+*.swp
+Thumbs.db
