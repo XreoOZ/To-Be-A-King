@@ -1,10 +1,10 @@
 {
   "char_alfred": {
     "id": "char_alfred",
-    "name": "Alfred 'the Great'",
-    "title": "King of Wessex",
+    "name": "King Alfred 'the Great'",
+    "title": "King of Wessex & the Anglo-Saxons",
     "dynasty": "House of Wessex",
-    "realm": "wessex",
+    "realm": "Kingdom of Wessex",
     "portrait": "portrait_alfred.png",
     "coa": "coa_wessex.png",
     "age": 22,
@@ -13,117 +13,44 @@
       "diplomacy": 14,
       "martial": 16,
       "stewardship": 15,
-      "intrigue": 11,
+      "intrigue": 12,
       "learning": 18
     },
-    "gold": 120,
+    "gold": 150,
     "prestige": 250,
     "piety": 180,
     "traits": [
       "Brave",
       "Just",
-      "Scholar"
+      "Scholar",
+      "Defender of Faith"
     ]
   },
-  "char_burgred": {
-    "id": "char_burgred",
-    "name": "Burgred",
-    "title": "King of Mercia",
-    "dynasty": "House of Mercia",
-    "realm": "mercia",
-    "portrait": "portrait_burgred.png",
-    "coa": "coa_mercia.png",
-    "age": 41,
-    "alive": true,
-    "stats": {
-      "diplomacy": 11,
-      "martial": 9,
-      "stewardship": 12,
-      "intrigue": 8,
-      "learning": 9
-    },
-    "gold": 80,
-    "prestige": 140,
-    "piety": 90,
-    "traits": [
-      "Craven",
-      "Content"
-    ]
-  },
-  "char_halfden": {
-    "id": "char_halfden",
-    "name": "Halfdan Ragnarsson",
-    "title": "Jarl of Jorvik & Northumbria",
-    "dynasty": "Ragnarsson",
-    "realm": "danelaw",
+  "char_halfdan": {
+    "id": "char_halfdan",
+    "name": "Jarl Halfdan Ragnarsson",
+    "title": "Warlord of Danelaw & the Great Army",
+    "dynasty": "House of Ragnarsson",
+    "realm": "The Danelaw",
     "portrait": "portrait_halfden.png",
     "coa": "coa_danelaw.png",
     "age": 35,
     "alive": true,
     "stats": {
-      "diplomacy": 8,
+      "diplomacy": 9,
       "martial": 19,
-      "stewardship": 10,
+      "stewardship": 11,
       "intrigue": 14,
-      "learning": 6
+      "learning": 7
     },
-    "gold": 210,
-    "prestige": 400,
-    "piety": 50,
+    "gold": 180,
+    "prestige": 350,
+    "piety": 60,
     "traits": [
       "Viking",
       "Fierce",
-      "Ambitious"
-    ]
-  },
-  "char_rhodri": {
-    "id": "char_rhodri",
-    "name": "Rhodri the Great",
-    "title": "King of Gwynedd & Powys",
-    "dynasty": "Aberffraw",
-    "realm": "wales",
-    "portrait": "portrait_rhodri.png",
-    "coa": "coa_wales.png",
-    "age": 48,
-    "alive": true,
-    "stats": {
-      "diplomacy": 13,
-      "martial": 15,
-      "stewardship": 12,
-      "intrigue": 10,
-      "learning": 12
-    },
-    "gold": 90,
-    "prestige": 210,
-    "piety": 130,
-    "traits": [
-      "Proud",
-      "Diligent"
-    ]
-  },
-  "char_constantine": {
-    "id": "char_constantine",
-    "name": "Causant\u00edn mac Cin\u00e1eda",
-    "title": "King of the Picts & Alba",
-    "dynasty": "Alpin",
-    "realm": "scotland",
-    "portrait": "portrait_constantine.png",
-    "coa": "coa_scotland.png",
-    "age": 31,
-    "alive": true,
-    "stats": {
-      "diplomacy": 10,
-      "martial": 14,
-      "stewardship": 11,
-      "intrigue": 12,
-      "learning": 10
-    },
-    "gold": 110,
-    "prestige": 190,
-    "piety": 110,
-    "traits": [
-      "Stubborn",
-      "Hunter"
+      "Ambitious",
+      "Scourge of the North"
     ]
   }
 }

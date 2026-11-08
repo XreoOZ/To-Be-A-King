@@ -1,18 +1,14 @@
 {
   "wessex": {
     "id": "wessex",
-    "name": "Wessex",
+    "name": "Wessex (Capital)",
     "owner": "char_alfred",
     "culture": "Anglo-Saxon",
     "religion": "Catholic",
     "tax": 16,
-    "levies_max": 2200,
-    "levies_current": 2200,
-    "color": [
-      195,
-      30,
-      30
-    ]
+    "levies_max": 2000,
+    "levies_current": 2000,
+    "color": [195, 35, 35]
   },
   "kent_essex": {
     "id": "kent_essex",
@@ -20,14 +16,10 @@
     "owner": "char_alfred",
     "culture": "Anglo-Saxon",
     "religion": "Catholic",
-    "tax": 12,
-    "levies_max": 1400,
-    "levies_current": 1400,
-    "color": [
-      215,
-      60,
-      60
-    ]
+    "tax": 14,
+    "levies_max": 1600,
+    "levies_current": 1600,
+    "color": [195, 35, 35]
   },
   "cornwall": {
     "id": "cornwall",
@@ -35,178 +27,108 @@
     "owner": "char_alfred",
     "culture": "Cornish",
     "religion": "Catholic",
-    "tax": 7,
-    "levies_max": 800,
-    "levies_current": 800,
-    "color": [
-      175,
-      50,
-      70
-    ]
+    "tax": 8,
+    "levies_max": 900,
+    "levies_current": 900,
+    "color": [195, 35, 35]
   },
   "mercia": {
     "id": "mercia",
     "name": "Mercia",
-    "owner": "char_burgred",
+    "owner": "char_alfred",
     "culture": "Anglo-Saxon",
     "religion": "Catholic",
-    "tax": 13,
-    "levies_max": 1600,
-    "levies_current": 1600,
-    "color": [
-      210,
-      170,
-      40
-    ]
+    "tax": 15,
+    "levies_max": 1800,
+    "levies_current": 1800,
+    "color": [195, 35, 35]
   },
   "east_anglia": {
     "id": "east_anglia",
     "name": "East Anglia",
-    "owner": "char_burgred",
+    "owner": "char_alfred",
     "culture": "Anglo-Saxon",
     "religion": "Catholic",
-    "tax": 10,
-    "levies_max": 1200,
-    "levies_current": 1200,
-    "color": [
-      220,
-      120,
-      40
-    ]
+    "tax": 12,
+    "levies_max": 1300,
+    "levies_current": 1300,
+    "color": [195, 35, 35]
   },
-  "jorvik": {
-    "id": "jorvik",
-    "name": "Jorvik",
-    "owner": "char_halfden",
-    "culture": "Norse",
-    "religion": "Norse Pagan",
-    "tax": 15,
-    "levies_max": 2000,
-    "levies_current": 2000,
-    "color": [
-      70,
-      70,
-      75
-    ]
-  },
-  "bernicia": {
-    "id": "bernicia",
-    "name": "Bernicia",
-    "owner": "char_halfden",
-    "culture": "Anglo-Saxon",
+  "wales": {
+    "id": "wales",
+    "name": "Wales",
+    "owner": "char_alfred",
+    "culture": "Welsh",
     "religion": "Catholic",
     "tax": 9,
     "levies_max": 1100,
     "levies_current": 1100,
-    "color": [
-      160,
-      45,
-      45
-    ]
+    "color": [195, 35, 35]
   },
-  "gwynedd": {
-    "id": "gwynedd",
-    "name": "Gwynedd",
-    "owner": "char_rhodri",
-    "culture": "Welsh",
-    "religion": "Catholic",
-    "tax": 8,
-    "levies_max": 900,
-    "levies_current": 900,
-    "color": [
-      35,
-      140,
-      65
-    ]
+  "jorvik": {
+    "id": "jorvik",
+    "name": "Jorvik (Capital)",
+    "owner": "char_halfdan",
+    "culture": "Norse",
+    "religion": "Norse Pagan",
+    "tax": 16,
+    "levies_max": 2000,
+    "levies_current": 2000,
+    "color": [55, 75, 100]
   },
-  "powys": {
-    "id": "powys",
-    "name": "Powys",
-    "owner": "char_rhodri",
-    "culture": "Welsh",
-    "religion": "Catholic",
-    "tax": 7,
-    "levies_max": 800,
-    "levies_current": 800,
-    "color": [
-      50,
-      160,
-      80
-    ]
+  "deira": {
+    "id": "deira",
+    "name": "Deira",
+    "owner": "char_halfdan",
+    "culture": "Norse",
+    "religion": "Norse Pagan",
+    "tax": 13,
+    "levies_max": 1500,
+    "levies_current": 1500,
+    "color": [55, 75, 100]
   },
-  "deheubarth": {
-    "id": "deheubarth",
-    "name": "Deheubarth",
-    "owner": "char_rhodri",
-    "culture": "Welsh",
-    "religion": "Catholic",
-    "tax": 7,
-    "levies_max": 850,
-    "levies_current": 850,
-    "color": [
-      65,
-      175,
-      95
-    ]
-  },
-  "alba": {
-    "id": "alba",
-    "name": "Alba",
-    "owner": "char_constantine",
-    "culture": "Goidelic",
-    "religion": "Catholic",
+  "bernicia": {
+    "id": "bernicia",
+    "name": "Bernicia",
+    "owner": "char_halfdan",
+    "culture": "Anglo-Danish",
+    "religion": "Norse Pagan",
     "tax": 11,
-    "levies_max": 1300,
-    "levies_current": 1300,
-    "color": [
-      25,
-      65,
-      145
-    ]
-  },
-  "highlands": {
-    "id": "highlands",
-    "name": "Highlands",
-    "owner": "char_constantine",
-    "culture": "Pictish",
-    "religion": "Catholic",
-    "tax": 5,
-    "levies_max": 700,
-    "levies_current": 700,
-    "color": [
-      40,
-      80,
-      160
-    ]
-  },
-  "lothian": {
-    "id": "lothian",
-    "name": "Lothian",
-    "owner": "char_constantine",
-    "culture": "Goidelic",
-    "religion": "Catholic",
-    "tax": 8,
-    "levies_max": 950,
-    "levies_current": 950,
-    "color": [
-      60,
-      100,
-      175
-    ]
+    "levies_max": 1200,
+    "levies_current": 1200,
+    "color": [55, 75, 100]
   },
   "strathclyde": {
     "id": "strathclyde",
     "name": "Strathclyde",
-    "owner": "char_constantine",
+    "owner": "char_halfdan",
     "culture": "Cumbric",
     "religion": "Catholic",
-    "tax": 7,
-    "levies_max": 800,
-    "levies_current": 800,
-    "color": [
-      75,
-      115,
-      190
-    ]
+    "tax": 10,
+    "levies_max": 1100,
+    "levies_current": 1100,
+    "color": [55, 75, 100]
+  },
+  "lothian": {
+    "id": "lothian",
+    "name": "Lothian",
+    "owner": "char_halfdan",
+    "culture": "Pictish",
+    "religion": "Catholic",
+    "tax": 12,
+    "levies_max": 1300,
+    "levies_current": 1300,
+    "color": [55, 75, 100]
+  },
+  "highlands": {
+    "id": "highlands",
+    "name": "Scottish Highlands",
+    "owner": "char_halfdan",
+    "culture": "Gaelic",
+    "religion": "Catholic",
+    "tax": 9,
+    "levies_max": 1000,
+    "levies_current": 1000,
+    "color": [55, 75, 100]
   }
 }
