@@ -901,7 +901,9 @@ def run_game():
 
         state.hovered_province = None
 
-        # Draw mainland Britain tiles
+        # -----------------------------------------------------------
+        # PASS 1: Fill all land tiles (full tile, no gap = seamless)
+        # -----------------------------------------------------------
         for r, row in enumerate(raw_grid):
             for c, ch in enumerate(row):
                 cell_x = map_origin_x + (c * tile_w)
@@ -909,35 +911,93 @@ def run_game():
                 cell_rect = pygame.Rect(cell_x, cell_y, tile_w, tile_h)
 
                 if ch == ".":
+                    # Ocean dashes
                     if (r + c) % 7 == 0:
-                        pygame.draw.line(screen, (28, 48, 76), (cell_x + 4, cell_y + 12), (cell_x + 12, cell_y + 12))
-                else:
-                    prov_id = cell_to_prov.get((c, r))
-                    prov_info = PROVINCES.get(prov_id)
-                    col = prov_info["color"] if prov_info else (150, 150, 150)
+                        pygame.draw.line(screen, (28, 48, 76),
+                                         (cell_x + 4, cell_y + 12), (cell_x + 12, cell_y + 12))
+                    continue
 
-                    is_hovered = cell_rect.collidepoint(mouse_pos)
-                    is_selected = (prov_id == state.selected_province)
+                prov_id  = cell_to_prov.get((c, r))
+                prov_info = PROVINCES.get(prov_id)
+                col = tuple(prov_info["color"]) if prov_info else (150, 150, 150)
 
-                    if is_hovered:
-                        state.hovered_province = prov_id
-                        col = (min(255, col[0] + 45), min(255, col[1] + 45), min(255, col[2] + 45))
+                is_hovered  = cell_rect.collidepoint(mouse_pos)
+                is_selected = (prov_id == state.selected_province)
 
-                    pygame.draw.rect(screen, col, (cell_x, cell_y, tile_w - 1, tile_h - 1))
+                if is_hovered:
+                    state.hovered_province = prov_id
+                    col = (min(255, col[0] + 45), min(255, col[1] + 45), min(255, col[2] + 45))
 
-                    if is_selected:
-                        pygame.draw.rect(screen, COLOR_GOLD, (cell_x - 1, cell_y - 1, tile_w + 1, tile_h + 1), 2)
-                    else:
-                        pygame.draw.line(screen, (min(255, col[0] + 25), min(255, col[1] + 25), min(255, col[2] + 25)), (cell_x, cell_y), (cell_x + tile_w - 2, cell_y))
-                        pygame.draw.line(screen, (max(0, col[0] - 25), max(0, col[1] - 25), max(0, col[2] - 25)), (cell_x, cell_y + tile_h - 2), (cell_x + tile_w - 2, cell_y + tile_h - 2))
+                # Draw full tile (no 1-px gap → seamless within province)
+                pygame.draw.rect(screen, col, (cell_x, cell_y, tile_w, tile_h))
 
-                    if mouse_clicked and is_hovered:
-                        # If player has an army selected, clicking a province can move it
-                        curr_army = state.get_selected_army()
-                        if curr_army and curr_army.owner == state.player_id and prov_id != curr_army.province:
-                            # March order!
-                            state.order_army_march(curr_army, prov_id)
-                        state.selected_province = prov_id
+                # Subtle inner highlight (top/left edges only within same province)
+                pygame.draw.line(screen,
+                    (min(255, col[0]+18), min(255, col[1]+18), min(255, col[2]+18)),
+                    (cell_x, cell_y), (cell_x + tile_w - 1, cell_y))
+                pygame.draw.line(screen,
+                    (min(255, col[0]+18), min(255, col[1]+18), min(255, col[2]+18)),
+                    (cell_x, cell_y), (cell_x, cell_y + tile_h - 1))
+
+                if mouse_clicked and is_hovered:
+                    curr_army = state.get_selected_army()
+                    if curr_army and curr_army.owner == state.player_id and prov_id != curr_army.province:
+                        state.order_army_march(curr_army, prov_id)
+                    state.selected_province = prov_id
+
+        # -----------------------------------------------------------
+        # PASS 2: Draw borders ONLY on edges between different owners
+        #         (or land vs ocean)
+        # -----------------------------------------------------------
+        BORDER_COL      = (0,   0,   0)    # hard black between different rulers
+        SELECTED_COL    = COLOR_GOLD
+        BORDER_W        = 2
+
+        def get_owner(col_i, row_i):
+            pid = cell_to_prov.get((col_i, row_i))
+            if pid is None:
+                return None   # ocean
+            return PROVINCES[pid]["owner"]
+
+        for r, row in enumerate(raw_grid):
+            for c, ch in enumerate(row):
+                if ch == ".":
+                    continue
+                cell_x = map_origin_x + (c * tile_w)
+                cell_y = map_origin_y + 45 + (r * tile_h)
+                prov_id  = cell_to_prov.get((c, r))
+                is_selected = (prov_id == state.selected_province)
+                owner = get_owner(c, r)
+
+                # Check 4 neighbors; draw border line if owner differs
+                # Right edge
+                if get_owner(c + 1, r) != owner:
+                    ex = cell_x + tile_w - 1
+                    col_b = SELECTED_COL if is_selected else BORDER_COL
+                    pygame.draw.line(screen, col_b,
+                                     (ex, cell_y), (ex, cell_y + tile_h - 1), BORDER_W)
+                # Bottom edge
+                if get_owner(c, r + 1) != owner:
+                    ey = cell_y + tile_h - 1
+                    col_b = SELECTED_COL if is_selected else BORDER_COL
+                    pygame.draw.line(screen, col_b,
+                                     (cell_x, ey), (cell_x + tile_w - 1, ey), BORDER_W)
+                # Left edge
+                if get_owner(c - 1, r) != owner:
+                    col_b = SELECTED_COL if is_selected else BORDER_COL
+                    pygame.draw.line(screen, col_b,
+                                     (cell_x, cell_y), (cell_x, cell_y + tile_h - 1), BORDER_W)
+                # Top edge
+                if get_owner(c, r - 1) != owner:
+                    col_b = SELECTED_COL if is_selected else BORDER_COL
+                    pygame.draw.line(screen, col_b,
+                                     (cell_x, cell_y), (cell_x + tile_w - 1, cell_y), BORDER_W)
+
+                # Golden highlight on selected province (outer glow over border)
+                if is_selected:
+                    pygame.draw.rect(screen, COLOR_GOLD,
+                                     (cell_x, cell_y, tile_w, tile_h), 1)
+
 
         # Province Name Labels
         for pid, (lx, ly) in province_anchors.items():
