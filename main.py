@@ -2249,8 +2249,8 @@ def run_game():
 
             t1 = font_sm.render(f"My Liege, {req['vassal']} humbly requests your royal charter", True, COLOR_TEXT_WHITE)
             t2 = font_sm.render(f"to construct a fortified market town in {req['province_name']}.", True, COLOR_TEXT_WHITE)
-            t3 = font_xs.render("• Granting Charter: Vassal pays cost, +15 Vassal Opinion, +5 Tax, +250 Levies.", True, COLOR_TEXT_GREEN)
-            t4 = font_xs.render("• Denying Charter: -15 Vassal Opinion.", True, COLOR_TEXT_RED)
+            t3 = font_xs.render("• Granting Charter: Vassal pays cost, +5 Province Tax, +250 Levies.", True, COLOR_TEXT_GREEN)
+            t4 = font_xs.render("• Denying Charter: Vassal saves their treasury.", True, COLOR_TEXT_MUTED)
 
             screen.blit(t1, (pop_x + 25, pop_y + 70))
             screen.blit(t2, (pop_x + 25, pop_y + 92))
@@ -2278,8 +2278,7 @@ def run_game():
                     p_obj["tax"] += 5
                     p_obj["levies_max"] += 250
                     p_obj["levies_current"] += 250
-                    req["vassal_ref"]["opinion"] = min(100, req["vassal_ref"]["opinion"] + 15)
-                    req["vassal_ref"]["gold"] = max(0, req["vassal_ref"]["gold"] - 100)
+                    req["vassal_ref"]["gold"] = max(0, req["vassal_ref"]["gold"] - 1000)
                     
                     # Find free 2 tiles in this province to establish the new town!
                     tiles = prov_tile_list.get(pid, [])
@@ -2301,8 +2300,7 @@ def run_game():
                 state.vassal_build_requests.pop(0)
 
             elif mouse_clicked and den_hov:
-                req["vassal_ref"]["opinion"] = max(0, req["vassal_ref"]["opinion"] - 15)
-                state.logs.append(f"Denied charter to {req['vassal']}. Their loyalty wavers (-15 Opinion).")
+                state.logs.append(f"Denied charter to {req['vassal']}. Funds remain unspent.")
                 state.vassal_build_requests.pop(0)
 
         pygame.display.flip()
