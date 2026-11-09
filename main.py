@@ -17,6 +17,7 @@ import sys
 import os
 import json
 import random
+import math
 from collections import deque
 import pygame
 
@@ -113,13 +114,29 @@ for cid, char in CHARACTERS.items():
     cfile = char.get("coa", "coa_wessex.png")
     coa_cache[cid] = load_image(os.path.join("heraldry", cfile), (36, 42))
 
-# Province Heraldic Flags for Armies
+# Procedural Distinct Heraldry for Kent & Cornwall
+def make_heraldic_shield(bg_color, is_cornwall=False, is_kent=False):
+    s = pygame.Surface((24, 28), pygame.SRCALPHA)
+    s.fill(bg_color)
+    if is_cornwall:
+        # Saint Piran's Cross: Bold White Cross on Pitch Black Field
+        pygame.draw.line(s, (255, 255, 255), (0, 14), (24, 14), 4)
+        pygame.draw.line(s, (255, 255, 255), (8, 0), (8, 28), 4)
+    elif is_kent:
+        # Saxon Invicta Cross on Crimson Field
+        pygame.draw.line(s, (255, 255, 255), (0, 14), (24, 14), 3)
+        pygame.draw.line(s, (255, 255, 255), (8, 0), (8, 28), 3)
+        pygame.draw.polygon(s, (255, 255, 255), [(13, 6), (19, 10), (13, 14)])
+    pygame.draw.rect(s, COLOR_GOLD, (0, 0, 24, 28), 1, border_radius=3)
+    return s
+
+# Province Heraldic Shields for Armies
 prov_flag_cache = {
     "wessex": load_image(os.path.join("heraldry", "coa_wessex.png"), (24, 28)),
     "mercia": load_image(os.path.join("heraldry", "coa_mercia.png"), (24, 28)),
     "east_anglia": load_image(os.path.join("heraldry", "coa_east_anglia.png"), (24, 28)),
-    "kent_essex": load_image(os.path.join("heraldry", "coa_wessex.png"), (24, 28)),
-    "cornwall": load_image(os.path.join("heraldry", "coa_wessex.png"), (24, 28)),
+    "kent_essex": make_heraldic_shield((175, 25, 45), is_kent=True),
+    "cornwall": make_heraldic_shield((24, 24, 28), is_cornwall=True),
     "wales": load_image(os.path.join("heraldry", "coa_wales.png"), (24, 28)),
     "jorvik": load_image(os.path.join("heraldry", "coa_danelaw.png"), (24, 28)),
     "deira": load_image(os.path.join("heraldry", "coa_northumbria.png"), (24, 28)),
@@ -128,6 +145,117 @@ prov_flag_cache = {
     "lothian": load_image(os.path.join("heraldry", "coa_scotland.png"), (24, 28)),
     "highlands": load_image(os.path.join("heraldry", "coa_scotland.png"), (24, 28)),
 }
+
+# -------------------------------------------------------------
+# Waving War Banners & Cloth Generation
+# -------------------------------------------------------------
+def make_banner_cloth(pid, width, height, is_large=True):
+    bg_palette = {
+        "wessex": (190, 30, 30),
+        "mercia": (22, 50, 130),
+        "east_anglia": (30, 80, 160),
+        "kent_essex": (170, 25, 45),
+        "cornwall": (24, 24, 28),
+        "wales": (28, 110, 50),
+        "jorvik": (35, 40, 50),
+        "deira": (135, 38, 42),
+        "bernicia": (30, 42, 85),
+        "strathclyde": (20, 55, 135),
+        "lothian": (20, 55, 135),
+        "highlands": (20, 55, 135),
+    }
+    bg = bg_palette.get(pid, (120, 30, 30))
+    surf = pygame.Surface((width, height), pygame.SRCALPHA)
+    surf.fill(bg)
+
+    # Blit heraldic shield onto banner cloth
+    emblem = prov_flag_cache.get(pid)
+    if emblem:
+        ew = int(width * 0.65)
+        eh = int(height * 0.78)
+        scaled_emblem = pygame.transform.smoothscale(emblem, (ew, eh))
+        surf.blit(scaled_emblem, (2, (height - eh) // 2))
+
+    # Golden fringe borders
+    pygame.draw.line(surf, COLOR_GOLD, (0, 0), (width, 0), 1)
+    pygame.draw.line(surf, COLOR_GOLD, (0, height - 1), (width, height - 1), 1)
+
+    # Swallowtail pennon notch for grand banners
+    if is_large and width >= 26:
+        cut_w = 6
+        pts = [(width - cut_w, height // 2), (width + 1, 0), (width + 1, height)]
+        cut_mask = pygame.Surface((width, height), pygame.SRCALPHA)
+        cut_mask.fill((255, 255, 255, 255))
+        pygame.draw.polygon(cut_mask, (0, 0, 0, 0), pts)
+        surf.blit(cut_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        pygame.draw.line(surf, COLOR_GOLD, (width - 1, 0), (width - cut_w, height // 2), 1)
+        pygame.draw.line(surf, COLOR_GOLD, (width - cut_w, height // 2), (width - 1, height - 1), 1)
+    else:
+        pygame.draw.line(surf, COLOR_GOLD, (width - 1, 0), (width - 1, height - 1), 1)
+
+    return surf
+
+banner_cloth_large = {pid: make_banner_cloth(pid, 32, 22, is_large=True) for pid in prov_flag_cache}
+banner_cloth_small = {pid: make_banner_cloth(pid, 18, 13, is_large=False) for pid in prov_flag_cache}
+
+def draw_waving_banner(surface, cloth_surf, pole_x, pole_y, pole_h, ticks, amp=3.0, freq=0.25, is_main=False):
+    # Wooden flagpole
+    top_y = pole_y - pole_h
+    pygame.draw.line(surface, (45, 30, 20), (pole_x, top_y), (pole_x, pole_y), 2 if is_main else 1)
+    pygame.draw.line(surface, (95, 70, 48), (pole_x - 1, top_y), (pole_x - 1, pole_y), 1)
+
+    # Golden Spearhead Finial on top
+    finial_h = 7 if is_main else 4
+    finial_w = 4 if is_main else 2
+    pygame.draw.polygon(surface, COLOR_GOLD, [
+        (pole_x, top_y - finial_h),
+        (pole_x - finial_w, top_y),
+        (pole_x + finial_w, top_y)
+    ])
+    if is_main:
+        pygame.draw.line(surface, (255, 235, 120), (pole_x - finial_w, top_y), (pole_x + finial_w, top_y), 1)
+
+    # Waving cloth flutter animation
+    cw, ch = cloth_surf.get_size()
+    strip_w = 2
+    cloth_top = top_y + (4 if is_main else 2)
+    time_val = ticks * 0.0055
+
+    for sx in range(0, cw, strip_w):
+        cur_w = min(strip_w, cw - sx)
+        progress = sx / max(1, cw - 1)
+        cur_amp = amp * progress
+        wave_y = int(math.sin(time_val + sx * freq) * cur_amp)
+        
+        draw_x = pole_x + 1 + sx
+        draw_y = cloth_top + wave_y
+        surface.blit(cloth_surf, (draw_x, draw_y), (sx, 0, cur_w, ch))
+
+        # Dynamic lighting shading on wave ripples
+        shade = int(math.cos(time_val + sx * freq) * (18 if is_main else 12))
+        if shade != 0:
+            s_surf = pygame.Surface((cur_w, ch), pygame.SRCALPHA)
+            if shade > 0:
+                s_surf.fill((255, 255, 255, min(45, shade * 2)))
+            else:
+                s_surf.fill((0, 0, 0, min(65, -shade * 2)))
+            surface.blit(s_surf, (draw_x, draw_y))
+
+# Surrounding banner relative coordinates (encircling the grand central banner)
+SUB_FLAG_OFFSETS = [
+    (-22,  3),   # 0: left flank forward
+    (+24,  3),   # 1: right flank forward
+    (-36, -5),   # 2: left flank rear
+    (+38, -5),   # 3: right flank rear
+    (-50,  2),   # 4: far-left flank
+    (+52,  2),   # 5: far-right flank
+    (-14, -12),  # 6: center-left rear
+    (+14, -12),  # 7: center-right rear
+    (-64, -3),   # 8: extra far left
+    (+66, -3),   # 9: extra far right
+    (-28, -14),  # 10
+    (+28, -14),  # 11
+]
 
 # -------------------------------------------------------------
 # Province Adjacency Graph for Movement & Pathfinding
@@ -387,7 +515,7 @@ class GameState:
         dominant_army.troops = total_troops
         dominant_army.name = f"Royal Host of {PROVINCES[province_id]['name'].split()[0]}"
         
-        # Collect secondary flags
+        # Collect all contingent flags from every joining host (no truncation)
         all_origins = []
         for a in armies_here:
             if a.flag_origin not in all_origins:
@@ -395,7 +523,7 @@ class GameState:
             for sf in a.sub_flags:
                 if sf not in all_origins:
                     all_origins.append(sf)
-        dominant_army.sub_flags = [f for f in all_origins if f != dominant_army.flag_origin][:4]
+        dominant_army.sub_flags = [f for f in all_origins if f != dominant_army.flag_origin]
         
         for a in armies_here[1:]:
             if a.id == self.selected_army_id:
@@ -1416,73 +1544,104 @@ def run_game():
                         pygame.draw.line(screen, col, src, dst, 2)
 
         # ---------------------------------------------------------
-        # DRAW ARMIES ON MAP (Badges with Troop Counts)
+        # DRAW ARMIES ON MAP (Waving War Banners & Troop Standard)
         # ---------------------------------------------------------
+        anim_ticks = pygame.time.get_ticks()
+
         for army in state.armies:
             base_pos = province_anchors.get(army.province)
             if not base_pos:
                 continue
 
-            bx, by = base_pos[0] - 15, base_pos[1] - 25
+            cx, cy = base_pos[0], base_pos[1]
 
-            # If moving, interpolate slightly towards next province
+            # If moving, interpolate position smoothly along route
             if army.is_moving and army.next_province:
                 next_pos = province_anchors.get(army.next_province, base_pos)
                 pct = army.move_progress / 100.0
-                bx = int(bx + (next_pos[0] - base_pos[0]) * pct)
-                by = int(by + (next_pos[1] - base_pos[1]) * pct)
-
-            badge_w = 104
-            badge_h = 28
-            badge_rect = pygame.Rect(bx, by, badge_w, badge_h)
+                cx = int(cx + (next_pos[0] - base_pos[0]) * pct)
+                cy = int(cy + (next_pos[1] - base_pos[1]) * pct)
 
             is_player = (army.owner == state.player_id)
             is_sel_army = (army.id == state.selected_army_id)
-            is_badge_hover = badge_rect.collidepoint(mouse_pos)
 
-            # Badge Styling
+            # RTS Golden Ground Selection Ring
+            if is_sel_army:
+                sel_surf = pygame.Surface((46, 14), pygame.SRCALPHA)
+                pygame.draw.ellipse(sel_surf, (240, 195, 50, 180), (0, 0, 46, 14), 2)
+                screen.blit(sel_surf, (cx - 23, cy - 7))
+
+            # -------------------------------------------------------------
+            # WAVING BANNER HIERARCHY:
+            # 1 Grand Central Standard (Large, Waving)
+            # + All Contingent Standards (Small, Waving, Encircling the Grand Banner)
+            # -------------------------------------------------------------
+            banner_draw_queue = []
+            # Grand standard in center (dy = 0)
+            banner_draw_queue.append((0, True, army.flag_origin, cx, cy, 0))
+
+            # All secondary contingents encircling the grand standard
+            for idx, sf in enumerate(army.sub_flags):
+                dx, dy = SUB_FLAG_OFFSETS[idx % len(SUB_FLAG_OFFSETS)]
+                mult = 1.0 + (idx // len(SUB_FLAG_OFFSETS)) * 0.25
+                cur_dx = int(dx * mult)
+                cur_dy = int(dy * mult)
+                banner_draw_queue.append((cur_dy, False, sf, cx + cur_dx, cy + cur_dy, (idx + 1) * 750))
+
+            # Sort by depth so background banners render behind foreground banners
+            banner_draw_queue.sort(key=lambda b: b[0])
+
+            for dy, is_main, f_id, px, py, t_off in banner_draw_queue:
+                if is_main:
+                    c_surf = banner_cloth_large.get(f_id, banner_cloth_large.get("wessex"))
+                    draw_waving_banner(screen, c_surf, px, py, pole_h=42, ticks=anim_ticks, amp=3.2, freq=0.25, is_main=True)
+                else:
+                    c_surf = banner_cloth_small.get(f_id, banner_cloth_small.get("wessex"))
+                    draw_waving_banner(screen, c_surf, px, py, pole_h=26, ticks=anim_ticks + t_off, amp=2.0, freq=0.30, is_main=False)
+
+            # -------------------------------------------------------------
+            # Sleek Troop Count Pill Under Standard Base (No Clunky Red Box)
+            # -------------------------------------------------------------
             if army.in_battle:
-                b_color = (190, 40, 40)
-                border_col = (255, 220, 50)
-                txt_badge = f"{army.troops:,}"
+                txt_badge = f"⚔ {army.troops:,}"
+                p_bg = (185, 35, 35)
+                p_border = (255, 220, 50)
             elif army.is_sieging:
-                b_color = (160, 90, 30)
-                border_col = COLOR_GOLD
-                txt_badge = f"{army.troops:,}"
-            elif is_player:
-                b_color = (170, 30, 30) if not is_sel_army else (210, 45, 45)
-                border_col = COLOR_GOLD if is_sel_army else (240, 180, 180)
-                txt_badge = f"{army.troops:,}"
+                txt_badge = f"⚑ {army.troops:,}"
+                p_bg = (155, 85, 25)
+                p_border = COLOR_GOLD
+            elif is_sel_army:
+                p_bg = (175, 30, 30) if is_player else (35, 55, 95)
+                p_border = COLOR_GOLD
             else:
-                b_color = (40, 60, 90)
-                border_col = (120, 160, 220)
-                txt_badge = f"{army.troops:,}"
+                p_bg = (24, 28, 38)
+                p_border = (165, 45, 45) if is_player else (65, 95, 145)
 
-            pygame.draw.rect(screen, b_color, badge_rect, border_radius=4)
-            pygame.draw.rect(screen, border_col, badge_rect, 2 if is_sel_army else 1, border_radius=4)
+            lbl = font_xs.render(txt_badge, True, COLOR_TEXT_WHITE if not is_sel_army else (255, 235, 140))
+            tw = lbl.get_width()
+            pw = max(42, tw + 12)
+            ph = 16
+            px_pill = cx - pw // 2
+            py_pill = cy + 4
 
-            # -------------------------------------------------------------
-            # FLAG HIERARCHY RENDERING:
-            # Main Dominant flag (large, 24x28) + Secondary flags (small, 14x16)
-            # -------------------------------------------------------------
-            main_flag = prov_flag_cache.get(army.flag_origin)
-            if main_flag:
-                # Crown banner for Royal Host
-                screen.blit(main_flag, (bx + 2, by))
-            
-            # Secondary contingent flags trailing
-            sub_x = bx + 28
-            for sf in army.sub_flags[:2]:
-                s_flag = prov_flag_cache.get(sf)
-                if s_flag:
-                    s_mini = pygame.transform.smoothscale(s_flag, (12, 14))
-                    screen.blit(s_mini, (sub_x, by + 7))
-                    sub_x += 13
+            pill_surf = pygame.Surface((pw, ph), pygame.SRCALPHA)
+            pill_surf.fill((*p_bg, 225))
+            pygame.draw.rect(pill_surf, p_border, (0, 0, pw, ph), 2 if is_sel_army else 1, border_radius=4)
+            screen.blit(pill_surf, (px_pill, py_pill))
+            screen.blit(lbl, (px_pill + (pw - tw) // 2, py_pill + 1))
 
-            badge_surf = font_xs.render(txt_badge, True, COLOR_TEXT_WHITE)
-            screen.blit(badge_surf, (bx + 54, by + 6))
+            # Hitbox covering all banners + pill for natural mouse selection
+            all_x = [cx, cx + 34, px_pill, px_pill + pw]
+            for idx, sf in enumerate(army.sub_flags):
+                dx, dy = SUB_FLAG_OFFSETS[idx % len(SUB_FLAG_OFFSETS)]
+                all_x.extend([cx + dx - 2, cx + dx + 20])
+            min_x = min(all_x) - 4
+            max_x = max(all_x) + 4
+            hit_rect = pygame.Rect(min_x, cy - 48, max_x - min_x, (py_pill + ph + 4) - (cy - 48))
 
-            # Click badge to select army
+            is_badge_hover = hit_rect.collidepoint(mouse_pos)
+
+            # Click banner or count pill to select army
             if mouse_clicked and is_badge_hover:
                 state.selected_army_id = army.id
                 state.selected_province = army.province
