@@ -200,9 +200,11 @@ class GameState:
         self.months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         self.month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         
-        # Speed: 0 = Pause, 1 = Normal, 2 = Fast, 3 = Very Fast
-        self.speed = 1
+        # Speed: 0 = Pause, 1 = Very Slow, 2 = Slow, 3 = Normal, 4 = Fast, 5 = Very Fast
+        self.speed = 3  # start at Normal
+        self.speed_factors = {1:2000, 2:1000, 3:500, 4:250, 5:125}
         self.tick_timer = 0
+
         
         # Army management
         self.armies = []
@@ -230,9 +232,11 @@ class GameState:
         self.months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         self.month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         
-        # Speed: 0 = Pause, 1 = Normal, 2 = Fast, 3 = Very Fast
-        self.speed = 1
+        # Speed: 0 = Pause, 1 = Very Slow, 2 = Slow, 3 = Normal, 4 = Fast, 5 = Very Fast
+        self.speed = 3  # start at Normal
+        self.speed_factors = {1:2000, 2:1000, 3:500, 4:250, 5:125}
         self.tick_timer = 0
+
         
         # Army management
         self.armies = []
@@ -656,13 +660,17 @@ def run_game():
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
-                    state.speed = 0 if state.speed > 0 else 1
+                    state.speed = 0 if state.speed > 0 else 3
                 elif event.key == pygame.K_1:
                     state.speed = 1
                 elif event.key == pygame.K_2:
                     state.speed = 2
                 elif event.key == pygame.K_3:
                     state.speed = 3
+                elif event.key == pygame.K_4:
+                    state.speed = 4
+                elif event.key == pygame.K_5:
+                    state.speed = 5
                 elif event.key == pygame.K_r:
                     state.raise_all_levies()
                 elif event.key == pygame.K_m:
@@ -683,13 +691,14 @@ def run_game():
                     if army_obj:
                         state.order_army_march(army_obj, target_province)
         # Time advancement
-        if state.speed > 0:
+        # Time advancement
         if state.speed > 0:
             state.tick_timer += dt
-            tick_interval = 1000 // (state.speed * 2)
+            tick_interval = state.speed_factors.get(state.speed, 500)
             if state.tick_timer >= tick_interval:
                 state.advance_day()
                 state.tick_timer = 0
+
 
         # Background
         screen.fill(COLOR_BG)
@@ -708,16 +717,27 @@ def run_game():
         d_surf = font_md.render(date_str, True, COLOR_TEXT_WHITE)
         screen.blit(d_surf, (340, 15))
 
-        # Speed Controls
-        speeds = [(0, icon_speed_pause), (1, icon_speed_play), (2, icon_speed_fast)]
-        for i, (sp, icon) in enumerate(speeds):
-            btn_x = 475 + (i * 36)
-            btn_rect = pygame.Rect(btn_x, 10, 32, 32)
+        # Speed Controls — 0: Pause | 1: Very Slow | 2: Slow | 3: Normal | 4: Fast | 5: Very Fast
+        speed_labels = {0: "||", 1: ">>", 2: ">>", 3: ">", 4: ">>", 5: ">>>"}
+        speed_texts  = ["‖", "½×", "1×", "2×", "4×", "8×"]
+        speed_colors = {
+            0: (160, 160, 160),  # grey  – pause
+            1: (100, 180, 255),  # blue  – very slow
+            2: (100, 220, 180),  # teal  – slow
+            3: COLOR_TEXT_GREEN, # green – normal
+            4: COLOR_GOLD,       # gold  – fast
+            5: (235, 75, 75),    # red   – very fast
+        }
+        for sp in range(6):
+            btn_x = 460 + (sp * 36)
+            btn_rect = pygame.Rect(btn_x, 8, 32, 32)
             is_active = (state.speed == sp)
             b_col = COLOR_BUTTON_ACTIVE if is_active else (COLOR_BUTTON_HOVER if btn_rect.collidepoint(mouse_pos) else COLOR_BUTTON_NORMAL)
             pygame.draw.rect(screen, b_col, btn_rect, border_radius=4)
-            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_rect, 1, border_radius=4)
-            screen.blit(icon, (btn_x + 4, 14))
+            border_col = speed_colors[sp] if is_active else COLOR_PANEL_BORDER
+            pygame.draw.rect(screen, border_col, btn_rect, 1 if not is_active else 2, border_radius=4)
+            lbl = font_xs.render(speed_texts[sp], True, speed_colors[sp] if is_active else COLOR_TEXT_MUTED)
+            screen.blit(lbl, (btn_x + 16 - lbl.get_width() // 2, 20 - lbl.get_height() // 2))
             if mouse_clicked and btn_rect.collidepoint(mouse_pos):
                 state.speed = sp
 
