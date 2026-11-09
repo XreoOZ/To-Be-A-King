@@ -357,6 +357,9 @@ class GameState:
         self.selected_fief_id = None
         self.fiefs = {}                  # fief_id -> {"province": pid, "tiles": [...], "holder": vassal_name or None, "name": str}
         self.fief_id_counter = 1
+        self.fief_mode = False
+        self.active_fief_id = None
+        self.fief_brushes = {}
         
         # Calendar: Start 1 January 867 AD
         self.year = 867
@@ -1288,10 +1291,7 @@ def run_game():
                     (cell_x, cell_y), (cell_x, cell_y + tile_h - 1))
 
                 if mouse_clicked and is_hovered:
-                    if state.fief_mode and prov_id == state.selected_province:
-                        # Paint tile with current active Fief ID
-                        state.fief_brushes[(c, r)] = state.active_fief_id
-                    elif not state.build_mode:
+                    if not state.build_mode:
                         # CK2 style: Left-clicking a province inspects that province and unselects armies!
                         state.selected_province = prov_id
                         state.selected_army_id = None
