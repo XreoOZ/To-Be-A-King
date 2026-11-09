@@ -360,6 +360,11 @@ class GameState:
         self.fief_mode = False
         self.active_fief_id = None
         self.fief_brushes = {}
+        self.editing_fief_id = None      # Current fief ID being edited/painted
+        
+        # Left Panel Sub-Tab System ('armies' or 'vassals')
+        self.left_tab = "armies"
+        self.vassal_page = 0
         
         # Calendar: Start 1 January 867 AD
         self.year = 867
@@ -937,6 +942,55 @@ def run_game():
     # Setup starter cities and fiefs matching each vassal exactly
     setup_province_starter_cities(state)
 
+    def carve_new_fief(target_state, province_id):
+        p_tiles = [coord for coord, pid in cell_to_prov.items() if pid == province_id]
+        claimed_tiles = set()
+        for f in target_state.fiefs.values():
+            if f.get("province") == province_id:
+                for t in f.get("tiles", []):
+                    claimed_tiles.add(t)
+        
+        free_tiles = [t for t in p_tiles if t not in claimed_tiles]
+        new_tiles = []
+        for (fc, fr) in free_tiles:
+            if (fc + 1, fr) in free_tiles:
+                new_tiles = [(fc, fr), (fc + 1, fr)]
+                break
+            elif (fc, fr + 1) in free_tiles:
+                new_tiles = [(fc, fr), (fc, fr + 1)]
+                break
+                
+        if not new_tiles and len(free_tiles) >= 2:
+            new_tiles = free_tiles[:2]
+        elif not new_tiles and len(p_tiles) >= 2:
+            prov_fiefs = [f for f in target_state.fiefs.values() if f.get("province") == province_id]
+            if prov_fiefs:
+                largest_f = max(prov_fiefs, key=lambda f: len(f.get("tiles", [])))
+                if len(largest_f["tiles"]) >= 4:
+                    new_tiles = largest_f["tiles"][-2:]
+                    for t in new_tiles:
+                        largest_f["tiles"].remove(t)
+
+        if new_tiles:
+            target_state.fief_id_counter += 1
+            fid = f"fief_{target_state.fief_id_counter}"
+            pname = PROVINCES[province_id]["name"].split()[0]
+            target_state.fiefs[fid] = {
+                "id": fid,
+                "province": province_id,
+                "tiles": new_tiles,
+                "holder": None,
+                "name": f"{pname} Fief #{target_state.fief_id_counter}",
+                "vassal_id": None
+            }
+            target_state.selected_fief_id = fid
+            target_state.editing_fief_id = fid
+            target_state.logs.append(f"Carved new fief '{target_state.fiefs[fid]['name']}'! Click tiles on map to edit its boundaries.")
+            return fid
+        else:
+            target_state.logs.append(f"Cannot carve fief: all land in {PROVINCES[province_id]['name']} is already assigned.")
+            return None
+
     # Build reverse lookup: pixel -> province (for accurate click detection)
     # cell_to_prov already handles this via tile grid
 
@@ -1174,53 +1228,147 @@ def run_game():
                 if a.owner == state.player_id:
                     state.disband_army(a)
 
-        # Active Armies Roster
-        pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 235), (285, 235), 1)
-        screen.blit(font_md.render("Active Saxon Armies", True, COLOR_GOLD), (25, 245))
+        # ---------------------------------------------------------
+        # Left Panel Sub-Tabs: [ ⚔ Active Armies ]  [ 👑 Realm Vassals ]
+        # ---------------------------------------------------------
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 233), (285, 233), 1)
+        tab_y = 240
+        tab_armies = pygame.Rect(25, tab_y, 125, 26)
+        tab_vassals = pygame.Rect(158, tab_y, 127, 26)
+        
+        is_hov_ta = tab_armies.collidepoint(mouse_pos)
+        is_hov_tv = tab_vassals.collidepoint(mouse_pos)
+        
+        is_a_active = (state.left_tab == "armies")
+        pygame.draw.rect(screen, COLOR_BUTTON_ACTIVE if is_a_active else (COLOR_BUTTON_HOVER if is_hov_ta else COLOR_BUTTON_NORMAL), tab_armies, border_radius=4)
+        pygame.draw.rect(screen, COLOR_GOLD if is_a_active else COLOR_PANEL_BORDER, tab_armies, 1, border_radius=4)
+        screen.blit(font_xs.render("⚔ ACTIVE ARMIES", True, COLOR_TEXT_WHITE if not is_a_active else COLOR_GOLD), (32, tab_y + 6))
+        
+        is_v_active = (state.left_tab == "vassals")
+        pygame.draw.rect(screen, COLOR_BUTTON_ACTIVE if is_v_active else (COLOR_BUTTON_HOVER if is_hov_tv else COLOR_BUTTON_NORMAL), tab_vassals, border_radius=4)
+        pygame.draw.rect(screen, COLOR_GOLD if is_v_active else COLOR_PANEL_BORDER, tab_vassals, 1, border_radius=4)
+        screen.blit(font_xs.render("👑 REALM VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD), (164, tab_y + 6))
+        
+        if mouse_clicked and is_hov_ta:
+            state.left_tab = "armies"
+        elif mouse_clicked and is_hov_tv:
+            state.left_tab = "vassals"
 
-        player_armies = [a for a in state.armies if a.owner == state.player_id]
-        if not player_armies:
-            screen.blit(font_sm.render("No armies raised yet.", True, COLOR_TEXT_MUTED), (25, 275))
-            screen.blit(font_sm.render("Click 'RAISE ALL' or select", True, COLOR_TEXT_MUTED), (25, 295))
-            screen.blit(font_sm.render("a province to raise local fyrd.", True, COLOR_TEXT_MUTED), (25, 315))
+        if state.left_tab == "armies":
+            # Active Saxon Armies Roster
+            screen.blit(font_md.render("Active Saxon Armies", True, COLOR_GOLD), (25, 275))
+
+            player_armies = [a for a in state.armies if a.owner == state.player_id]
+            if not player_armies:
+                screen.blit(font_sm.render("No armies raised yet.", True, COLOR_TEXT_MUTED), (25, 305))
+                screen.blit(font_sm.render("Click 'RAISE ALL' or select", True, COLOR_TEXT_MUTED), (25, 325))
+                screen.blit(font_sm.render("a province to raise local fyrd.", True, COLOR_TEXT_MUTED), (25, 345))
+            else:
+                ay = 305
+                for a in player_armies[:4]:
+                    a_rect = pygame.Rect(25, ay, 260, 44)
+                    is_sel = (a.id == state.selected_army_id)
+                    b_hover_a = a_rect.collidepoint(mouse_pos)
+                    
+                    bg_col = COLOR_BUTTON_ACTIVE if is_sel else ((55, 65, 82) if b_hover_a else (38, 44, 58))
+                    pygame.draw.rect(screen, bg_col, a_rect, border_radius=4)
+                    pygame.draw.rect(screen, COLOR_GOLD if is_sel else COLOR_PANEL_BORDER, a_rect, 1, border_radius=4)
+
+                    screen.blit(font_sm.render(f"{a.name} ({a.troops:,} men)", True, COLOR_TEXT_WHITE), (35, ay + 4))
+                    
+                    status_str = "Idle"
+                    if a.in_battle: status_str = "⚔ IN BATTLE!"
+                    elif a.is_sieging: status_str = f"Besieging ({a.siege_progress}%)"
+                    elif a.is_moving: status_str = f"Marching to {PROVINCES[a.next_province]['name'].split()[0]}"
+                    else: status_str = f"Stationed in {PROVINCES[a.province]['name'].split()[0]}"
+
+                    screen.blit(font_xs.render(status_str, True, COLOR_GOLD if a.in_battle else COLOR_TEXT_MUTED), (35, ay + 24))
+
+                    if mouse_clicked and b_hover_a:
+                        state.selected_army_id = a.id
+                        state.selected_province = a.province
+
+                    ay += 48
+
+            # Chronicle of Britain
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 505), (285, 505), 1)
+            screen.blit(font_md.render("Chronicle of Britain", True, COLOR_GOLD), (25, 515))
+
+            log_y = 545
+            for log_msg in state.logs[-6:]:
+                disp = log_msg[:34] + "..." if len(log_msg) > 37 else log_msg
+                lm_surf = font_sm.render(f"• {disp}", True, COLOR_TEXT_MUTED)
+                screen.blit(lm_surf, (25, log_y))
+                log_y += 24
+
         else:
-            ay = 275
-            for a in player_armies[:4]:
-                a_rect = pygame.Rect(25, ay, 260, 46)
-                is_sel = (a.id == state.selected_army_id)
-                b_hover_a = a_rect.collidepoint(mouse_pos)
+            # Realm Vassals Directory (All vassals across Kingdom of Wessex)
+            realm_vassals = []
+            for pid, prov in PROVINCES.items():
+                if prov["owner"] == state.player_id:
+                    for v in state.vassals.get(pid, []):
+                        realm_vassals.append((pid, v))
+            
+            total_v = len(realm_vassals)
+            header_lbl = font_md.render(f"Realm Vassals ({total_v} Lords)", True, COLOR_GOLD)
+            screen.blit(header_lbl, (25, 275))
+            
+            per_page = 6
+            max_pages = max(1, (total_v + per_page - 1) // per_page)
+            state.vassal_page = max(0, min(state.vassal_page, max_pages - 1))
+            
+            start_i = state.vassal_page * per_page
+            cur_page_vassals = realm_vassals[start_i:start_i + per_page]
+            
+            vy = 305
+            for v_pid, v_data in cur_page_vassals:
+                v_card = pygame.Rect(25, vy, 260, 52)
+                is_vc_hov = v_card.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (50, 60, 78) if is_vc_hov else (34, 40, 52), v_card, border_radius=4)
+                pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
                 
-                bg_col = COLOR_BUTTON_ACTIVE if is_sel else ((55, 65, 82) if b_hover_a else (38, 44, 58))
-                pygame.draw.rect(screen, bg_col, a_rect, border_radius=4)
-                pygame.draw.rect(screen, COLOR_GOLD if is_sel else COLOR_PANEL_BORDER, a_rect, 1, border_radius=4)
-
-                # Army info
-                screen.blit(font_sm.render(f"{a.name} ({a.troops:,} men)", True, COLOR_TEXT_WHITE), (35, ay + 5))
+                prov_short = PROVINCES[v_pid]["name"].split()[0]
+                screen.blit(font_xs.render(f"👑 {v_data['name']}", True, COLOR_GOLD), (32, vy + 4))
+                p_tag = font_xs.render(f"[{prov_short}]", True, (140, 200, 255))
+                screen.blit(p_tag, (280 - p_tag.get_width(), vy + 4))
                 
-                status_str = "Idle"
-                if a.in_battle: status_str = "⚔ IN BATTLE!"
-                elif a.is_sieging: status_str = f"Besieging ({a.siege_progress}%)"
-                elif a.is_moving: status_str = f"Marching to {PROVINCES[a.next_province]['name'].split()[0]}"
-                else: status_str = f"Stationed in {PROVINCES[a.province]['name'].split()[0]}"
-
-                screen.blit(font_xs.render(status_str, True, COLOR_GOLD if a.in_battle else COLOR_TEXT_MUTED), (35, ay + 25))
-
-                if mouse_clicked and b_hover_a:
-                    state.selected_army_id = a.id
-                    state.selected_province = a.province
-
-                ay += 52
-
-        # Chronicle of Britain
-        pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 495), (285, 495), 1)
-        screen.blit(font_md.render("Chronicle of Britain", True, COLOR_GOLD), (25, 505))
-
-        log_y = 535
-        for log_msg in state.logs[-6:]:
-            disp = log_msg[:34] + "..." if len(log_msg) > 37 else log_msg
-            lm_surf = font_sm.render(f"• {disp}", True, COLOR_TEXT_MUTED)
-            screen.blit(lm_surf, (25, log_y))
-            log_y += 24
+                h_name = v_data.get("city_name") or "Holding Fief"
+                screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 18))
+                screen.blit(font_xs.render(f"Gold: {v_data['gold']}g  •  Levy: +{v_data['levy_contribution']}  •  Tax: +{v_data['tax_contribution']}g/m", True, COLOR_TEXT_MUTED), (32, vy + 32))
+                
+                if mouse_clicked and is_vc_hov:
+                    state.selected_province = v_pid
+                    state.right_tab = "vassals"
+                    if v_data.get("tiles"):
+                        state.selected_settlement = v_data["tiles"][0]
+                    state.logs.append(f"Inspecting vassal {v_data['name']} in {PROVINCES[v_pid]['name']}.")
+                
+                vy += 56
+                
+            # Pagination Controls at bottom
+            py_btn = 650
+            btn_prev = pygame.Rect(25, py_btn, 80, 26)
+            btn_next = pygame.Rect(205, py_btn, 80, 26)
+            
+            is_prev_hov = btn_prev.collidepoint(mouse_pos)
+            is_next_hov = btn_next.collidepoint(mouse_pos)
+            
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
+            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.vassal_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
+            
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
+            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.vassal_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
+            
+            page_str = f"Page {state.vassal_page + 1}/{max_pages}"
+            p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
+            screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
+            
+            if mouse_clicked and is_prev_hov and state.vassal_page > 0:
+                state.vassal_page -= 1
+            elif mouse_clicked and is_next_hov and state.vassal_page < max_pages - 1:
+                state.vassal_page += 1
 
         # ---------------------------------------------------------
         # 3. CENTER: TERRITORY BALANCE & MAP
@@ -1291,7 +1439,25 @@ def run_game():
                     (cell_x, cell_y), (cell_x, cell_y + tile_h - 1))
 
                 if mouse_clicked and is_hovered:
-                    if not state.build_mode:
+                    if state.editing_fief_id and prov_id == state.selected_province:
+                        f_edit = state.fiefs.get(state.editing_fief_id)
+                        if f_edit:
+                            t_coord = (c, r)
+                            if t_coord in f_edit["tiles"]:
+                                if len(f_edit["tiles"]) > 2:
+                                    f_edit["tiles"].remove(t_coord)
+                                    state.logs.append(f"Removed tile {t_coord} from {f_edit['name']}.")
+                                else:
+                                    state.logs.append(f"{f_edit['name']} must retain at least 2 tiles!")
+                            else:
+                                # Reassign tile from another fief if claimed
+                                for other_fid, other_f in state.fiefs.items():
+                                    if other_fid != state.editing_fief_id and other_f.get("province") == prov_id:
+                                        if t_coord in other_f["tiles"]:
+                                            other_f["tiles"].remove(t_coord)
+                                f_edit["tiles"].append(t_coord)
+                                state.logs.append(f"Assigned tile {t_coord} to {f_edit['name']}!")
+                    elif not state.build_mode:
                         # CK2 style: Left-clicking a province inspects that province and unselects armies!
                         state.selected_province = prov_id
                         state.selected_army_id = None
@@ -1357,7 +1523,13 @@ def run_game():
                 fy = map_origin_y + 45 + (fr * tile_h)
                 
                 # Fief border / outline
-                if is_f_sel:
+                is_f_edit = (state.editing_fief_id == fid)
+                if is_f_edit:
+                    f_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
+                    f_surf.fill((240, 205, 50, 90))
+                    screen.blit(f_surf, (fx, fy))
+                    pygame.draw.rect(screen, COLOR_GOLD, (fx, fy, tile_w, tile_h), 2)
+                elif is_f_sel:
                     f_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
                     f_surf.fill((100, 255, 120, 75))
                     screen.blit(f_surf, (fx, fy))
@@ -1917,30 +2089,77 @@ def run_game():
                     vy += 50
 
             # -------------------------------------------------------------
-            # TAB 4: FIEFS (Fiefs Management & Granting)
+            # TAB 4: FIEFS (Fiefs Management, Redrawing, Granting, Revoking)
             # -------------------------------------------------------------
             elif state.right_tab == "fiefs":
-                screen.blit(font_md.render("Provincial Fiefs & Baronies", True, COLOR_GOLD), (880, 160))
-                prov_fiefs = [f for f in state.fiefs.values() if f["province"] == state.selected_province]
-                fy = 190
+                screen.blit(font_md.render("Provincial Fiefs & Baronies", True, COLOR_GOLD), (880, 155))
+
+                # Header action: Edit banner or Carve New Fief button
+                if state.editing_fief_id:
+                    edit_f = state.fiefs.get(state.editing_fief_id)
+                    f_name = edit_f["name"] if edit_f else "Fief"
+                    eb_rect = pygame.Rect(880, 180, 290, 42)
+                    pygame.draw.rect(screen, (70, 50, 15), eb_rect, border_radius=4)
+                    pygame.draw.rect(screen, COLOR_GOLD, eb_rect, 2, border_radius=4)
+                    screen.blit(font_xs.render(f"🖌 EDITING: {f_name}", True, COLOR_GOLD), (888, 184))
+                    screen.blit(font_xs.render("Click tiles on map to Add/Remove (Min 2)", True, (240, 240, 240)), (888, 198))
+                    
+                    done_btn = pygame.Rect(1075, 186, 85, 28)
+                    d_hov = done_btn.collidepoint(mouse_pos)
+                    pygame.draw.rect(screen, (35, 100, 50) if d_hov else (25, 75, 40), done_btn, border_radius=4)
+                    pygame.draw.rect(screen, COLOR_TEXT_GREEN, done_btn, 1, border_radius=4)
+                    screen.blit(font_xs.render("DONE ✓", True, COLOR_TEXT_WHITE), (1095, 193))
+                    if mouse_clicked and d_hov:
+                        state.editing_fief_id = None
+                        state.logs.append(f"Saved boundaries for {f_name}!")
+                    fy = 230
+                else:
+                    # Carve New Fief Button
+                    carve_btn = pygame.Rect(880, 182, 290, 28)
+                    c_hov = carve_btn.collidepoint(mouse_pos)
+                    pygame.draw.rect(screen, (40, 75, 110) if c_hov else (30, 55, 85), carve_btn, border_radius=4)
+                    pygame.draw.rect(screen, (100, 180, 255), carve_btn, 1, border_radius=4)
+                    screen.blit(font_xs.render("+ CARVE NEW FIEF (Partition Land)", True, COLOR_TEXT_WHITE), (935, 188))
+                    if mouse_clicked and c_hov:
+                        carve_new_fief(state, state.selected_province)
+                    fy = 218
+
+                prov_fiefs = [f for f in state.fiefs.values() if f.get("province") == state.selected_province]
                 for f_data in prov_fiefs[:4]:
-                    f_box = pygame.Rect(880, fy, 290, 52)
+                    f_box = pygame.Rect(880, fy, 290, 64)
                     is_f_hov = f_box.collidepoint(mouse_pos)
                     is_f_sel = (state.selected_fief_id == f_data["id"])
-                    pygame.draw.rect(screen, (55, 65, 85) if is_f_sel else ((42, 48, 62) if is_f_hov else (32, 36, 48)), f_box, border_radius=4)
-                    pygame.draw.rect(screen, (100, 255, 120) if is_f_sel else COLOR_PANEL_BORDER, f_box, 1, border_radius=4)
+                    is_f_editing = (state.editing_fief_id == f_data["id"])
 
-                    holder_str = f"Holder: {f_data['holder']}" if f_data["holder"] else "Status: UNASSIGNED FIEF"
-                    h_col = (180, 255, 180) if f_data["holder"] else (255, 170, 70)
+                    bg_c = (65, 55, 30) if is_f_editing else ((55, 65, 85) if is_f_sel else ((42, 48, 62) if is_f_hov else (32, 36, 48)))
+                    pygame.draw.rect(screen, bg_c, f_box, border_radius=4)
+                    b_color = COLOR_GOLD if is_f_editing else ((100, 255, 120) if is_f_sel else COLOR_PANEL_BORDER)
+                    pygame.draw.rect(screen, b_color, f_box, 2 if (is_f_sel or is_f_editing) else 1, border_radius=4)
+
+                    holder_str = f"Lord: {f_data['holder']}" if f_data["holder"] else "Status: UNASSIGNED CROWN FIEF"
+                    h_col = (180, 255, 180) if f_data["holder"] else (255, 180, 80)
                     screen.blit(font_xs.render(f"🛡 {f_data['name']} ({len(f_data['tiles'])} Tiles)", True, COLOR_GOLD), (888, fy + 4))
                     screen.blit(font_xs.render(holder_str, True, h_col), (888, fy + 18))
 
-                    # Grant Fief Button for Unassigned Fiefs
-                    if f_data["holder"] is None and is_player_owned:
-                        g_btn = pygame.Rect(888, fy + 32, 270, 16)
-                        g_hov = g_btn.collidepoint(mouse_pos)
-                        pygame.draw.rect(screen, (40, 110, 60) if g_hov else (30, 80, 45), g_btn, border_radius=3)
-                        screen.blit(font_xs.render("GRANT FIEF TO VASSAL", True, COLOR_TEXT_WHITE), (960, fy + 32))
+                    # Action buttons on fief card
+                    # 1. Edit Tiles Button
+                    b_edit = pygame.Rect(888, fy + 36, 75, 20)
+                    e_hov = b_edit.collidepoint(mouse_pos)
+                    pygame.draw.rect(screen, (80, 70, 30) if e_hov else (50, 45, 25), b_edit, border_radius=3)
+                    pygame.draw.rect(screen, COLOR_GOLD, b_edit, 1, border_radius=3)
+                    screen.blit(font_xs.render("EDIT 🖌" if not is_f_editing else "STOP ✕", True, COLOR_GOLD), (902, fy + 38))
+                    if mouse_clicked and e_hov:
+                        state.editing_fief_id = None if is_f_editing else f_data["id"]
+                        state.selected_fief_id = f_data["id"]
+
+                    # 2. Grant or Revoke Button
+                    if f_data["holder"] is None:
+                        # Grant Fief Button
+                        b_grant = pygame.Rect(970, fy + 36, 120, 20)
+                        g_hov = b_grant.collidepoint(mouse_pos)
+                        pygame.draw.rect(screen, (40, 110, 60) if g_hov else (30, 80, 45), b_grant, border_radius=3)
+                        pygame.draw.rect(screen, COLOR_TEXT_GREEN, b_grant, 1, border_radius=3)
+                        screen.blit(font_xs.render("GRANT TO VASSAL", True, COLOR_TEXT_WHITE), (982, fy + 38))
                         if mouse_clicked and g_hov:
                             v_list = state.vassals.get(state.selected_province, [])
                             if v_list:
@@ -1949,13 +2168,38 @@ def run_game():
                                 f_data["vassal_id"] = chosen_v["id"]
                                 chosen_v["gold"] += 100
                                 state.logs.append(f"Granted {f_data['name']} to {chosen_v['name']}!")
-                    else:
-                        screen.blit(font_xs.render("Tiles physically partitioned on map", True, COLOR_TEXT_MUTED), (888, fy + 33))
 
-                    if mouse_clicked and is_f_hov:
+                        # 3. Dissolve Button
+                        b_del = pygame.Rect(1096, fy + 36, 68, 20)
+                        d_hov = b_del.collidepoint(mouse_pos)
+                        pygame.draw.rect(screen, (85, 30, 30) if d_hov else (60, 25, 25), b_del, border_radius=3)
+                        pygame.draw.rect(screen, (220, 80, 80), b_del, 1, border_radius=3)
+                        screen.blit(font_xs.render("DISSOLVE", True, (255, 200, 200)), (1104, fy + 38))
+                        if mouse_clicked and d_hov:
+                            del state.fiefs[f_data["id"]]
+                            if state.selected_fief_id == f_data["id"]:
+                                state.selected_fief_id = None
+                            if state.editing_fief_id == f_data["id"]:
+                                state.editing_fief_id = None
+                            state.logs.append(f"Dissolved {f_data['name']}. Land returned to province.")
+                            break
+                    else:
+                        # Revoke Fief Button
+                        b_revoke = pygame.Rect(970, fy + 36, 194, 20)
+                        r_hov = b_revoke.collidepoint(mouse_pos)
+                        pygame.draw.rect(screen, (100, 45, 45) if r_hov else (70, 30, 30), b_revoke, border_radius=3)
+                        pygame.draw.rect(screen, (240, 100, 100), b_revoke, 1, border_radius=3)
+                        screen.blit(font_xs.render("REVOKE FIEF (👑 Return to Crown)", True, COLOR_TEXT_WHITE), (980, fy + 38))
+                        if mouse_clicked and r_hov:
+                            v_prev = f_data["holder"]
+                            f_data["holder"] = None
+                            f_data["vassal_id"] = None
+                            state.logs.append(f"Revoked {f_data['name']} from {v_prev}! Now an unassigned crown fief.")
+
+                    if mouse_clicked and is_f_hov and not (e_hov or g_hov or d_hov or r_hov):
                         state.selected_fief_id = f_data["id"]
 
-                    fy += 58
+                    fy += 70
             else:
                 # Enemy Province Instructions
                 screen.blit(font_md.render("Viking Controlled Territory", True, COLOR_TEXT_RED), (880, 415))
