@@ -614,6 +614,10 @@ def run_game():
     }
 
     running = True
+    # Box-selection state (separate from drag_start on GameState for clarity)
+    box_start = None   # (x,y) where drag started
+    box_end   = None   # (x,y) current mouse position while dragging
+
     while running:
         dt = clock.tick(FPS)
         mouse_pos = pygame.mouse.get_pos()
@@ -624,39 +628,44 @@ def run_game():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     mouse_clicked = True
-                    # start drag selection
-                    state.drag_start = event.pos
-                    state.drag_rect = pygame.Rect(event.pos, (0, 0))
+                    box_start = event.pos
+                    box_end   = event.pos
                 elif event.button == 3:
                     right_clicked = True
+
             elif event.type == pygame.MOUSEMOTION:
-                if state.drag_start:
-                    x1, y1 = state.drag_start
-                    x2, y2 = event.pos
-                    rect = pygame.Rect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
-                    state.drag_rect = rect
+                if box_start:
+                    box_end = event.pos
+
             elif event.type == pygame.MOUSEBUTTONUP:
-                if event.button == 1 and state.drag_start:
-                    # finalize selection
-                    state.selected_army_ids = []
-                    for a in state.armies:
-                        if a.owner == state.player_id:
-                            # compute badge rect for each army
-                            ax, ay = province_anchors.get(a.province, (0, 0))
-                            badge_rect = pygame.Rect(ax - 20, ay - 20, 40, 40)
-                            if state.drag_rect.colliderect(badge_rect):
-                                state.selected_army_ids.append(a.id)
-                    state.drag_start = None
-                    state.drag_rect = None
-                    # if any selected, also set primary selected_army_id for UI
-                    if state.selected_army_ids:
-                        state.selected_army_id = state.selected_army_ids[0]
-                elif event.button == 3:
-                    # right click action handled later
-                    pass
+                if event.button == 1 and box_start:
+                    # Build selection rect
+                    x1, y1 = box_start
+                    x2, y2 = box_end
+                    sel_rect = pygame.Rect(min(x1,x2), min(y1,y2), abs(x2-x1), abs(y2-y1))
+                    # Only treat as drag if moved >5 px (avoid accidental click-select)
+                    if sel_rect.width > 5 or sel_rect.height > 5:
+                        state.selected_army_ids = []
+                        for a in state.armies:
+                            if a.owner == state.player_id:
+                                ax, ay = province_anchors.get(a.province, (0, 0))
+                                # Interpolate badge pos if moving
+                                if a.is_moving and a.next_province:
+                                    nxt = province_anchors.get(a.next_province, (ax, ay))
+                                    pct = a.move_progress / 100.0
+                                    ax = int(ax + (nxt[0] - ax) * pct)
+                                    ay = int(ay + (nxt[1] - ay) * pct)
+                                badge_rect = pygame.Rect(ax - 42, ay - 25, 84, 24)
+                                if sel_rect.colliderect(badge_rect):
+                                    state.selected_army_ids.append(a.id)
+                        if state.selected_army_ids:
+                            state.selected_army_id = state.selected_army_ids[0]
+                    box_start = None
+                    box_end   = None
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
@@ -676,13 +685,16 @@ def run_game():
                 elif event.key == pygame.K_m:
                     if state.selected_province:
                         state.rally_all_armies_to(state.selected_province)
+                elif event.key == pygame.K_ESCAPE:
+                    # Clear selection
+                    state.selected_army_ids = []
+                    state.selected_army_id  = None
 
-        # Right-click march orders for selected armies
+        # Right-click march orders for box-selected armies
         if right_clicked and state.selected_army_ids:
-            # Determine target province under cursor (simple radius check around anchor points)
             target_province = None
             for pid, (ax, ay) in province_anchors.items():
-                if (mouse_pos[0] - ax) ** 2 + (mouse_pos[1] - ay) ** 2 < 30 ** 2:
+                if (mouse_pos[0] - ax) ** 2 + (mouse_pos[1] - ay) ** 2 < 1600:  # ~40px radius
                     target_province = pid
                     break
             if target_province:
@@ -934,6 +946,47 @@ def run_game():
                 screen.blit(lbl_surf, (lx, ly))
 
         # ---------------------------------------------------------
+        # DRAW MOVEMENT ARROWS (before armies, so badges render on top)
+        # ---------------------------------------------------------
+        def draw_arrow(surface, color, start, end, width=2, head_size=10):
+            """Draw a line with an arrowhead at 'end'."""
+            if start == end:
+                return
+            pygame.draw.line(surface, color, start, end, width)
+            # Compute arrowhead
+            import math
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            angle = math.atan2(dy, dx)
+            left  = (end[0] - head_size * math.cos(angle - math.pi/6),
+                     end[1] - head_size * math.sin(angle - math.pi/6))
+            right = (end[0] - head_size * math.cos(angle + math.pi/6),
+                     end[1] - head_size * math.sin(angle + math.pi/6))
+            pygame.draw.polygon(surface, color, [end, left, right])
+
+        for army in state.armies:
+            if not army.is_moving:
+                continue
+            is_player_army = (army.owner == state.player_id)
+            arrow_col = (220, 160, 50) if is_player_army else (80, 130, 220)
+
+            # Draw arrows along each step of the path
+            path_steps = [army.province] + army.path
+            for i in range(len(path_steps) - 1):
+                src = province_anchors.get(path_steps[i])
+                dst = province_anchors.get(path_steps[i + 1])
+                if src and dst:
+                    # Offset slightly so arrows don't sit exactly on labels
+                    sx, sy = src[0] + 10, src[1] + 10
+                    ex, ey = dst[0] + 10, dst[1] + 10
+                    alpha_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+                    # Fade colour for path steps farther away
+                    fade = max(60, 200 - i * 50)
+                    col_a = (*arrow_col, fade)
+                    pygame.draw.line(alpha_surf, col_a, (sx, sy), (ex, ey), 2)
+                    screen.blit(alpha_surf, (0, 0))
+                    draw_arrow(screen, (*arrow_col,), (sx, sy), (ex, ey), width=2, head_size=9)
+
+        # ---------------------------------------------------------
         # DRAW ARMIES ON MAP (Badges with Troop Counts)
         # ---------------------------------------------------------
         for army in state.armies:
@@ -1159,6 +1212,35 @@ def run_game():
                 screen.blit(font_xs.render("1. Raise levies from your provinces.", True, COLOR_TEXT_WHITE), (880, 470))
                 screen.blit(font_xs.render("2. Rally & merge your hosts into an army.", True, COLOR_TEXT_WHITE), (880, 490))
                 screen.blit(font_xs.render("3. Select your army and click here to march!", True, COLOR_GOLD), (880, 510))
+
+        # ---------------------------------------------------------
+        # DRAW BOX SELECTION RECTANGLE
+        # ---------------------------------------------------------
+        if box_start and box_end:
+            x1, y1 = box_start
+            x2, y2 = box_end
+            bx, by = min(x1, x2), min(y1, y2)
+            bw, bh = abs(x2 - x1), abs(y2 - y1)
+            if bw > 2 and bh > 2:
+                # Semi-transparent fill
+                sel_surface = pygame.Surface((bw, bh), pygame.SRCALPHA)
+                sel_surface.fill((100, 220, 100, 35))
+                screen.blit(sel_surface, (bx, by))
+                # Bright green border
+                pygame.draw.rect(screen, (100, 255, 120), pygame.Rect(bx, by, bw, bh), 1)
+
+        # Highlight selected army badges with green ring
+        for aid in state.selected_army_ids:
+            sel_a = next((a for a in state.armies if a.id == aid), None)
+            if sel_a:
+                ax, ay = province_anchors.get(sel_a.province, (0, 0))
+                if sel_a.is_moving and sel_a.next_province:
+                    nxt = province_anchors.get(sel_a.next_province, (ax, ay))
+                    pct = sel_a.move_progress / 100.0
+                    ax = int(ax + (nxt[0] - ax) * pct)
+                    ay = int(ay + (nxt[1] - ay) * pct)
+                pygame.draw.rect(screen, (100, 255, 120),
+                                 pygame.Rect(ax - 43, ay - 26, 86, 26), 2, border_radius=4)
 
         pygame.display.flip()
 
