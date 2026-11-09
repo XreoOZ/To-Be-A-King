@@ -193,37 +193,11 @@ class GameState:
         self.drag_rect = None           # pygame.Rect of current drag area
         self.selected_army_ids = []     # list of army.id currently selected
         
-        # Calendar: Start 1 January 867 AD
-        self.year = 867
-        self.month = 1
-        self.day = 1
-        self.months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        self.month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        
-        # Speed: 0 = Pause, 1 = Very Slow, 2 = Slow, 3 = Normal, 4 = Fast, 5 = Very Fast
-        self.speed = 3  # start at Normal
-        self.speed_factors = {1:2000, 2:1000, 3:500, 4:250, 5:125}
-        self.tick_timer = 0
-
-        
-        # Army management
-        self.armies = []
-        self.army_id_counter = 1
-        
-        # AI decision timer
-        self.ai_timer = 30
-        
-        # Chronicle Logs
-        self.logs = [
-            "AD 867: Britain stands divided between Saxons and Vikings.",
-            "Raise your levies from the provinces, assemble your army, and march!"
-        ]
-        self.player_id = "char_alfred"
-        self.enemy_id = "char_halfdan"
-        self.selected_province = "wessex"
-        self.selected_army_id = None
-        self.hovered_province = None
-        self.hovered_army_id = None
+        # City Building Mode State
+        self.build_mode = False          # True when building a settlement
+        self.build_type = "town"         # "town" (2 tiles) or "castle" (1 tile)
+        self.build_orientation = "H"     # "H" (Horizontal) or "V" (Vertical) for 2-tile
+        self.settlements = {}            # (c, r) -> {"province": pid, "type": "town", "name": str}
         
         # Calendar: Start 1 January 867 AD
         self.year = 867
@@ -236,7 +210,6 @@ class GameState:
         self.speed = 3  # start at Normal
         self.speed_factors = {1:2000, 2:1000, 3:500, 4:250, 5:125}
         self.tick_timer = 0
-
         
         # Army management
         self.armies = []
@@ -706,10 +679,19 @@ def run_game():
                 elif event.key == pygame.K_m:
                     if state.selected_province:
                         state.rally_all_armies_to(state.selected_province)
+                elif event.key == pygame.K_b:
+                    # Toggle Build Mode
+                    state.build_mode = not state.build_mode
+                elif event.key == pygame.K_t:
+                    # Rotate building orientation
+                    state.build_orientation = "V" if state.build_orientation == "H" else "H"
                 elif event.key == pygame.K_ESCAPE:
-                    # Clear selection
-                    state.selected_army_ids = []
-                    state.selected_army_id  = None
+                    if state.build_mode:
+                        state.build_mode = False
+                    else:
+                        # Clear selection
+                        state.selected_army_ids = []
+                        state.selected_army_id  = None
 
         # Right-click march orders for box-selected armies
         if right_clicked and state.selected_army_ids:
@@ -725,7 +707,6 @@ def run_game():
                     army_obj = next((a for a in state.armies if a.id == aid), None)
                     if army_obj:
                         state.order_army_march(army_obj, target_province)
-        # Time advancement
         # Time advancement
         if state.speed > 0:
             state.tick_timer += dt
@@ -959,10 +940,11 @@ def run_game():
                     (cell_x, cell_y), (cell_x, cell_y + tile_h - 1))
 
                 if mouse_clicked and is_hovered:
-                    curr_army = state.get_selected_army()
-                    if curr_army and curr_army.owner == state.player_id and prov_id != curr_army.province:
-                        state.order_army_march(curr_army, prov_id)
-                    state.selected_province = prov_id
+                    if not state.build_mode:
+                        curr_army = state.get_selected_army()
+                        if curr_army and curr_army.owner == state.player_id and prov_id != curr_army.province:
+                            state.order_army_march(curr_army, prov_id)
+                        state.selected_province = prov_id
 
         # -----------------------------------------------------------
         # PASS 2: Draw borders ONLY on edges between different PROVINCES
@@ -1008,6 +990,77 @@ def run_game():
                 if is_selected:
                     pygame.draw.rect(screen, COLOR_GOLD,
                                      (cell_x, cell_y, tile_w, tile_h), 1)
+
+        # -----------------------------------------------------------
+        # PASS 3: Draw Built Settlements / Cities
+        # -----------------------------------------------------------
+        for (sc, sr), sdata in state.settlements.items():
+            sx = map_origin_x + (sc * tile_w)
+            sy = map_origin_y + 45 + (sr * tile_h)
+            # Small settlement foundation icon
+            pygame.draw.rect(screen, (40, 45, 55), (sx + 3, sy + 3, tile_w - 6, tile_h - 6), border_radius=3)
+            pygame.draw.rect(screen, COLOR_GOLD, (sx + 3, sy + 3, tile_w - 6, tile_h - 6), 1, border_radius=3)
+            # City Icon / Letter
+            c_txt = font_xs.render("🏰", True, COLOR_GOLD)
+            screen.blit(c_txt, (sx + 6, sy + 4))
+
+        # -----------------------------------------------------------
+        # PASS 4: Build Mode Hover & Placement Ghost
+        # -----------------------------------------------------------
+        if state.build_mode and state.selected_province:
+            # Determine tile hovered
+            mx, my = mouse_pos
+            hc = (mx - map_origin_x) // tile_w
+            hr = (my - (map_origin_y + 45)) // tile_h
+
+            target_tiles = []
+            if state.build_orientation == "H":
+                target_tiles = [(hc, hr), (hc + 1, hr)]
+            else:
+                target_tiles = [(hc, hr), (hc, hr + 1)]
+
+            # Check validity
+            prov_obj = PROVINCES.get(state.selected_province)
+            is_valid = True
+            if prov_obj["owner"] != state.player_id:
+                is_valid = False
+            elif state.player["gold"] < 100:
+                is_valid = False
+            else:
+                for tc, tr in target_tiles:
+                    if cell_to_prov.get((tc, tr)) != state.selected_province:
+                        is_valid = False
+                        break
+                    if (tc, tr) in state.settlements:
+                        is_valid = False
+                        break
+
+            # Draw Ghost Tiles
+            ghost_col = (50, 220, 80, 120) if is_valid else (220, 50, 50, 120)
+            border_c = (80, 255, 110) if is_valid else (255, 80, 80)
+            for tc, tr in target_tiles:
+                gx = map_origin_x + (tc * tile_w)
+                gy = map_origin_y + 45 + (tr * tile_h)
+                gsurf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
+                gsurf.fill(ghost_col)
+                screen.blit(gsurf, (gx, gy))
+                pygame.draw.rect(screen, border_c, (gx, gy, tile_w, tile_h), 2)
+
+            # Left click to place
+            if mouse_clicked and is_valid:
+                state.player["gold"] -= 100
+                prov_obj["tax"] += 6
+                prov_obj["levies_max"] += 300
+                prov_obj["levies_current"] += 300
+                for tc, tr in target_tiles:
+                    state.settlements[(tc, tr)] = {
+                        "province": state.selected_province,
+                        "type": "town",
+                        "name": f"{prov_obj['name'].split()[0]} Burgh"
+                    }
+                state.logs.append(f"Constructed new Town Burgh in {prov_obj['name']}! (+6 Tax, +300 Levies)")
+                state.build_mode = False
+
 
 
         # Province Name Labels
@@ -1295,11 +1348,11 @@ def run_game():
                     state.rally_all_armies_to(state.selected_province)
 
                 # 3. Develop Lands Button
-                dev_btn = pygame.Rect(880, 505, 290, 38)
+                dev_btn = pygame.Rect(880, 505, 290, 36)
                 b_dv_hover = dev_btn.collidepoint(mouse_pos)
                 pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_dv_hover else COLOR_BUTTON_NORMAL, dev_btn, border_radius=6)
                 pygame.draw.rect(screen, COLOR_PANEL_BORDER, dev_btn, 1, border_radius=6)
-                screen.blit(font_sm.render("Develop Lands (-50 Gold, +4 Tax, +250 Levies)", True, COLOR_GOLD), (888, 514))
+                screen.blit(font_sm.render("Develop Lands (-50 Gold, +4 Tax, +250 Levies)", True, COLOR_GOLD), (888, 513))
                 if mouse_clicked and b_dv_hover:
                     if state.player["gold"] >= 50:
                         state.player["gold"] -= 50
@@ -1308,6 +1361,27 @@ def run_game():
                         state.logs.append(f"Developed lands in {sel_prov['name']}!")
                     else:
                         state.logs.append("Need 50 Gold to develop lands!")
+
+                # 4. BUILD SETTLEMENT BUTTON (2 Tiles, Rotatable with T)
+                bld_btn = pygame.Rect(880, 550, 290, 42)
+                b_bld_hover = bld_btn.collidepoint(mouse_pos)
+                b_bld_active = state.build_mode
+                bld_bg = (140, 80, 20) if b_bld_active else ((85, 50, 15) if b_bld_hover else (60, 35, 10))
+                pygame.draw.rect(screen, bld_bg, bld_btn, border_radius=6)
+                pygame.draw.rect(screen, COLOR_GOLD if b_bld_active else (200, 140, 40), bld_btn, 2 if b_bld_active else 1, border_radius=6)
+                
+                bld_lbl = "CANCEL BUILD MODE (ESC)" if b_bld_active else "BUILD CITY (2 TILES - 100g)"
+                screen.blit(font_md.render(bld_lbl, True, COLOR_GOLD if b_bld_active else COLOR_TEXT_WHITE), (895, 559))
+                if mouse_clicked and b_bld_hover:
+                    state.build_mode = not state.build_mode
+
+                if state.build_mode:
+                    hint1 = font_xs.render("• Hover mouse over 2 adjacent tiles inside province.", True, COLOR_TEXT_WHITE)
+                    hint2 = font_xs.render("• Press 'T' to rotate orientation (Horiz / Vert).", True, COLOR_GOLD)
+                    hint3 = font_xs.render("• Click to place settlement when green.", True, COLOR_TEXT_GREEN)
+                    screen.blit(hint1, (880, 600))
+                    screen.blit(hint2, (880, 618))
+                    screen.blit(hint3, (880, 636))
             else:
                 # Enemy Province Instructions
                 screen.blit(font_md.render("Viking Controlled Territory", True, COLOR_TEXT_RED), (880, 415))
