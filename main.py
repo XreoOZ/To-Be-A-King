@@ -597,21 +597,23 @@ def run_game():
             else: prov_id = "wessex"
             cell_to_prov[(c, r)] = prov_id
 
-    # Coordinates for labels & army badges on map
-    province_anchors = {
-        "highlands": (map_origin_x + 185, map_origin_y + 80),
-        "strathclyde": (map_origin_x + 175, map_origin_y + 195),
-        "lothian": (map_origin_x + 245, map_origin_y + 195),
-        "bernicia": (map_origin_x + 255, map_origin_y + 245),
-        "deira": (map_origin_x + 265, map_origin_y + 295),
-        "jorvik": (map_origin_x + 250, map_origin_y + 325),
-        "wales": (map_origin_x + 180, map_origin_y + 395),
-        "mercia": (map_origin_x + 270, map_origin_y + 395),
-        "east_anglia": (map_origin_x + 360, map_origin_y + 440),
-        "wessex": (map_origin_x + 225, map_origin_y + 515),
-        "kent_essex": (map_origin_x + 330, map_origin_y + 500),
-        "cornwall": (map_origin_x + 130, map_origin_y + 535)
-    }
+    # Compute TRUE province centroids from tile grid (guaranteed on land)
+    prov_tile_sum = {}   # pid -> [sum_x, sum_y, count]
+    for (c, r), pid in cell_to_prov.items():
+        cx = map_origin_x + c * tile_w + tile_w // 2
+        cy = map_origin_y + 45 + r * tile_h + tile_h // 2
+        if pid not in prov_tile_sum:
+            prov_tile_sum[pid] = [0, 0, 0]
+        prov_tile_sum[pid][0] += cx
+        prov_tile_sum[pid][1] += cy
+        prov_tile_sum[pid][2] += 1
+
+    province_anchors = {}
+    for pid, (sx, sy, count) in prov_tile_sum.items():
+        province_anchors[pid] = (sx // count, sy // count)
+
+    # Build reverse lookup: pixel -> province (for accurate click detection)
+    # cell_to_prov already handles this via tile grid
 
     running = True
     # Box-selection state (separate from drag_start on GameState for clarity)
@@ -692,11 +694,13 @@ def run_game():
 
         # Right-click march orders for box-selected armies
         if right_clicked and state.selected_army_ids:
+            # Accurate province detection: reverse-lookup tile under cursor
+            mx, my = mouse_pos
             target_province = None
-            for pid, (ax, ay) in province_anchors.items():
-                if (mouse_pos[0] - ax) ** 2 + (mouse_pos[1] - ay) ** 2 < 1600:  # ~40px radius
-                    target_province = pid
-                    break
+            # Convert screen pos -> grid cell -> province
+            col_idx = (mx - map_origin_x) // tile_w
+            row_idx = (my - (map_origin_y + 45)) // tile_h
+            target_province = cell_to_prov.get((col_idx, row_idx))
             if target_province:
                 for aid in state.selected_army_ids:
                     army_obj = next((a for a in state.armies if a.id == aid), None)
@@ -948,43 +952,71 @@ def run_game():
         # ---------------------------------------------------------
         # DRAW MOVEMENT ARROWS (before armies, so badges render on top)
         # ---------------------------------------------------------
-        def draw_arrow(surface, color, start, end, width=2, head_size=10):
+        import math as _math
+
+        def draw_arrow(surface, color, start, end, width=3, head_size=10):
             """Draw a line with an arrowhead at 'end'."""
             if start == end:
                 return
             pygame.draw.line(surface, color, start, end, width)
-            # Compute arrowhead
-            import math
             dx, dy = end[0] - start[0], end[1] - start[1]
-            angle = math.atan2(dy, dx)
-            left  = (end[0] - head_size * math.cos(angle - math.pi/6),
-                     end[1] - head_size * math.sin(angle - math.pi/6))
-            right = (end[0] - head_size * math.cos(angle + math.pi/6),
-                     end[1] - head_size * math.sin(angle + math.pi/6))
+            angle = _math.atan2(dy, dx)
+            left  = (int(end[0] - head_size * _math.cos(angle - _math.pi/6)),
+                     int(end[1] - head_size * _math.sin(angle - _math.pi/6)))
+            right = (int(end[0] - head_size * _math.cos(angle + _math.pi/6)),
+                     int(end[1] - head_size * _math.sin(angle + _math.pi/6)))
             pygame.draw.polygon(surface, color, [end, left, right])
+
+        # Find the pixel centroid of tiles that border between two adjacent provinces
+        def border_midpoint(pid_a, pid_b):
+            """Return pixel midpoint of tiles where pid_a and pid_b touch."""
+            border_pixels = []
+            dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+            for (c, r), pid in cell_to_prov.items():
+                if pid != pid_a:
+                    continue
+                for dc, dr in dirs:
+                    if cell_to_prov.get((c + dc, r + dr)) == pid_b:
+                        # This tile is on the border
+                        cx = map_origin_x + c * tile_w + tile_w // 2
+                        cy = map_origin_y + 45 + r * tile_h + tile_h // 2
+                        border_pixels.append((cx, cy))
+                        break
+            if not border_pixels:
+                return None
+            bx = sum(p[0] for p in border_pixels) // len(border_pixels)
+            by = sum(p[1] for p in border_pixels) // len(border_pixels)
+            return (bx, by)
 
         for army in state.armies:
             if not army.is_moving:
                 continue
             is_player_army = (army.owner == state.player_id)
-            arrow_col = (220, 160, 50) if is_player_army else (80, 130, 220)
+            arrow_col = (240, 180, 50) if is_player_army else (80, 130, 220)
 
-            # Draw arrows along each step of the path
+            # Build waypoints: centroid -> border midpoint -> centroid -> ...
             path_steps = [army.province] + army.path
+            waypoints = [province_anchors.get(path_steps[0])]
             for i in range(len(path_steps) - 1):
-                src = province_anchors.get(path_steps[i])
+                bp = border_midpoint(path_steps[i], path_steps[i + 1])
+                if bp:
+                    waypoints.append(bp)
                 dst = province_anchors.get(path_steps[i + 1])
+                if dst:
+                    waypoints.append(dst)
+
+            # Draw path segments with arrowhead on each leg
+            for i in range(len(waypoints) - 1):
+                src = waypoints[i]
+                dst = waypoints[i + 1]
                 if src and dst:
-                    # Offset slightly so arrows don't sit exactly on labels
-                    sx, sy = src[0] + 10, src[1] + 10
-                    ex, ey = dst[0] + 10, dst[1] + 10
-                    alpha_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-                    # Fade colour for path steps farther away
-                    fade = max(60, 200 - i * 50)
-                    col_a = (*arrow_col, fade)
-                    pygame.draw.line(alpha_surf, col_a, (sx, sy), (ex, ey), 2)
-                    screen.blit(alpha_surf, (0, 0))
-                    draw_arrow(screen, (*arrow_col,), (sx, sy), (ex, ey), width=2, head_size=9)
+                    fade = max(80, 220 - i * 30)
+                    col = (arrow_col[0], arrow_col[1], arrow_col[2])
+                    # Dashed line for far steps
+                    if i % 2 == 0:
+                        draw_arrow(screen, col, src, dst, width=2, head_size=8)
+                    else:
+                        pygame.draw.line(screen, col, src, dst, 2)
 
         # ---------------------------------------------------------
         # DRAW ARMIES ON MAP (Badges with Troop Counts)
