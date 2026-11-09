@@ -34,6 +34,9 @@ screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 pygame.display.set_caption("CK2-Lite: The War for Britain (Army Raising & Rally Edition)")
 
 # Palette
+# Added constant for travel days per tile
+DAYS_PER_TILE = 5  # Number of in‑game days it takes to traverse one province
+
 COLOR_BG = (20, 24, 32)
 COLOR_PANEL_BG = (30, 35, 46)
 COLOR_PANEL_BORDER = (52, 60, 76)
@@ -158,7 +161,7 @@ class Army:
         # Movement & Path
         self.path = []              # list of province_ids to march through
         self.move_progress = 0.0    # 0 to 100%
-        self.move_speed = 22.0      # % per day (takes ~4.5 days per province)
+        self.move_speed = 100.0 / DAYS_PER_TILE      # % per day (takes DAYS_PER_TILE days per province)
         
         # Combat & Siege
         self.is_sieging = False
@@ -178,6 +181,41 @@ class Army:
 # -------------------------------------------------------------
 class GameState:
     def __init__(self):
+        self.player_id = "char_alfred"
+        self.enemy_id = "char_halfdan"
+        self.selected_province = "wessex"
+        self.selected_army_id = None
+        self.hovered_province = None
+        self.hovered_army_id = None
+        
+        # Selection handling for RTS box‑select
+        self.drag_start = None          # (x, y) when left mouse button pressed
+        self.drag_rect = None           # pygame.Rect of current drag area
+        self.selected_army_ids = []     # list of army.id currently selected
+        
+        # Calendar: Start 1 January 867 AD
+        self.year = 867
+        self.month = 1
+        self.day = 1
+        self.months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        self.month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        
+        # Speed: 0 = Pause, 1 = Normal, 2 = Fast, 3 = Very Fast
+        self.speed = 1
+        self.tick_timer = 0
+        
+        # Army management
+        self.armies = []
+        self.army_id_counter = 1
+        
+        # AI decision timer
+        self.ai_timer = 30
+        
+        # Chronicle Logs
+        self.logs = [
+            "AD 867: Britain stands divided between Saxons and Vikings.",
+            "Raise your levies from the provinces, assemble your army, and march!"
+        ]
         self.player_id = "char_alfred"
         self.enemy_id = "char_halfdan"
         self.selected_province = "wessex"
@@ -585,8 +623,37 @@ def run_game():
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     mouse_clicked = True
+                    # start drag selection
+                    state.drag_start = event.pos
+                    state.drag_rect = pygame.Rect(event.pos, (0, 0))
                 elif event.button == 3:
                     right_clicked = True
+            elif event.type == pygame.MOUSEMOTION:
+                if state.drag_start:
+                    x1, y1 = state.drag_start
+                    x2, y2 = event.pos
+                    rect = pygame.Rect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+                    state.drag_rect = rect
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1 and state.drag_start:
+                    # finalize selection
+                    state.selected_army_ids = []
+                    for a in state.armies:
+                        if a.owner == state.player_id:
+                            # compute badge rect for each army
+                            ax, ay = province_anchors.get(a.province, (0, 0))
+                            badge_rect = pygame.Rect(ax - 20, ay - 20, 40, 40)
+                            if state.drag_rect.colliderect(badge_rect):
+                                state.selected_army_ids.append(a.id)
+                    state.drag_start = None
+                    state.drag_rect = None
+                    # if any selected, also set primary selected_army_id for UI
+                    if state.selected_army_ids:
+                        state.selected_army_id = state.selected_army_ids[0]
+                elif event.button == 3:
+                    # right click action handled later
+                    pass
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     state.speed = 0 if state.speed > 0 else 1
@@ -602,7 +669,21 @@ def run_game():
                     if state.selected_province:
                         state.rally_all_armies_to(state.selected_province)
 
+        # Right-click march orders for selected armies
+        if right_clicked and state.selected_army_ids:
+            # Determine target province under cursor (simple radius check around anchor points)
+            target_province = None
+            for pid, (ax, ay) in province_anchors.items():
+                if (mouse_pos[0] - ax) ** 2 + (mouse_pos[1] - ay) ** 2 < 30 ** 2:
+                    target_province = pid
+                    break
+            if target_province:
+                for aid in state.selected_army_ids:
+                    army_obj = next((a for a in state.armies if a.id == aid), None)
+                    if army_obj:
+                        state.order_army_march(army_obj, target_province)
         # Time advancement
+        if state.speed > 0:
         if state.speed > 0:
             state.tick_timer += dt
             tick_interval = 1000 // (state.speed * 2)
