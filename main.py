@@ -1602,6 +1602,7 @@ def run_game():
             # -------------------------------------------------------------
             # Sleek Troop Count Pill Under Standard Base (No Clunky Red Box)
             # -------------------------------------------------------------
+            txt_badge = f"{army.troops:,}"
             if army.in_battle:
                 txt_badge = f"⚔ {army.troops:,}"
                 p_bg = (185, 35, 35)
