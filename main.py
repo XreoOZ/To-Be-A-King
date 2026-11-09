@@ -1,20 +1,23 @@
 """
-CK2-Lite: Britain AD 867 (Simplified 2-Kingdom Campaign)
+CK2-Lite: Britain AD 867 (Army Raising & Gathering Edition)
 Kingdom of Wessex (Saxons) vs The Danelaw (Vikings)
 
-Features:
-- Single continuous Britain island landmass
-- Exactly 2 Rival Kingdoms: King Alfred vs Jarl Halfdan
-- Territory Control Bar (e.g. 6 vs 6 provinces)
-- Real-time conquest war and siege mechanics
-- No annoying pop-up event interruptions
-- Standalone Windows .exe ready
+New Features:
+- Must RAISE LEVIES from provinces (individually or 'Raise All Levies')
+- Armies exist as units on the map (with troop count badges)
+- Move & march armies between adjacent provinces (with BFS pathfinding)
+- GATHER & MERGE armies into a single mighty Royal Army host!
+- March into enemy territory to besiege provinces
+- Clash with enemy armies in tactical Pitched Battles!
+- Danelaw (Halfdan) AI raises Viking hosts, rallies them, and counter-attacks
+- No pop-up interruptions, smooth calendar ticks
 """
 
 import sys
 import os
 import json
 import random
+from collections import deque
 import pygame
 
 # Initialize Pygame
@@ -28,7 +31,7 @@ FPS = 60
 
 # Set display mode immediately
 screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-pygame.display.set_caption("CK2-Lite: Britain AD 867 - Wessex vs Danelaw")
+pygame.display.set_caption("CK2-Lite: The War for Britain (Army Raising & Rally Edition)")
 
 # Palette
 COLOR_BG = (20, 24, 32)
@@ -50,19 +53,16 @@ COLOR_OCEAN = (18, 32, 54)
 COLOR_WESSEX = (195, 35, 35)      # Saxon Crimson
 COLOR_DANELAW = (55, 75, 100)     # Norse Iron Slate
 
-if getattr(sys, 'frozen', False):
-    BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # Fonts
+font_xs = pygame.font.SysFont("segoeui", 12, bold=True)
 font_sm = pygame.font.SysFont("segoeui", 14)
 font_md = pygame.font.SysFont("segoeui", 17, bold=True)
 font_lg = pygame.font.SysFont("segoeui", 22, bold=True)
-font_title = pygame.font.SysFont("georgia", 26, bold=True)
+font_title = pygame.font.SysFont("georgia", 25, bold=True)
 font_banner = pygame.font.SysFont("georgia", 32, bold=True)
 
 # -------------------------------------------------------------
@@ -111,6 +111,69 @@ for cid, char in CHARACTERS.items():
     coa_cache[cid] = load_image(os.path.join("heraldry", cfile), (36, 42))
 
 # -------------------------------------------------------------
+# Province Adjacency Graph for Movement & Pathfinding
+# -------------------------------------------------------------
+ADJACENCY = {
+    "cornwall": ["wessex"],
+    "wessex": ["cornwall", "mercia", "kent_essex", "wales"],
+    "kent_essex": ["wessex", "mercia", "east_anglia"],
+    "mercia": ["wessex", "kent_essex", "east_anglia", "wales", "deira", "jorvik"],
+    "wales": ["wessex", "mercia", "deira"],
+    "east_anglia": ["kent_essex", "mercia", "jorvik"],
+    "jorvik": ["mercia", "east_anglia", "deira", "bernicia"],
+    "deira": ["mercia", "wales", "jorvik", "bernicia"],
+    "bernicia": ["deira", "jorvik", "strathclyde", "lothian"],
+    "strathclyde": ["bernicia", "lothian", "highlands"],
+    "lothian": ["bernicia", "strathclyde", "highlands"],
+    "highlands": ["strathclyde", "lothian"]
+}
+
+def find_shortest_path(start, goal):
+    if start == goal:
+        return [start]
+    queue = deque([[start]])
+    visited = {start}
+    while queue:
+        path = queue.popleft()
+        node = path[-1]
+        for neighbor in ADJACENCY.get(node, []):
+            if neighbor == goal:
+                return path + [neighbor]
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append(path + [neighbor])
+    return None
+
+# -------------------------------------------------------------
+# Army Class
+# -------------------------------------------------------------
+class Army:
+    def __init__(self, army_id, owner_id, province_id, troops, name="Levy Host"):
+        self.id = army_id
+        self.owner = owner_id
+        self.province = province_id
+        self.troops = troops
+        self.name = name
+        
+        # Movement & Path
+        self.path = []              # list of province_ids to march through
+        self.move_progress = 0.0    # 0 to 100%
+        self.move_speed = 22.0      # % per day (takes ~4.5 days per province)
+        
+        # Combat & Siege
+        self.is_sieging = False
+        self.siege_progress = 0     # 0 to 100%
+        self.in_battle = False
+
+    @property
+    def is_moving(self):
+        return len(self.path) > 0
+
+    @property
+    def next_province(self):
+        return self.path[0] if self.path else None
+
+# -------------------------------------------------------------
 # Game State
 # -------------------------------------------------------------
 class GameState:
@@ -118,7 +181,9 @@ class GameState:
         self.player_id = "char_alfred"
         self.enemy_id = "char_halfdan"
         self.selected_province = "wessex"
+        self.selected_army_id = None
         self.hovered_province = None
+        self.hovered_army_id = None
         
         # Calendar: Start 1 January 867 AD
         self.year = 867
@@ -127,20 +192,21 @@ class GameState:
         self.months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         self.month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         
-        # Speed: 0 = Pause, 1 = Normal (1 day/sec), 2 = Fast, 3 = Super Fast
+        # Speed: 0 = Pause, 1 = Normal, 2 = Fast, 3 = Very Fast
         self.speed = 1
         self.tick_timer = 0
         
-        # Active War List: {"attacker": char_id, "defender": char_id, "target_prov": prov_id, "siege_progress": int}
-        self.active_wars = []
+        # Army management
+        self.armies = []
+        self.army_id_counter = 1
         
-        # AI decision timer (in days)
-        self.ai_timer = 45
+        # AI decision timer
+        self.ai_timer = 30
         
-        # Silent Chronicle Log (No popups)
+        # Chronicle Logs
         self.logs = [
-            "AD 867: King Alfred stands against the Great Heathen Army.",
-            "Objective: Conquer all 12 provinces to unite Britain!"
+            "AD 867: Britain stands divided between Saxons and Vikings.",
+            "Raise your levies from the provinces, assemble your army, and march!"
         ]
 
     @property
@@ -154,9 +220,131 @@ class GameState:
     def get_provinces_count(self, char_id):
         return sum(1 for p in PROVINCES.values() if p["owner"] == char_id)
 
-    def get_total_troops(self, char_id):
+    def get_unraised_levies(self, char_id):
         return sum(p["levies_current"] for p in PROVINCES.values() if p["owner"] == char_id)
 
+    def get_field_troops(self, char_id):
+        return sum(a.troops for a in self.armies if a.owner == char_id)
+
+    def get_selected_army(self):
+        for a in self.armies:
+            if a.id == self.selected_army_id:
+                return a
+        return None
+
+    # ---------------------------------------------------------
+    # Army Operations
+    # ---------------------------------------------------------
+    def raise_province_levy(self, province_id):
+        prov = PROVINCES.get(province_id)
+        if not prov or prov["owner"] != self.player_id:
+            return
+        
+        available = prov["levies_current"]
+        if available <= 0:
+            self.logs.append(f"No levies available to raise in {prov['name']}.")
+            return
+
+        army_id = f"army_{self.army_id_counter}"
+        self.army_id_counter += 1
+        
+        army_name = f"{prov['name'].split()[0]} Fyrd"
+        new_army = Army(army_id, self.player_id, province_id, available, army_name)
+        self.armies.append(new_army)
+        
+        prov["levies_current"] = 0
+        self.selected_army_id = army_id
+        self.logs.append(f"Raised {available:,} men in {prov['name']}!")
+
+    def raise_all_levies(self):
+        raised_count = 0
+        total_men = 0
+        for pid, prov in PROVINCES.items():
+            if prov["owner"] == self.player_id and prov["levies_current"] > 0:
+                available = prov["levies_current"]
+                army_id = f"army_{self.army_id_counter}"
+                self.army_id_counter += 1
+                army_name = f"{prov['name'].split()[0]} Fyrd"
+                new_army = Army(army_id, self.player_id, pid, available, army_name)
+                self.armies.append(new_army)
+                prov["levies_current"] = 0
+                raised_count += 1
+                total_men += available
+        
+        if raised_count > 0:
+            self.logs.append(f"Mobilized all realm levies: {total_men:,} men in {raised_count} hosts!")
+        else:
+            self.logs.append("All available levies are already raised.")
+
+    def rally_all_armies_to(self, target_province_id):
+        player_armies = [a for a in self.armies if a.owner == self.player_id]
+        if not player_armies:
+            self.logs.append("No active armies to rally! Raise levies first.")
+            return
+
+        rallied = 0
+        for a in player_armies:
+            if a.province != target_province_id:
+                path = find_shortest_path(a.province, target_province_id)
+                if path and len(path) > 1:
+                    a.path = path[1:]
+                    a.move_progress = 0.0
+                    a.is_sieging = False
+                    rallied += 1
+        
+        target_name = PROVINCES[target_province_id]["name"]
+        self.logs.append(f"Rally orders issued! {len(player_armies)} hosts marching to {target_name}.")
+
+    def merge_armies_in_province(self, province_id, owner_id):
+        armies_here = [a for a in self.armies if a.province == province_id and a.owner == owner_id and not a.is_moving]
+        if len(armies_here) <= 1:
+            return
+
+        total_troops = sum(a.troops for a in armies_here)
+        leader_army = armies_here[0]
+        leader_army.troops = total_troops
+        leader_army.name = f"Royal Host of {PROVINCES[province_id]['name'].split()[0]}"
+        
+        for a in armies_here[1:]:
+            if a.id == self.selected_army_id:
+                self.selected_army_id = leader_army.id
+            self.armies.remove(a)
+            
+        self.logs.append(f"Combined {len(armies_here)} hosts into a grand army of {total_troops:,} men!")
+
+    def disband_army(self, army):
+        if not army:
+            return
+        prov = PROVINCES.get(army.province)
+        if prov and prov["owner"] == army.owner:
+            # Return surviving men to province
+            prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + army.troops)
+            self.logs.append(f"Disbanded {army.name}. {army.troops:,} men returned home.")
+            if army.id == self.selected_army_id:
+                self.selected_army_id = None
+            self.armies.remove(army)
+        else:
+            self.logs.append("Cannot disband an army while inside enemy territory!")
+
+    def order_army_march(self, army, target_province_id):
+        if not army:
+            return
+        if army.province == target_province_id:
+            return
+        
+        path = find_shortest_path(army.province, target_province_id)
+        if path and len(path) > 1:
+            army.path = path[1:] # steps to traverse
+            army.move_progress = 0.0
+            army.is_sieging = False
+            t_name = PROVINCES[target_province_id]["name"]
+            self.logs.append(f"{army.name} is marching towards {t_name}...")
+        else:
+            self.logs.append(f"No valid march route from {army.province} to {target_province_id}!")
+
+    # ---------------------------------------------------------
+    # Game Loop Ticks
+    # ---------------------------------------------------------
     def advance_day(self):
         self.day += 1
         max_d = self.month_days[self.month - 1]
@@ -169,24 +357,30 @@ class GameState:
                 self.year += 1
                 self.yearly_tick()
 
-        # Update Wars / Sieges
-        self.update_wars()
+        # Update Army Movements & Combat
+        self.update_armies()
 
         # AI Behavior
         self.ai_timer -= 1
         if self.ai_timer <= 0:
-            self.ai_timer = random.randint(40, 70)
-            self.ai_take_action()
+            self.ai_timer = random.randint(35, 55)
+            self.ai_routine()
 
     def monthly_tick(self):
-        # Tax collection and levy reinforcements for both sides
+        # Tax collection and levy reinforcement
         for prov in PROVINCES.values():
             owner = CHARACTERS.get(prov["owner"])
             if owner:
                 owner["gold"] += prov["tax"]
+                # Reinforce unraised garrison slowly
                 if prov["levies_current"] < prov["levies_max"]:
-                    prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 60)
+                    prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 50)
         
+        # Army upkeep cost (1 gold per 500 men)
+        player_troops = self.get_field_troops(self.player_id)
+        upkeep = player_troops // 500
+        self.player["gold"] = max(0, self.player["gold"] - upkeep)
+
         self.player["prestige"] += 1
         self.player["piety"] += 1
         self.enemy["prestige"] += 1
@@ -194,83 +388,132 @@ class GameState:
     def yearly_tick(self):
         self.player["age"] += 1
         self.enemy["age"] += 1
-        self.logs.append(f"AD {self.year}: The fierce war for Britain continues.")
+        self.logs.append(f"AD {self.year}: War rages across the lands of Britain.")
 
-    def declare_war(self, target_prov_id):
-        prov = PROVINCES[target_prov_id]
-        if prov["owner"] == self.player_id:
-            return
-        
-        # Check if already besieging this province
-        for war in self.active_wars:
-            if war["target_prov"] == target_prov_id:
-                return
+    def update_armies(self):
+        # 1. Update movement
+        for a in list(self.armies):
+            if a.is_moving and not a.in_battle:
+                a.move_progress += a.move_speed
+                if a.move_progress >= 100.0:
+                    a.province = a.path.pop(0)
+                    a.move_progress = 0.0
+                    
+                    # If reached final destination, auto merge if friendly army exists
+                    if not a.path:
+                        self.merge_armies_in_province(a.province, a.owner)
 
-        war = {
-            "attacker": self.player_id,
-            "defender": self.enemy_id,
-            "target_prov": target_prov_id,
-            "siege_progress": 0,
-            "days_elapsed": 0
-        }
-        self.active_wars.append(war)
-        self.logs.append(f"Wessex launched siege on {prov['name']}!")
+        # 2. Check Battles (Opposing armies in same province)
+        for pid in PROVINCES.keys():
+            armies_p1 = [a for a in self.armies if a.province == pid and a.owner == self.player_id and not a.is_moving]
+            armies_p2 = [a for a in self.armies if a.province == pid and a.owner == self.enemy_id and not a.is_moving]
 
-    def ai_take_action(self):
-        # If already in a war, don't start another
-        ai_wars = [w for w in self.active_wars if w["attacker"] == self.enemy_id]
-        if ai_wars:
-            return
-
-        # Target a random player province
-        player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.player_id]
-        if player_provs and random.random() < 0.6:
-            target = random.choice(player_provs)
-            war = {
-                "attacker": self.enemy_id,
-                "defender": self.player_id,
-                "target_prov": target,
-                "siege_progress": 0,
-                "days_elapsed": 0
-            }
-            self.active_wars.append(war)
-            self.logs.append(f"Warning! Halfdan has launched an attack on {PROVINCES[target]['name']}!")
-
-    def update_wars(self):
-        completed_wars = []
-        for war in self.active_wars:
-            war["days_elapsed"] += 1
-            prov = PROVINCES[war["target_prov"]]
-            atk_char = CHARACTERS[war["attacker"]]
-            def_char = CHARACTERS[war["defender"]]
-
-            atk_martial = atk_char["stats"]["martial"]
-            def_martial = def_char["stats"]["martial"]
-
-            # Advance siege progress every 3 days
-            if war["days_elapsed"] % 3 == 0:
-                roll = random.randint(1, 10) + (atk_martial - def_martial) // 3
-                if roll > 3:
-                    war["siege_progress"] += 14
-                    prov["levies_current"] = max(0, prov["levies_current"] - 140)
-                else:
-                    war["siege_progress"] += 6
-
-            if war["siege_progress"] >= 100 or prov["levies_current"] <= 0:
-                # Victory for attacker
-                prov["owner"] = war["attacker"]
-                prov["color"] = list(COLOR_WESSEX if war["attacker"] == self.player_id else COLOR_DANELAW)
-                atk_char["prestige"] += 80
+            if armies_p1 and armies_p2:
+                # Merge multiple armies on each side first
+                self.merge_armies_in_province(pid, self.player_id)
+                self.merge_armies_in_province(pid, self.enemy_id)
                 
-                if war["attacker"] == self.player_id:
-                    self.logs.append(f"Victory! {prov['name']} has been conquered for Wessex!")
-                else:
-                    self.logs.append(f"Loss! {prov['name']} has fallen to the Danelaw!")
+                # Fetch leading armies
+                a1 = armies_p1[0]
+                a2 = armies_p2[0]
+                a1.in_battle = True
+                a2.in_battle = True
+                a1.is_sieging = False
+                a2.is_sieging = False
 
-                completed_wars.append(war)
+                # Combat Round
+                alfred_martial = self.player["stats"]["martial"]
+                halfdan_martial = self.enemy["stats"]["martial"]
 
-        for w in completed_wars:
-            self.active_wars.remove(w)
+                dmg_to_a2 = int(a1.troops * 0.035 * (1 + alfred_martial * 0.02)) + random.randint(10, 30)
+                dmg_to_a1 = int(a2.troops * 0.035 * (1 + halfdan_martial * 0.02)) + random.randint(10, 30)
+
+                a1.troops = max(0, a1.troops - dmg_to_a1)
+                a2.troops = max(0, a2.troops - dmg_to_a2)
+
+                if a1.troops <= 0:
+                    self.logs.append(f"Defeat! {a1.name} was wiped out at {PROVINCES[pid]['name']}!")
+                    self.armies.remove(a1)
+                    a2.in_battle = False
+                elif a2.troops <= 0:
+                    self.logs.append(f"Glorious Victory! Destroyed the Viking host at {PROVINCES[pid]['name']}!")
+                    self.armies.remove(a2)
+                    a1.in_battle = False
+
+        # 3. Check Sieges (Army in enemy province with no defending army)
+        for a in list(self.armies):
+            if a not in self.armies:
+                continue
+            prov = PROVINCES[a.province]
+            if prov["owner"] != a.owner and not a.is_moving and not a.in_battle:
+                # Check if there is an opposing army defending
+                defenders = [enemy for enemy in self.armies if enemy.province == a.province and enemy.owner != a.owner]
+                if not defenders:
+                    a.is_sieging = True
+                    # Siege progress speed based on troop size
+                    rate = max(4, int(a.troops / 250))
+                    a.siege_progress += rate
+                    
+                    if a.siege_progress >= 100:
+                        # Province conquered!
+                        prov["owner"] = a.owner
+                        prov["color"] = list(COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW)
+                        a.is_sieging = False
+                        a.siege_progress = 0
+                        
+                        if a.owner == self.player_id:
+                            self.player["prestige"] += 100
+                            self.logs.append(f"Victory! {prov['name']} has been conquered by Wessex!")
+                        else:
+                            self.enemy["prestige"] += 100
+                            self.logs.append(f"Disaster! {prov['name']} has fallen to the Danelaw!")
+
+    # ---------------------------------------------------------
+    # AI (Halfdan Ragnarsson)
+    # ---------------------------------------------------------
+    def ai_routine(self):
+        danelaw_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.enemy_id]
+        if not danelaw_provs:
+            return
+
+        danelaw_armies = [a for a in self.armies if a.owner == self.enemy_id]
+        
+        # 1. Raise Levies if none active
+        if not danelaw_armies:
+            for pid in danelaw_provs:
+                p = PROVINCES[pid]
+                if p["levies_current"] > 500:
+                    army_id = f"army_{self.army_id_counter}"
+                    self.army_id_counter += 1
+                    host = Army(army_id, self.enemy_id, pid, p["levies_current"], "Viking Warband")
+                    self.armies.append(host)
+                    p["levies_current"] = 0
+            self.logs.append("Ravens squawk! The Danelaw has summoned their Viking hosts!")
+            return
+
+        # 2. Rally Viking armies into Jorvik or a border province
+        rally_point = "jorvik" if "jorvik" in danelaw_provs else random.choice(danelaw_provs)
+        for a in danelaw_armies:
+            if a.province != rally_point and not a.is_moving:
+                path = find_shortest_path(a.province, rally_point)
+                if path and len(path) > 1:
+                    a.path = path[1:]
+                    a.move_progress = 0.0
+
+        # 3. If armies gathered in rally point, march to attack player border province!
+        gathered = [a for a in danelaw_armies if a.province == rally_point and not a.is_moving]
+        if gathered:
+            self.merge_armies_in_province(rally_point, self.enemy_id)
+            main_host = [a for a in self.armies if a.province == rally_point and a.owner == self.enemy_id]
+            if main_host and main_host[0].troops >= 2000:
+                player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.player_id]
+                if player_provs:
+                    target = random.choice(player_provs)
+                    path = find_shortest_path(rally_point, target)
+                    if path and len(path) > 1:
+                        main_host[0].path = path[1:]
+                        main_host[0].move_progress = 0.0
+                        self.logs.append(f"Alarm! Halfdan's Great Host marches towards {PROVINCES[target]['name']}!")
 
 # -------------------------------------------------------------
 # Main Game Loop
@@ -312,8 +555,8 @@ def run_game():
             else: prov_id = "wessex"
             cell_to_prov[(c, r)] = prov_id
 
-    # Province name labels on map
-    label_positions = {
+    # Coordinates for labels & army badges on map
+    province_anchors = {
         "highlands": (map_origin_x + 185, map_origin_y + 80),
         "strathclyde": (map_origin_x + 175, map_origin_y + 195),
         "lothian": (map_origin_x + 245, map_origin_y + 195),
@@ -333,13 +576,17 @@ def run_game():
         dt = clock.tick(FPS)
         mouse_pos = pygame.mouse.get_pos()
         mouse_clicked = False
+        right_clicked = False
 
         # Event handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                mouse_clicked = True
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    mouse_clicked = True
+                elif event.button == 3:
+                    right_clicked = True
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     state.speed = 0 if state.speed > 0 else 1
@@ -349,11 +596,16 @@ def run_game():
                     state.speed = 2
                 elif event.key == pygame.K_3:
                     state.speed = 3
+                elif event.key == pygame.K_r:
+                    state.raise_all_levies()
+                elif event.key == pygame.K_m:
+                    if state.selected_province:
+                        state.rally_all_armies_to(state.selected_province)
 
-        # Time advancement (Smooth, no popup interruptions)
+        # Time advancement
         if state.speed > 0:
             state.tick_timer += dt
-            tick_interval = 1000 // (state.speed * 2) # Speed 1: ~500ms, Speed 2: ~250ms, Speed 3: ~166ms
+            tick_interval = 1000 // (state.speed * 2)
             if state.tick_timer >= tick_interval:
                 state.advance_day()
                 state.tick_timer = 0
@@ -367,19 +619,18 @@ def run_game():
         pygame.draw.rect(screen, COLOR_PANEL_BG, (0, 0, WINDOW_WIDTH, 52))
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (0, 52), (WINDOW_WIDTH, 52), 2)
 
-        # Title / Campaign Name
         t_surf = font_lg.render("CK2: THE WAR FOR BRITAIN", True, COLOR_GOLD)
         screen.blit(t_surf, (20, 12))
 
         # Calendar Date
         date_str = f"{state.day:02d} {state.months[state.month - 1]} {state.year} AD"
         d_surf = font_md.render(date_str, True, COLOR_TEXT_WHITE)
-        screen.blit(d_surf, (350, 15))
+        screen.blit(d_surf, (340, 15))
 
         # Speed Controls
         speeds = [(0, icon_speed_pause), (1, icon_speed_play), (2, icon_speed_fast)]
         for i, (sp, icon) in enumerate(speeds):
-            btn_x = 485 + (i * 36)
+            btn_x = 475 + (i * 36)
             btn_rect = pygame.Rect(btn_x, 10, 32, 32)
             is_active = (state.speed == sp)
             b_col = COLOR_BUTTON_ACTIVE if is_active else (COLOR_BUTTON_HOVER if btn_rect.collidepoint(mouse_pos) else COLOR_BUTTON_NORMAL)
@@ -389,22 +640,25 @@ def run_game():
             if mouse_clicked and btn_rect.collidepoint(mouse_pos):
                 state.speed = sp
 
-        # Player Stats (Gold, Prestige, Piety, Total Levies)
-        stats_x = 640
+        # Player Resources
+        stats_x = 610
+        field_men = state.get_field_troops(state.player_id)
+        garrison_men = state.get_unraised_levies(state.player_id)
+        
         stats = [
             (icon_gold, str(state.player["gold"]), COLOR_GOLD),
             (icon_prestige, str(state.player["prestige"]), COLOR_PRESTIGE),
-            (icon_piety, str(state.player["piety"]), COLOR_PIETY),
-            (icon_troops, f"{state.get_total_troops(state.player_id):,}", COLOR_TEXT_WHITE)
+            (icon_troops, f"Field: {field_men:,}", COLOR_TEXT_GREEN if field_men > 0 else COLOR_TEXT_WHITE),
+            (icon_piety, f"Garrison: {garrison_men:,}", COLOR_TEXT_MUTED)
         ]
         for icon, val_str, col in stats:
             screen.blit(icon, (stats_x, 14))
             v_surf = font_md.render(val_str, True, col)
             screen.blit(v_surf, (stats_x + 28, 15))
-            stats_x += 120
+            stats_x += 140
 
         # ---------------------------------------------------------
-        # 2. LEFT PANEL: PLAYER RULER (ALFRED THE GREAT)
+        # 2. LEFT PANEL: PLAYER RULER & ACTIVE FORCES
         # ---------------------------------------------------------
         left_panel = pygame.Rect(10, 62, 290, WINDOW_HEIGHT - 72)
         pygame.draw.rect(screen, COLOR_PANEL_BG, left_panel, border_radius=6)
@@ -421,59 +675,80 @@ def run_game():
         # Ruler Info
         name_surf = font_md.render(state.player["name"], True, COLOR_TEXT_WHITE)
         title_surf = font_sm.render(state.player["realm"], True, COLOR_GOLD)
-        dynasty_surf = font_sm.render(f"Dynasty: {state.player['dynasty']}", True, COLOR_TEXT_MUTED)
-        age_surf = font_sm.render(f"Age: {state.player['age']} years old", True, COLOR_TEXT_MUTED)
+        dynasty_surf = font_sm.render(f"Martial Skill: {state.player['stats']['martial']}", True, COLOR_TEXT_RED)
+        age_surf = font_sm.render(f"Age: {state.player['age']} • Gold: {state.player['gold']}", True, COLOR_TEXT_MUTED)
 
         screen.blit(name_surf, (115, 75))
         screen.blit(title_surf, (115, 96))
         screen.blit(dynasty_surf, (115, 116))
         screen.blit(age_surf, (115, 134))
 
-        # Attributes Table
+        # Realm Mobilization Buttons
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 172), (285, 172), 1)
-        st_title = font_md.render("Royal Attributes", True, COLOR_GOLD)
-        screen.blit(st_title, (25, 180))
+        
+        # Raise All Button
+        btn_raise_all = pygame.Rect(25, 185, 125, 36)
+        b_hover = btn_raise_all.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (40, 110, 60) if b_hover else (30, 80, 45), btn_raise_all, border_radius=4)
+        pygame.draw.rect(screen, COLOR_TEXT_GREEN, btn_raise_all, 1, border_radius=4)
+        screen.blit(font_sm.render("RAISE ALL (R)", True, COLOR_TEXT_WHITE), (35, 193))
+        if mouse_clicked and b_hover:
+            state.raise_all_levies()
 
-        attr_keys = [
-            ("Diplomacy", state.player["stats"]["diplomacy"], (100, 180, 255)),
-            ("Martial", state.player["stats"]["martial"], (240, 100, 100)),
-            ("Stewardship", state.player["stats"]["stewardship"], (120, 220, 140)),
-            ("Intrigue", state.player["stats"]["intrigue"], (190, 120, 240)),
-            ("Learning", state.player["stats"]["learning"], (255, 220, 120))
-        ]
-        for idx, (label, val, bar_col) in enumerate(attr_keys):
-            row_y = 208 + (idx * 26)
-            l_surf = font_sm.render(label, True, COLOR_TEXT_WHITE)
-            v_surf = font_sm.render(str(val), True, COLOR_GOLD)
-            screen.blit(l_surf, (25, row_y))
-            screen.blit(v_surf, (115, row_y))
+        # Disband All Button
+        btn_disband_all = pygame.Rect(160, 185, 125, 36)
+        b_hover_d = btn_disband_all.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (100, 40, 40) if b_hover_d else (75, 30, 30), btn_disband_all, border_radius=4)
+        pygame.draw.rect(screen, COLOR_TEXT_RED, btn_disband_all, 1, border_radius=4)
+        screen.blit(font_sm.render("DISBAND ALL", True, COLOR_TEXT_WHITE), (175, 193))
+        if mouse_clicked and b_hover_d:
+            for a in list(state.armies):
+                if a.owner == state.player_id:
+                    state.disband_army(a)
 
-            # Stat Bar
-            pygame.draw.rect(screen, (40, 45, 58), (145, row_y + 4, 130, 8), border_radius=3)
-            fill_w = min(130, int((val / 20) * 130))
-            pygame.draw.rect(screen, bar_col, (145, row_y + 4, fill_w, 8), border_radius=3)
+        # Active Armies Roster
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 235), (285, 235), 1)
+        screen.blit(font_md.render("Active Saxon Armies", True, COLOR_GOLD), (25, 245))
 
-        # Traits
-        pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 345), (285, 345), 1)
-        tr_title = font_md.render("Traits", True, COLOR_GOLD)
-        screen.blit(tr_title, (25, 355))
+        player_armies = [a for a in state.armies if a.owner == state.player_id]
+        if not player_armies:
+            screen.blit(font_sm.render("No armies raised yet.", True, COLOR_TEXT_MUTED), (25, 275))
+            screen.blit(font_sm.render("Click 'RAISE ALL' or select", True, COLOR_TEXT_MUTED), (25, 295))
+            screen.blit(font_sm.render("a province to raise local fyrd.", True, COLOR_TEXT_MUTED), (25, 315))
+        else:
+            ay = 275
+            for a in player_armies[:4]:
+                a_rect = pygame.Rect(25, ay, 260, 46)
+                is_sel = (a.id == state.selected_army_id)
+                b_hover_a = a_rect.collidepoint(mouse_pos)
+                
+                bg_col = COLOR_BUTTON_ACTIVE if is_sel else ((55, 65, 82) if b_hover_a else (38, 44, 58))
+                pygame.draw.rect(screen, bg_col, a_rect, border_radius=4)
+                pygame.draw.rect(screen, COLOR_GOLD if is_sel else COLOR_PANEL_BORDER, a_rect, 1, border_radius=4)
 
-        for tidx, trait in enumerate(state.player["traits"]):
-            tx = 25 + ((tidx % 2) * 135)
-            ty = 380 + ((tidx // 2) * 28)
-            t_box = pygame.Rect(tx, ty, 125, 24)
-            pygame.draw.rect(screen, COLOR_BUTTON_NORMAL, t_box, border_radius=4)
-            pygame.draw.rect(screen, COLOR_PANEL_BORDER, t_box, 1, border_radius=4)
-            tt_surf = font_sm.render(trait, True, COLOR_TEXT_WHITE)
-            screen.blit(tt_surf, (t_box.x + 8, t_box.y + 3))
+                # Army info
+                screen.blit(font_sm.render(f"{a.name} ({a.troops:,} men)", True, COLOR_TEXT_WHITE), (35, ay + 5))
+                
+                status_str = "Idle"
+                if a.in_battle: status_str = "⚔ IN BATTLE!"
+                elif a.is_sieging: status_str = f"Besieging ({a.siege_progress}%)"
+                elif a.is_moving: status_str = f"Marching to {PROVINCES[a.next_province]['name'].split()[0]}"
+                else: status_str = f"Stationed in {PROVINCES[a.province]['name'].split()[0]}"
 
-        # Chronicle Logs (Uninterrupted)
-        pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 450), (285, 450), 1)
-        log_title = font_md.render("Chronicle of Britain", True, COLOR_GOLD)
-        screen.blit(log_title, (25, 460))
+                screen.blit(font_xs.render(status_str, True, COLOR_GOLD if a.in_battle else COLOR_TEXT_MUTED), (35, ay + 25))
 
-        log_y = 490
-        for log_msg in state.logs[-7:]:
+                if mouse_clicked and b_hover_a:
+                    state.selected_army_id = a.id
+                    state.selected_province = a.province
+
+                ay += 52
+
+        # Chronicle of Britain
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 495), (285, 495), 1)
+        screen.blit(font_md.render("Chronicle of Britain", True, COLOR_GOLD), (25, 505))
+
+        log_y = 535
+        for log_msg in state.logs[-6:]:
             disp = log_msg[:34] + "..." if len(log_msg) > 37 else log_msg
             lm_surf = font_sm.render(f"• {disp}", True, COLOR_TEXT_MUTED)
             screen.blit(lm_surf, (25, log_y))
@@ -496,16 +771,14 @@ def run_game():
         bar_w = 500
         bar_h = 24
         
-        # Draw balance bar
         pygame.draw.rect(screen, (25, 30, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
         wessex_pixel_w = int((wessex_count / total_provs) * bar_w)
         pygame.draw.rect(screen, COLOR_WESSEX, (bar_x, bar_y, wessex_pixel_w, bar_h), border_radius=4)
         pygame.draw.rect(screen, COLOR_DANELAW, (bar_x + wessex_pixel_w, bar_y, bar_w - wessex_pixel_w, bar_h), border_radius=4)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=4)
 
-        # Bar Labels
-        w_lbl = font_sm.render(f"WESSEX: {wessex_count}", True, (255, 230, 230))
-        d_lbl = font_sm.render(f"DANELAW: {danelaw_count}", True, (230, 240, 255))
+        w_lbl = font_sm.render(f"WESSEX: {wessex_count} Provinces", True, (255, 230, 230))
+        d_lbl = font_sm.render(f"DANELAW: {danelaw_count} Provinces", True, (230, 240, 255))
         screen.blit(w_lbl, (bar_x + 10, bar_y + 3))
         screen.blit(d_lbl, (bar_x + bar_w - d_lbl.get_width() - 10, bar_y + 3))
 
@@ -542,10 +815,15 @@ def run_game():
                         pygame.draw.line(screen, (max(0, col[0] - 25), max(0, col[1] - 25), max(0, col[2] - 25)), (cell_x, cell_y + tile_h - 2), (cell_x + tile_w - 2, cell_y + tile_h - 2))
 
                     if mouse_clicked and is_hovered:
+                        # If player has an army selected, clicking a province can move it
+                        curr_army = state.get_selected_army()
+                        if curr_army and curr_army.owner == state.player_id and prov_id != curr_army.province:
+                            # March order!
+                            state.order_army_march(curr_army, prov_id)
                         state.selected_province = prov_id
 
         # Province Name Labels
-        for pid, (lx, ly) in label_positions.items():
+        for pid, (lx, ly) in province_anchors.items():
             p_data = PROVINCES.get(pid)
             if p_data:
                 short_name = p_data["name"].split()[0]
@@ -554,7 +832,61 @@ def run_game():
                 screen.blit(sh_surf, (lx + 1, ly + 1))
                 screen.blit(lbl_surf, (lx, ly))
 
-        # Victory / Defeat Check
+        # ---------------------------------------------------------
+        # DRAW ARMIES ON MAP (Badges with Troop Counts)
+        # ---------------------------------------------------------
+        for army in state.armies:
+            base_pos = province_anchors.get(army.province)
+            if not base_pos:
+                continue
+
+            bx, by = base_pos[0] - 15, base_pos[1] - 25
+
+            # If moving, interpolate slightly towards next province
+            if army.is_moving and army.next_province:
+                next_pos = province_anchors.get(army.next_province, base_pos)
+                pct = army.move_progress / 100.0
+                bx = int(bx + (next_pos[0] - base_pos[0]) * pct)
+                by = int(by + (next_pos[1] - base_pos[1]) * pct)
+
+            badge_w = 84
+            badge_h = 24
+            badge_rect = pygame.Rect(bx, by, badge_w, badge_h)
+
+            is_player = (army.owner == state.player_id)
+            is_sel_army = (army.id == state.selected_army_id)
+            is_badge_hover = badge_rect.collidepoint(mouse_pos)
+
+            # Badge Styling
+            if army.in_battle:
+                b_color = (190, 40, 40)
+                border_col = (255, 220, 50)
+                txt_badge = f"⚔ {army.troops:,}"
+            elif army.is_sieging:
+                b_color = (160, 90, 30)
+                border_col = COLOR_GOLD
+                txt_badge = f"🏰 {army.troops:,}"
+            elif is_player:
+                b_color = (170, 30, 30) if not is_sel_army else (210, 45, 45)
+                border_col = COLOR_GOLD if is_sel_army else (240, 180, 180)
+                txt_badge = f"🛡 {army.troops:,}"
+            else:
+                b_color = (40, 60, 90)
+                border_col = (120, 160, 220)
+                txt_badge = f"⚔ {army.troops:,}"
+
+            pygame.draw.rect(screen, b_color, badge_rect, border_radius=4)
+            pygame.draw.rect(screen, border_col, badge_rect, 2 if is_sel_army else 1, border_radius=4)
+
+            badge_surf = font_xs.render(txt_badge, True, COLOR_TEXT_WHITE)
+            screen.blit(badge_surf, (bx + 6, by + 4))
+
+            # Click badge to select army
+            if mouse_clicked and is_badge_hover:
+                state.selected_army_id = army.id
+                state.selected_province = army.province
+
+        # Victory / Defeat Banner
         if wessex_count == total_provs:
             vic_rect = pygame.Rect(340, 260, 480, 110)
             pygame.draw.rect(screen, (20, 50, 25), vic_rect, border_radius=8)
@@ -573,14 +905,80 @@ def run_game():
             screen.blit(db_sub, (def_rect.x + (def_rect.w - db_sub.get_width()) // 2, def_rect.y + 65))
 
         # ---------------------------------------------------------
-        # 4. RIGHT PANEL: SELECTED PROVINCE & CAMPAIGN ACTIONS
+        # 4. RIGHT PANEL: SELECTED PROVINCE & ARMY COMMANDS
         # ---------------------------------------------------------
         right_panel = pygame.Rect(860, 62, 330, WINDOW_HEIGHT - 72)
         pygame.draw.rect(screen, COLOR_PANEL_BG, right_panel, border_radius=6)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, right_panel, 2, border_radius=6)
 
         sel_prov = PROVINCES.get(state.selected_province)
-        if sel_prov:
+        sel_army = state.get_selected_army()
+
+        # If an army is selected, show Army Command Card first!
+        if sel_army and sel_army.owner == state.player_id:
+            # Header
+            a_title = font_lg.render(sel_army.name, True, COLOR_GOLD)
+            screen.blit(a_title, (880, 80))
+            
+            sub_title = font_sm.render(f"Strength: {sel_army.troops:,} Men  •  Owner: Wessex", True, COLOR_TEXT_WHITE)
+            screen.blit(sub_title, (880, 110))
+
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, 135), (1170, 135), 1)
+
+            # Location & Status
+            screen.blit(font_md.render("Host Status", True, COLOR_GOLD), (880, 145))
+            screen.blit(font_sm.render(f"Current Location: {PROVINCES[sel_army.province]['name']}", True, COLOR_TEXT_WHITE), (880, 175))
+            
+            if sel_army.in_battle:
+                screen.blit(font_md.render("STATUS: ⚔ IN PITCHED BATTLE!", True, COLOR_TEXT_RED), (880, 202))
+            elif sel_army.is_sieging:
+                screen.blit(font_md.render(f"STATUS: 🏰 Besieging ({sel_army.siege_progress}%)", True, COLOR_GOLD), (880, 202))
+            elif sel_army.is_moving:
+                screen.blit(font_sm.render(f"Marching to: {PROVINCES[sel_army.next_province]['name']} ({int(sel_army.move_progress)}%)", True, COLOR_TEXT_WHITE), (880, 202))
+            else:
+                screen.blit(font_sm.render("Status: Standing Ready", True, COLOR_TEXT_GREEN), (880, 202))
+
+            # March Instruction Box
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, 235), (1170, 235), 1)
+            screen.blit(font_md.render("March Orders", True, COLOR_GOLD), (880, 245))
+            screen.blit(font_sm.render("Click any province on the map to", True, COLOR_TEXT_MUTED), (880, 275))
+            screen.blit(font_sm.render("order this army to march there!", True, COLOR_TEXT_MUTED), (880, 295))
+            screen.blit(font_xs.render("• March into enemy land to begin SIEGE.", True, COLOR_GOLD), (880, 320))
+            screen.blit(font_xs.render("• March into Viking army to CLASH.", True, COLOR_TEXT_RED), (880, 340))
+
+            # Action Buttons for Army
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, 365), (1170, 365), 1)
+            
+            # Merge button if other armies in same province
+            other_armies = [a for a in state.armies if a.province == sel_army.province and a.owner == state.player_id and a.id != sel_army.id]
+            if other_armies:
+                merge_btn = pygame.Rect(880, 385, 290, 40)
+                b_m_hover = merge_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (40, 90, 140) if b_m_hover else (30, 65, 105), merge_btn, border_radius=6)
+                pygame.draw.rect(screen, (80, 160, 240), merge_btn, 1, border_radius=6)
+                screen.blit(font_md.render("MERGE WITH OTHER HOSTS", True, COLOR_TEXT_WHITE), (910, 394))
+                if mouse_clicked and b_m_hover:
+                    state.merge_armies_in_province(sel_army.province, state.player_id)
+
+            # Disband Button
+            dis_btn = pygame.Rect(880, 435, 290, 40)
+            b_d_hover = dis_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (80, 35, 35) if b_d_hover else (60, 28, 28), dis_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_TEXT_RED, dis_btn, 1, border_radius=6)
+            screen.blit(font_md.render("DISBAND THIS HOST", True, (255, 220, 220)), (930, 444))
+            if mouse_clicked and b_d_hover:
+                state.disband_army(sel_army)
+
+            # Deselect Army Button
+            desel_btn = pygame.Rect(880, 485, 290, 36)
+            b_ds_hover = desel_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_ds_hover else COLOR_BUTTON_NORMAL, desel_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, desel_btn, 1, border_radius=6)
+            screen.blit(font_sm.render("Deselect Army (View Province)", True, COLOR_TEXT_MUTED), (925, 493))
+            if mouse_clicked and b_ds_hover:
+                state.selected_army_id = None
+
+        elif sel_prov:
             owner_char = CHARACTERS.get(sel_prov["owner"], CHARACTERS["char_alfred"])
             is_player_owned = (sel_prov["owner"] == state.player_id)
 
@@ -594,7 +992,7 @@ def run_game():
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, 135), (1170, 135), 1)
 
             # Owner Badge
-            screen.blit(font_md.render("Controlled by:", True, COLOR_TEXT_WHITE), (880, 145))
+            screen.blit(font_md.render("Held by:", True, COLOR_TEXT_WHITE), (880, 145))
             owner_p = portrait_cache.get(sel_prov["owner"])
             if owner_p:
                 mini_p = pygame.transform.smoothscale(owner_p, (50, 50))
@@ -608,29 +1006,44 @@ def run_game():
 
             # Details
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, 240), (1170, 240), 1)
-            screen.blit(font_md.render("Province Resources", True, COLOR_GOLD), (880, 252))
+            screen.blit(font_md.render("Province Details", True, COLOR_GOLD), (880, 252))
 
             screen.blit(icon_gold, (880, 285))
             screen.blit(font_sm.render(f"Monthly Tax Revenue: +{sel_prov['tax']} Gold", True, COLOR_TEXT_WHITE), (915, 288))
 
             screen.blit(icon_troops, (880, 320))
-            screen.blit(font_sm.render(f"Levies / Garrison: {sel_prov['levies_current']} / {sel_prov['levies_max']}", True, COLOR_TEXT_WHITE), (915, 323))
+            screen.blit(font_sm.render(f"Levies Available: {sel_prov['levies_current']} / {sel_prov['levies_max']}", True, COLOR_TEXT_WHITE), (915, 323))
 
             # Actions
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, 365), (1170, 365), 1)
-            screen.blit(font_md.render("Command Orders", True, COLOR_GOLD), (880, 375))
+            screen.blit(font_md.render("Military Orders", True, COLOR_GOLD), (880, 375))
 
             if is_player_owned:
-                # Develop Lands Button
-                imp_btn = pygame.Rect(880, 415, 290, 42)
-                b_hover = imp_btn.collidepoint(mouse_pos)
-                pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_hover else COLOR_BUTTON_NORMAL, imp_btn, border_radius=6)
-                pygame.draw.rect(screen, COLOR_PANEL_BORDER, imp_btn, 1, border_radius=6)
-                
-                ib_text = font_md.render("Develop Lands (-50 Gold, +4 Tax)", True, COLOR_GOLD)
-                screen.blit(ib_text, (895, 426))
+                # 1. Raise Local Levy Button
+                raise_btn = pygame.Rect(880, 405, 290, 42)
+                b_r_hover = raise_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (35, 95, 50) if b_r_hover else (25, 70, 38), raise_btn, border_radius=6)
+                pygame.draw.rect(screen, COLOR_TEXT_GREEN, raise_btn, 1, border_radius=6)
+                screen.blit(font_md.render(f"RAISE LEVY ({sel_prov['levies_current']} Men)", True, COLOR_TEXT_WHITE), (915, 415))
+                if mouse_clicked and b_r_hover:
+                    state.raise_province_levy(state.selected_province)
 
-                if mouse_clicked and b_hover:
+                # 2. Rally All Armies Here Button
+                rally_btn = pygame.Rect(880, 455, 290, 40)
+                b_rl_hover = rally_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (35, 65, 110) if b_rl_hover else (25, 48, 85), rally_btn, border_radius=6)
+                pygame.draw.rect(screen, (70, 130, 220), rally_btn, 1, border_radius=6)
+                screen.blit(font_md.render("RALLY ALL ARMIES HERE (M)", True, COLOR_TEXT_WHITE), (895, 464))
+                if mouse_clicked and b_rl_hover:
+                    state.rally_all_armies_to(state.selected_province)
+
+                # 3. Develop Lands Button
+                dev_btn = pygame.Rect(880, 505, 290, 38)
+                b_dv_hover = dev_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_dv_hover else COLOR_BUTTON_NORMAL, dev_btn, border_radius=6)
+                pygame.draw.rect(screen, COLOR_PANEL_BORDER, dev_btn, 1, border_radius=6)
+                screen.blit(font_sm.render("Develop Lands (-50 Gold, +4 Tax, +250 Levies)", True, COLOR_GOLD), (888, 514))
+                if mouse_clicked and b_dv_hover:
                     if state.player["gold"] >= 50:
                         state.player["gold"] -= 50
                         sel_prov["tax"] += 4
@@ -639,45 +1052,12 @@ def run_game():
                     else:
                         state.logs.append("Need 50 Gold to develop lands!")
             else:
-                # Declare War Button
-                war_btn = pygame.Rect(880, 415, 290, 44)
-                is_at_war = any(w["target_prov"] == state.selected_province for w in state.active_wars)
-                
-                if is_at_war:
-                    pygame.draw.rect(screen, (90, 30, 30), war_btn, border_radius=6)
-                    pygame.draw.rect(screen, COLOR_TEXT_RED, war_btn, 1, border_radius=6)
-                    wb_text = font_md.render("Besieging Province...", True, COLOR_TEXT_WHITE)
-                    screen.blit(wb_text, (940, 427))
-                else:
-                    b_hover = war_btn.collidepoint(mouse_pos)
-                    pygame.draw.rect(screen, (170, 40, 40) if b_hover else (130, 30, 30), war_btn, border_radius=6)
-                    pygame.draw.rect(screen, (230, 70, 70), war_btn, 1, border_radius=6)
-                    
-                    wb_text = font_md.render("DECLARE CONQUEST SIEGE", True, (255, 240, 240))
-                    screen.blit(wb_text, (910, 426))
-
-                    if mouse_clicked and b_hover:
-                        state.declare_war(state.selected_province)
-
-            # Active Sieges List
-            if state.active_wars:
-                pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, 480), (1170, 480), 1)
-                screen.blit(font_md.render("Active Campaigns", True, COLOR_TEXT_RED), (880, 492))
-                
-                for widx, w in enumerate(state.active_wars):
-                    w_box_y = 525 + (widx * 55)
-                    pygame.draw.rect(screen, (40, 20, 25), (880, w_box_y, 290, 48), border_radius=4)
-                    pygame.draw.rect(screen, (140, 40, 50), (880, w_box_y, 290, 48), 1, border_radius=4)
-
-                    wp_name = PROVINCES[w["target_prov"]]["name"].split()[0]
-                    atk_name = "Wessex" if w["attacker"] == state.player_id else "Danelaw"
-                    w_title = font_sm.render(f"{atk_name} Siege of {wp_name}: {w['siege_progress']}%", True, COLOR_TEXT_WHITE)
-                    screen.blit(w_title, (890, w_box_y + 6))
-
-                    # Siege Bar
-                    pygame.draw.rect(screen, (20, 20, 20), (890, w_box_y + 28, 270, 10), border_radius=4)
-                    pw = int((w["siege_progress"] / 100) * 270)
-                    pygame.draw.rect(screen, COLOR_TEXT_RED if w["attacker"] == state.player_id else (80, 120, 180), (890, w_box_y + 28, pw, 10), border_radius=4)
+                # Enemy Province Instructions
+                screen.blit(font_md.render("Viking Controlled Territory", True, COLOR_TEXT_RED), (880, 415))
+                screen.blit(font_sm.render("To conquer this province:", True, COLOR_TEXT_MUTED), (880, 445))
+                screen.blit(font_xs.render("1. Raise levies from your provinces.", True, COLOR_TEXT_WHITE), (880, 470))
+                screen.blit(font_xs.render("2. Rally & merge your hosts into an army.", True, COLOR_TEXT_WHITE), (880, 490))
+                screen.blit(font_xs.render("3. Select your army and click here to march!", True, COLOR_GOLD), (880, 510))
 
         pygame.display.flip()
 
