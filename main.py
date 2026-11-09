@@ -956,18 +956,15 @@ def run_game():
                     state.selected_province = prov_id
 
         # -----------------------------------------------------------
-        # PASS 2: Draw borders ONLY on edges between different owners
-        #         (or land vs ocean)
+        # PASS 2: Draw borders ONLY on edges between different PROVINCES
+        #         (tiles of same province = seamless; different province = border)
         # -----------------------------------------------------------
-        BORDER_COL      = (0,   0,   0)    # hard black between different rulers
-        SELECTED_COL    = COLOR_GOLD
-        BORDER_W        = 2
+        BORDER_COL   = (0, 0, 0)      # black line between provinces
+        BORDER_W     = 2
 
-        def get_owner(col_i, row_i):
-            pid = cell_to_prov.get((col_i, row_i))
-            if pid is None:
-                return None   # ocean
-            return PROVINCES[pid]["owner"]
+        def get_prov(col_i, row_i):
+            """Return province id for tile, or None if ocean."""
+            return cell_to_prov.get((col_i, row_i))
 
         for r, row in enumerate(raw_grid):
             for c, ch in enumerate(row):
@@ -975,35 +972,30 @@ def run_game():
                     continue
                 cell_x = map_origin_x + (c * tile_w)
                 cell_y = map_origin_y + 45 + (r * tile_h)
-                prov_id  = cell_to_prov.get((c, r))
+                prov_id    = get_prov(c, r)
                 is_selected = (prov_id == state.selected_province)
-                owner = get_owner(c, r)
+                border_col = COLOR_GOLD if is_selected else BORDER_COL
 
-                # Check 4 neighbors; draw border line if owner differs
-                # Right edge
-                if get_owner(c + 1, r) != owner:
+                # Right edge — draw if neighbor is different province (or ocean)
+                if get_prov(c + 1, r) != prov_id:
                     ex = cell_x + tile_w - 1
-                    col_b = SELECTED_COL if is_selected else BORDER_COL
-                    pygame.draw.line(screen, col_b,
+                    pygame.draw.line(screen, border_col,
                                      (ex, cell_y), (ex, cell_y + tile_h - 1), BORDER_W)
                 # Bottom edge
-                if get_owner(c, r + 1) != owner:
+                if get_prov(c, r + 1) != prov_id:
                     ey = cell_y + tile_h - 1
-                    col_b = SELECTED_COL if is_selected else BORDER_COL
-                    pygame.draw.line(screen, col_b,
+                    pygame.draw.line(screen, border_col,
                                      (cell_x, ey), (cell_x + tile_w - 1, ey), BORDER_W)
                 # Left edge
-                if get_owner(c - 1, r) != owner:
-                    col_b = SELECTED_COL if is_selected else BORDER_COL
-                    pygame.draw.line(screen, col_b,
+                if get_prov(c - 1, r) != prov_id:
+                    pygame.draw.line(screen, border_col,
                                      (cell_x, cell_y), (cell_x, cell_y + tile_h - 1), BORDER_W)
                 # Top edge
-                if get_owner(c, r - 1) != owner:
-                    col_b = SELECTED_COL if is_selected else BORDER_COL
-                    pygame.draw.line(screen, col_b,
+                if get_prov(c, r - 1) != prov_id:
+                    pygame.draw.line(screen, border_col,
                                      (cell_x, cell_y), (cell_x + tile_w - 1, cell_y), BORDER_W)
 
-                # Golden highlight on selected province (outer glow over border)
+                # Golden highlight on selected province (reinforcing border)
                 if is_selected:
                     pygame.draw.rect(screen, COLOR_GOLD,
                                      (cell_x, cell_y, tile_w, tile_h), 1)
