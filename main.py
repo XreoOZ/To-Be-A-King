@@ -314,6 +314,13 @@ class Army:
         self.is_sieging = False
         self.siege_progress = 0     # 0 to 100%
         self.in_battle = False
+        self.target_city = None
+        self.siege_target_name = None
+        
+        # Mobilization & Demobilization
+        self.is_mustering = False
+        self.muster_days = 0
+        self.is_demobilizing = False
 
     @property
     def is_moving(self):
@@ -322,6 +329,53 @@ class Army:
     @property
     def next_province(self):
         return self.path[0] if self.path else None
+
+# -------------------------------------------------------------
+# City Siege & Contested Province Helpers
+# -------------------------------------------------------------
+def get_province_holdings(state, pid):
+    """Return dict of holding_name -> list of (c, r) tiles in that province."""
+    holdings = {}
+    for (c, r), s in state.settlements.items():
+        if s.get("province") == pid:
+            h_name = s.get("name", "Unknown Holding")
+            holdings.setdefault(h_name, []).append((c, r))
+    return holdings
+
+def get_siegeable_holdings(state, province_id, army_owner):
+    prov = PROVINCES.get(province_id)
+    if not prov:
+        return []
+    is_enemy_prov = (prov["owner"] != army_owner)
+    holdings = get_province_holdings(state, province_id)
+    
+    siegeable = []
+    for h_name, tiles in holdings.items():
+        t0 = tiles[0]
+        s_data = state.settlements[t0]
+        occ = s_data.get("occupied_by")
+        if is_enemy_prov:
+            # In enemy territory: holding is siegeable if not yet occupied by army_owner
+            if occ != army_owner:
+                siegeable.append((h_name, tiles))
+        else:
+            # In friendly territory: holding is siegeable (liberatable) if occupied by an enemy
+            if occ is not None and occ != army_owner:
+                siegeable.append((h_name, tiles))
+    return siegeable
+
+def is_province_contested(state, pid):
+    """Returns True, occupier_id if any settlement in the province is occupied by non-owner."""
+    prov = PROVINCES.get(pid)
+    if not prov:
+        return False, None
+    owner = prov["owner"]
+    for s in state.settlements.values():
+        if s.get("province") == pid:
+            occ = s.get("occupied_by")
+            if occ is not None and occ != owner:
+                return True, occ
+    return False, None
 
 # -------------------------------------------------------------
 # Game State
@@ -464,11 +518,13 @@ class GameState:
         is_royal = (province_id == "wessex")
         new_army = Army(army_id, self.player_id, province_id, available, army_name,
                         flag_origin=province_id, rank=3 if is_royal else 1)
+        new_army.is_mustering = True
+        new_army.muster_days = 30
         self.armies.append(new_army)
         
         prov["levies_current"] = 0
         self.selected_army_id = army_id
-        self.logs.append(f"Raised {available:,} men in {prov['name']}!")
+        self.logs.append(f"Summoned {available:,} men in {prov['name']}! Mustering troops (30 days)...")
 
     def raise_all_levies(self):
         raised_count = 0
@@ -482,13 +538,15 @@ class GameState:
                 is_royal = (pid == "wessex")
                 new_army = Army(army_id, self.player_id, pid, available, army_name,
                                 flag_origin=pid, rank=3 if is_royal else 1)
+                new_army.is_mustering = True
+                new_army.muster_days = 30
                 self.armies.append(new_army)
                 prov["levies_current"] = 0
                 raised_count += 1
                 total_men += available
         
         if raised_count > 0:
-            self.logs.append(f"Mobilized all realm levies: {total_men:,} men in {raised_count} hosts!")
+            self.logs.append(f"Mobilized all realm levies: {total_men:,} men in {raised_count} hosts! (Mustering for 30 days)")
         else:
             self.logs.append("All available levies are already raised.")
 
@@ -512,7 +570,7 @@ class GameState:
         self.logs.append(f"Rally orders issued! {len(player_armies)} hosts marching to {target_name}.")
 
     def merge_armies_in_province(self, province_id, owner_id):
-        armies_here = [a for a in self.armies if a.province == province_id and a.owner == owner_id and not a.is_moving]
+        armies_here = [a for a in self.armies if a.province == province_id and a.owner == owner_id and not a.is_moving and not a.is_demobilizing and not a.is_mustering]
         if len(armies_here) <= 1:
             return
 
@@ -543,16 +601,66 @@ class GameState:
     def disband_army(self, army):
         if not army:
             return
-        prov = PROVINCES.get(army.province)
-        if prov and prov["owner"] == army.owner:
-            # Return surviving men to province
-            prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + army.troops)
-            self.logs.append(f"Disbanded {army.name}. {army.troops:,} men returned home.")
+        if army.in_battle:
+            self.logs.append(f"{army.name} is locked in combat and cannot disband!")
+            return
+
+        # If mustering, cancel muster and refund troops immediately
+        if army.is_mustering:
+            prov = PROVINCES.get(army.flag_origin)
+            if prov:
+                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + army.troops)
+            self.logs.append(f"Muster cancelled for {army.name}. {army.troops:,} men returned to garrison.")
             if army.id == self.selected_army_id:
                 self.selected_army_id = None
-            self.armies.remove(army)
-        else:
-            self.logs.append("Cannot disband an army while inside enemy territory!")
+            if army in self.armies:
+                self.armies.remove(army)
+            return
+
+        # If merged host, split back into individual provincial contingents!
+        contingents_to_disband = []
+        if army.sub_flags:
+            n_contingents = len(army.sub_flags) + 1
+            share = army.troops // n_contingents
+            dom_troops = army.troops - (share * len(army.sub_flags))
+            army.troops = dom_troops
+            
+            for sf in army.sub_flags:
+                new_id = f"army_{self.army_id_counter}"
+                self.army_id_counter += 1
+                p_short = PROVINCES[sf]["name"].split()[0]
+                sf_host = Army(new_id, army.owner, army.province, share, f"{p_short} Fyrd", flag_origin=sf)
+                self.armies.append(sf_host)
+                contingents_to_disband.append(sf_host)
+                
+            army.sub_flags = []
+            army.name = f"{PROVINCES[army.flag_origin]['name'].split()[0]} Fyrd"
+        
+        contingents_to_disband.append(army)
+
+        for host in contingents_to_disband:
+            if host.province == host.flag_origin:
+                # Already at home province: instant disband
+                prov = PROVINCES.get(host.flag_origin)
+                if prov:
+                    prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + host.troops)
+                self.logs.append(f"{host.name} disbanded at home in {PROVINCES[host.flag_origin]['name']}. {host.troops:,} men returned to garrison.")
+                if host.id == self.selected_army_id:
+                    self.selected_army_id = None
+                if host in self.armies:
+                    self.armies.remove(host)
+            else:
+                # Away from home: set demobilizing and march towards home province
+                host.is_demobilizing = True
+                host.is_sieging = False
+                host.is_mustering = False
+                path = find_shortest_path(host.province, host.flag_origin)
+                if path and len(path) > 1:
+                    host.path = path[1:]
+                    host.move_progress = 0.0
+                    self.logs.append(f"{host.name} demobilizing! ({host.troops:,} men marching home to {PROVINCES[host.flag_origin]['name']}...)")
+                else:
+                    self.logs.append(f"Demobilizing order: {host.name} seeking route home to {PROVINCES[host.flag_origin]['name']}.")
 
     def order_army_march(self, army, target_province_id):
         if not army:
@@ -560,6 +668,12 @@ class GameState:
         if army.in_battle:
             self.logs.append(f"{army.name} is locked in combat and cannot retreat!")
             return
+        if army.is_mustering:
+            self.logs.append(f"{army.name} is still mustering ({army.muster_days} days left) and cannot march!")
+            return
+        if army.is_demobilizing:
+            army.is_demobilizing = False
+            self.logs.append(f"March order issued! {army.name} cancelled demobilization and returned to war.")
         if army.province == target_province_id:
             return
         
@@ -587,6 +701,14 @@ class GameState:
                 self.month = 1
                 self.year += 1
                 self.yearly_tick()
+
+        # Update Muster Preparation Days
+        for a in list(self.armies):
+            if a.is_mustering:
+                a.muster_days -= 1
+                if a.muster_days <= 0:
+                    a.is_mustering = False
+                    self.logs.append(f"🎺 {a.name} is fully assembled and battle-ready!")
 
         # Update Army Movements & Combat
         self.update_armies()
@@ -657,17 +779,28 @@ class GameState:
                     blockers = [e for e in self.armies
                                 if e.province == a.province and e.owner == enemy_owner]
                     if blockers:
-                        # Stop marching — battle logic picks it up next tick
                         a.path = []
                         a.move_progress = 0.0
+                        if a.is_demobilizing:
+                            a.is_demobilizing = False
+                            self.logs.append(f"Ambush! {a.name} was attacked while returning home!")
 
-                    # If reached final destination with no blocker, auto-merge
+                    # If reached final destination with no blocker:
                     elif not a.path:
-                        self.merge_armies_in_province(a.province, a.owner)
+                        if a.is_demobilizing and a.province == a.flag_origin:
+                            prov = PROVINCES.get(a.flag_origin)
+                            if prov:
+                                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + a.troops)
+                            self.logs.append(f"{a.name} arrived safely home in {prov['name']}. {a.troops:,} men demobilized to garrison.")
+                            if a.id == self.selected_army_id:
+                                self.selected_army_id = None
+                            if a in self.armies:
+                                self.armies.remove(a)
+                        elif not a.is_demobilizing:
+                            self.merge_armies_in_province(a.province, a.owner)
 
         # 2. Check Battles (Opposing armies in same province)
         for pid in list(PROVINCES.keys()):
-            # Merge both sides first, THEN get fresh references
             self.merge_armies_in_province(pid, self.player_id)
             self.merge_armies_in_province(pid, self.enemy_id)
 
@@ -675,7 +808,6 @@ class GameState:
             p2_list = [a for a in self.armies if a.province == pid and a.owner == self.enemy_id and not a.is_moving]
 
             if not (p1_list and p2_list):
-                # No clash – make sure in_battle is cleared for any lone survivors
                 for a in p1_list + p2_list:
                     a.in_battle = False
                 continue
@@ -686,6 +818,8 @@ class GameState:
             a2.in_battle  = True
             a1.is_sieging = False
             a2.is_sieging = False
+            a1.is_demobilizing = False
+            a2.is_demobilizing = False
 
             # One combat round per game-tick
             alfred_martial  = self.player["stats"]["martial"]
@@ -698,7 +832,6 @@ class GameState:
             a2.troops = max(0, a2.troops - dmg_to_a2)
 
             if a1.troops <= 0 and a2.troops <= 0:
-                # Mutual annihilation
                 self.logs.append(f"Both armies annihilated at {PROVINCES[pid]['name']}!")
                 if a1 in self.armies: self.armies.remove(a1)
                 if a2 in self.armies: self.armies.remove(a2)
@@ -710,35 +843,95 @@ class GameState:
                 self.logs.append(f"Glorious Victory! Destroyed the Viking host at {PROVINCES[pid]['name']}!")
                 if a2 in self.armies: self.armies.remove(a2)
                 a1.in_battle = False
-            # else: both alive → battle continues next tick (in_battle stays True, blocks movement)
 
-        # 3. Check Sieges (Army in enemy province with no defending army)
+        # 3. Check Sieges (City-by-City Siege in Enemy or Contested Province)
         for a in list(self.armies):
             if a not in self.armies:
                 continue
+            if a.is_moving or a.in_battle or a.is_mustering or a.is_demobilizing:
+                continue
+
             prov = PROVINCES[a.province]
-            if prov["owner"] != a.owner and not a.is_moving and not a.in_battle:
-                # Check if there is an opposing army defending
-                defenders = [enemy for enemy in self.armies if enemy.province == a.province and enemy.owner != a.owner]
-                if not defenders:
-                    a.is_sieging = True
-                    # Siege progress speed based on troop size
-                    rate = max(4, int(a.troops / 250))
-                    a.siege_progress += rate
-                    
-                    if a.siege_progress >= 100:
-                        # Province conquered!
-                        prov["owner"] = a.owner
-                        prov["color"] = list(COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW)
-                        a.is_sieging = False
-                        a.siege_progress = 0
+            defenders = [enemy for enemy in self.armies if enemy.province == a.province and enemy.owner != a.owner]
+            if defenders:
+                a.is_sieging = False
+                continue
+
+            siegeable = get_siegeable_holdings(self, a.province, a.owner)
+            is_enemy_prov = (prov["owner"] != a.owner)
+
+            if siegeable:
+                # Find current target or set to first available holding
+                h_target_name, h_tiles = siegeable[0]
+                a.is_sieging = True
+                a.siege_target_name = h_target_name
+                a.target_city = h_tiles[0]
+
+                # Siege rate scaled by troops
+                rate = max(4, int(a.troops / 250))
+                a.siege_progress += rate
+
+                if a.siege_progress >= 100:
+                    a.siege_progress = 0
+                    if is_enemy_prov:
+                        # Occupy this holding!
+                        for t in h_tiles:
+                            self.settlements[t]["occupied_by"] = a.owner
                         
-                        if a.owner == self.player_id:
-                            self.player["prestige"] += 100
-                            self.logs.append(f"Victory! {prov['name']} has been conquered by Wessex!")
+                        remaining = get_siegeable_holdings(self, a.province, a.owner)
+                        if remaining:
+                            self.logs.append(f"Holding Fallen! {a.name} captured {h_target_name}. {prov['name']} is now contested!")
+                            a.target_city = remaining[0][1][0]
+                            a.siege_target_name = remaining[0][0]
                         else:
-                            self.enemy["prestige"] += 100
-                            self.logs.append(f"Disaster! {prov['name']} has fallen to the Danelaw!")
+                            # ALL holdings captured! Whole province flips!
+                            prov["owner"] = a.owner
+                            prov["color"] = list(COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW)
+                            a.is_sieging = False
+                            a.target_city = None
+                            a.siege_target_name = None
+                            for t in [coord for coord, s in self.settlements.items() if s.get("province") == a.province]:
+                                self.settlements[t]["occupied_by"] = None
+                            
+                            if a.owner == self.player_id:
+                                self.player["prestige"] += 100
+                                self.logs.append(f"TOTAL VICTORY! All boroughs in {prov['name']} have fallen! Province conquered by Wessex!")
+                            else:
+                                self.enemy["prestige"] += 100
+                                self.logs.append(f"DISASTER! All boroughs in {prov['name']} have fallen to the Danelaw!")
+                    else:
+                        # Friendly liberation of occupied holding!
+                        for t in h_tiles:
+                            self.settlements[t]["occupied_by"] = None
+                        self.logs.append(f"Liberated! {a.name} reclaimed {h_target_name} for {prov['name']}!")
+                        remaining = get_siegeable_holdings(self, a.province, a.owner)
+                        if remaining:
+                            a.target_city = remaining[0][1][0]
+                            a.siege_target_name = remaining[0][0]
+                        else:
+                            a.is_sieging = False
+                            a.target_city = None
+                            a.siege_target_name = None
+                            self.logs.append(f"Order Restored! {prov['name']} is fully liberated and no longer contested.")
+            elif is_enemy_prov:
+                # Enemy province with NO settlements: direct capture
+                a.is_sieging = True
+                rate = max(4, int(a.troops / 250))
+                a.siege_progress += rate
+                if a.siege_progress >= 100:
+                    prov["owner"] = a.owner
+                    prov["color"] = list(COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW)
+                    a.is_sieging = False
+                    a.siege_progress = 0
+                    if a.owner == self.player_id:
+                        self.player["prestige"] += 100
+                        self.logs.append(f"Victory! {prov['name']} has been conquered by Wessex!")
+                    else:
+                        self.enemy["prestige"] += 100
+                        self.logs.append(f"Disaster! {prov['name']} has fallen to the Danelaw!")
+            else:
+                a.is_sieging = False
+                a.siege_progress = 0
 
     # ---------------------------------------------------------
     # AI (Halfdan Ragnarsson)
@@ -748,19 +941,21 @@ class GameState:
         if not danelaw_provs:
             return
 
-        danelaw_armies = [a for a in self.armies if a.owner == self.enemy_id]
+        danelaw_armies = [a for a in self.armies if a.owner == self.enemy_id and not a.is_mustering]
         
         # 1. Raise Levies if none active
-        if not danelaw_armies:
+        if not danelaw_armies and not any(a.owner == self.enemy_id for a in self.armies):
             for pid in danelaw_provs:
                 p = PROVINCES[pid]
                 if p["levies_current"] > 500:
                     army_id = f"army_{self.army_id_counter}"
                     self.army_id_counter += 1
                     host = Army(army_id, self.enemy_id, pid, p["levies_current"], "Viking Warband")
+                    host.is_mustering = True
+                    host.muster_days = 20
                     self.armies.append(host)
                     p["levies_current"] = 0
-            self.logs.append("Ravens squawk! The Danelaw has summoned their Viking hosts!")
+            self.logs.append("Ravens squawk! The Danelaw has summoned their Viking hosts (Mustering)!")
             return
 
         # 2. Rally Viking armies into Jorvik or a border province
@@ -1278,11 +1473,14 @@ def run_game():
                     
                     status_str = "Idle"
                     if a.in_battle: status_str = "⚔ IN BATTLE!"
-                    elif a.is_sieging: status_str = f"Besieging ({a.siege_progress}%)"
+                    elif a.is_mustering: status_str = f"⏳ Mustering ({a.muster_days}d)"
+                    elif a.is_demobilizing: status_str = f"🏠 Returning to {PROVINCES[a.flag_origin]['name'].split()[0]}"
+                    elif a.is_sieging: status_str = f"Besieging {a.siege_target_name or 'Holding'} ({a.siege_progress}%)"
                     elif a.is_moving: status_str = f"Marching to {PROVINCES[a.next_province]['name'].split()[0]}"
                     else: status_str = f"Stationed in {PROVINCES[a.province]['name'].split()[0]}"
 
-                    screen.blit(font_xs.render(status_str, True, COLOR_GOLD if a.in_battle else COLOR_TEXT_MUTED), (35, ay + 24))
+                    st_color = COLOR_GOLD if a.in_battle else ((255, 180, 50) if a.is_mustering else ((150, 200, 255) if a.is_demobilizing else COLOR_TEXT_MUTED))
+                    screen.blit(font_xs.render(status_str, True, st_color), (35, ay + 24))
 
                     if mouse_clicked and b_hover_a:
                         state.selected_army_id = a.id
@@ -1430,6 +1628,15 @@ def run_game():
                 # Draw full tile (no 1-px gap → seamless within province)
                 pygame.draw.rect(screen, col, (cell_x, cell_y, tile_w, tile_h))
 
+                # Contested Province Hatching (Diagonal Striped Hazard Pattern ala CK2)
+                is_contested, occupier = is_province_contested(state, prov_id)
+                if is_contested:
+                    stripe_col = (220, 50, 50) if occupier == state.player_id else (45, 65, 95)
+                    stripe_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
+                    for off in range(-tile_h, tile_w + tile_h, 8):
+                        pygame.draw.line(stripe_surf, (*stripe_col, 140), (off, 0), (off + tile_h, tile_h), 2)
+                    screen.blit(stripe_surf, (cell_x, cell_y))
+
                 # Subtle inner highlight (top/left edges only within same province)
                 pygame.draw.line(screen,
                     (min(255, col[0]+18), min(255, col[1]+18), min(255, col[2]+18)),
@@ -1570,6 +1777,15 @@ def run_game():
             pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty + 2, 4, 3))
             # Arch gate
             pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 2, ty + th - 5, 4, 5))
+
+            # If holding is occupied by enemy, display conqueror's miniature banner on keep turret!
+            if sdata.get("occupied_by"):
+                occ_id = sdata["occupied_by"]
+                occ_key = "wessex" if occ_id == state.player_id else "jorvik"
+                occ_flag = prov_flag_cache.get(occ_key)
+                if occ_flag:
+                    mini_f = pygame.transform.smoothscale(occ_flag, (12, 14))
+                    screen.blit(mini_f, (sx + tile_w - 14, sy - 8))
 
             # Click city to inspect settlement details!
             if mouse_clicked and is_city_hover and not state.build_mode:
@@ -1779,8 +1995,17 @@ def run_game():
                 txt_badge = f"⚔ {army.troops:,}"
                 p_bg = (185, 35, 35)
                 p_border = (255, 220, 50)
+            elif army.is_mustering:
+                txt_badge = f"⏳ {army.muster_days}d ({army.troops:,})"
+                p_bg = (65, 52, 20)
+                p_border = COLOR_GOLD
+            elif army.is_demobilizing:
+                txt_badge = f"🏠 HOME ({army.troops:,})"
+                p_bg = (30, 48, 70)
+                p_border = (120, 180, 240)
             elif army.is_sieging:
-                txt_badge = f"⚑ {army.troops:,}"
+                t_str = army.siege_target_name.split()[0] if army.siege_target_name else "City"
+                txt_badge = f"⚑ {army.siege_progress}% {t_str}"
                 p_bg = (155, 85, 25)
                 p_border = COLOR_GOLD
             elif is_sel_army:
@@ -1893,8 +2118,14 @@ def run_game():
             
             if sel_army.in_battle:
                 screen.blit(font_md.render("STATUS: ⚔ IN PITCHED BATTLE!", True, COLOR_TEXT_RED), (880, 202))
+            elif sel_army.is_mustering:
+                screen.blit(font_md.render(f"STATUS: ⏳ MUSTERING ({sel_army.muster_days}d left)", True, COLOR_GOLD), (880, 202))
+            elif sel_army.is_demobilizing:
+                home_p = PROVINCES[sel_army.flag_origin]["name"].split()[0]
+                screen.blit(font_md.render(f"STATUS: 🏠 Returning Home to {home_p}", True, (140, 200, 255)), (880, 202))
             elif sel_army.is_sieging:
-                screen.blit(font_md.render(f"STATUS: 🏰 Besieging ({sel_army.siege_progress}%)", True, COLOR_GOLD), (880, 202))
+                t_lbl = sel_army.siege_target_name or 'Holding'
+                screen.blit(font_md.render(f"STATUS: 🏰 Besieging {t_lbl} ({sel_army.siege_progress}%)", True, COLOR_GOLD), (880, 202))
             elif sel_army.is_moving:
                 screen.blit(font_sm.render(f"Marching to: {PROVINCES[sel_army.next_province]['name']} ({int(sel_army.move_progress)}%)", True, COLOR_TEXT_WHITE), (880, 202))
             else:
@@ -1922,14 +2153,33 @@ def run_game():
                 if mouse_clicked and b_m_hover:
                     state.merge_armies_in_province(sel_army.province, state.player_id)
 
-            # Disband Button
-            dis_btn = pygame.Rect(880, 435, 290, 40)
-            b_d_hover = dis_btn.collidepoint(mouse_pos)
-            pygame.draw.rect(screen, (80, 35, 35) if b_d_hover else (60, 28, 28), dis_btn, border_radius=6)
-            pygame.draw.rect(screen, COLOR_TEXT_RED, dis_btn, 1, border_radius=6)
-            screen.blit(font_md.render("DISBAND THIS HOST", True, (255, 220, 220)), (930, 444))
-            if mouse_clicked and b_d_hover:
-                state.disband_army(sel_army)
+            # Disband / Cancel Muster / Cancel Return Button
+            if sel_army.is_mustering:
+                dis_btn = pygame.Rect(880, 435, 290, 40)
+                b_d_hover = dis_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (90, 40, 40) if b_d_hover else (70, 30, 30), dis_btn, border_radius=6)
+                pygame.draw.rect(screen, (240, 90, 90), dis_btn, 1, border_radius=6)
+                screen.blit(font_md.render("CANCEL MUSTER (Refund Men)", True, (255, 220, 220)), (915, 444))
+                if mouse_clicked and b_d_hover:
+                    state.disband_army(sel_army)
+            elif sel_army.is_demobilizing:
+                dis_btn = pygame.Rect(880, 435, 290, 40)
+                b_d_hover = dis_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (40, 90, 140) if b_d_hover else (30, 65, 105), dis_btn, border_radius=6)
+                pygame.draw.rect(screen, (80, 160, 240), dis_btn, 1, border_radius=6)
+                screen.blit(font_md.render("CANCEL DISBAND (Resume War)", True, COLOR_TEXT_WHITE), (905, 444))
+                if mouse_clicked and b_d_hover:
+                    sel_army.is_demobilizing = False
+                    sel_army.path = []
+                    state.logs.append(f"{sel_army.name} cancelled return march and is standing ready.")
+            else:
+                dis_btn = pygame.Rect(880, 435, 290, 40)
+                b_d_hover = dis_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (80, 35, 35) if b_d_hover else (60, 28, 28), dis_btn, border_radius=6)
+                pygame.draw.rect(screen, COLOR_TEXT_RED, dis_btn, 1, border_radius=6)
+                screen.blit(font_md.render("ORDER DISBAND (Return Home)", True, (255, 220, 220)), (905, 444))
+                if mouse_clicked and b_d_hover:
+                    state.disband_army(sel_army)
 
             # Deselect Army Button
             desel_btn = pygame.Rect(880, 485, 290, 36)
