@@ -604,6 +604,33 @@ def run_game():
     for pid, (sx, sy, count) in prov_tile_sum.items():
         province_anchors[pid] = (sx // count, sy // count)
 
+    # Initialize default capital settlement in each province (1 guaranteed town on 2 adjacent tiles)
+    prov_tile_list = {}
+    for (c, r), pid in cell_to_prov.items():
+        prov_tile_list.setdefault(pid, []).append((c, r))
+
+    for pid, tiles in prov_tile_list.items():
+        # Find 2 horizontally adjacent or vertically adjacent tiles inside province
+        tile_set = set(tiles)
+        placed = False
+        # Try horizontal
+        for (c, r) in tiles:
+            if (c + 1, r) in tile_set:
+                pname = PROVINCES[pid]["name"].split()[0]
+                state.settlements[(c, r)] = {"province": pid, "type": "town", "name": f"{pname} Castle"}
+                state.settlements[(c + 1, r)] = {"province": pid, "type": "town", "name": f"{pname} Castle"}
+                placed = True
+                break
+        if not placed:
+            # Try vertical
+            for (c, r) in tiles:
+                if (c, r + 1) in tile_set:
+                    pname = PROVINCES[pid]["name"].split()[0]
+                    state.settlements[(c, r)] = {"province": pid, "type": "town", "name": f"{pname} Castle"}
+                    state.settlements[(c, r + 1)] = {"province": pid, "type": "town", "name": f"{pname} Castle"}
+                    placed = True
+                    break
+
     # Build reverse lookup: pixel -> province (for accurate click detection)
     # cell_to_prov already handles this via tile grid
 
@@ -997,12 +1024,26 @@ def run_game():
         for (sc, sr), sdata in state.settlements.items():
             sx = map_origin_x + (sc * tile_w)
             sy = map_origin_y + 45 + (sr * tile_h)
-            # Small settlement foundation icon
-            pygame.draw.rect(screen, (40, 45, 55), (sx + 3, sy + 3, tile_w - 6, tile_h - 6), border_radius=3)
-            pygame.draw.rect(screen, COLOR_GOLD, (sx + 3, sy + 3, tile_w - 6, tile_h - 6), 1, border_radius=3)
-            # City Icon / Letter
-            c_txt = font_xs.render("🏰", True, COLOR_GOLD)
-            screen.blit(c_txt, (sx + 6, sy + 4))
+            
+            # City Foundation Block with Stone Walls
+            base_rect = pygame.Rect(sx + 2, sy + 2, tile_w - 4, tile_h - 4)
+            pygame.draw.rect(screen, (38, 42, 54), base_rect, border_radius=4)
+            pygame.draw.rect(screen, COLOR_GOLD, base_rect, 1, border_radius=4)
+            
+            # Castle Tower graphic drawn using geometric shapes (Clear & sharp, no broken font glyphs)
+            # Two battlements on top
+            tw, th = tile_w - 8, tile_h - 8
+            tx, ty = sx + 4, sy + 4
+            # Keep wall
+            pygame.draw.rect(screen, (85, 95, 115), (tx + 2, ty + 4, tw - 4, th - 4))
+            # Left turret
+            pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty + 1, 4, 6))
+            # Right turret
+            pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 5, ty + 1, 4, 6))
+            # Center battlements
+            pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty + 2, 4, 3))
+            # Arch gate
+            pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 2, ty + th - 5, 4, 5))
 
         # -----------------------------------------------------------
         # PASS 4: Build Mode Hover & Placement Ghost
@@ -1024,7 +1065,7 @@ def run_game():
             is_valid = True
             if prov_obj["owner"] != state.player_id:
                 is_valid = False
-            elif state.player["gold"] < 100:
+            elif state.player["gold"] < 1000:
                 is_valid = False
             else:
                 for tc, tr in target_tiles:
@@ -1036,7 +1077,7 @@ def run_game():
                         break
 
             # Draw Ghost Tiles
-            ghost_col = (50, 220, 80, 120) if is_valid else (220, 50, 50, 120)
+            ghost_col = (50, 220, 80, 140) if is_valid else (220, 50, 50, 140)
             border_c = (80, 255, 110) if is_valid else (255, 80, 80)
             for tc, tr in target_tiles:
                 gx = map_origin_x + (tc * tile_w)
@@ -1048,17 +1089,17 @@ def run_game():
 
             # Left click to place
             if mouse_clicked and is_valid:
-                state.player["gold"] -= 100
-                prov_obj["tax"] += 6
-                prov_obj["levies_max"] += 300
-                prov_obj["levies_current"] += 300
+                state.player["gold"] -= 1000
+                prov_obj["tax"] += 10
+                prov_obj["levies_max"] += 500
+                prov_obj["levies_current"] += 500
                 for tc, tr in target_tiles:
                     state.settlements[(tc, tr)] = {
                         "province": state.selected_province,
                         "type": "town",
                         "name": f"{prov_obj['name'].split()[0]} Burgh"
                     }
-                state.logs.append(f"Constructed new Town Burgh in {prov_obj['name']}! (+6 Tax, +300 Levies)")
+                state.logs.append(f"Founded Grand City in {prov_obj['name']} (-1000g, +10 Tax, +500 Levies)!")
                 state.build_mode = False
 
 
@@ -1339,49 +1380,34 @@ def run_game():
                     state.raise_province_levy(state.selected_province)
 
                 # 2. Rally All Armies Here Button
-                rally_btn = pygame.Rect(880, 455, 290, 40)
+                rally_btn = pygame.Rect(880, 455, 290, 42)
                 b_rl_hover = rally_btn.collidepoint(mouse_pos)
                 pygame.draw.rect(screen, (35, 65, 110) if b_rl_hover else (25, 48, 85), rally_btn, border_radius=6)
                 pygame.draw.rect(screen, (70, 130, 220), rally_btn, 1, border_radius=6)
-                screen.blit(font_md.render("RALLY ALL ARMIES HERE (M)", True, COLOR_TEXT_WHITE), (895, 464))
+                screen.blit(font_md.render("RALLY ALL ARMIES HERE (M)", True, COLOR_TEXT_WHITE), (895, 465))
                 if mouse_clicked and b_rl_hover:
                     state.rally_all_armies_to(state.selected_province)
 
-                # 3. Develop Lands Button
-                dev_btn = pygame.Rect(880, 505, 290, 36)
-                b_dv_hover = dev_btn.collidepoint(mouse_pos)
-                pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_dv_hover else COLOR_BUTTON_NORMAL, dev_btn, border_radius=6)
-                pygame.draw.rect(screen, COLOR_PANEL_BORDER, dev_btn, 1, border_radius=6)
-                screen.blit(font_sm.render("Develop Lands (-50 Gold, +4 Tax, +250 Levies)", True, COLOR_GOLD), (888, 513))
-                if mouse_clicked and b_dv_hover:
-                    if state.player["gold"] >= 50:
-                        state.player["gold"] -= 50
-                        sel_prov["tax"] += 4
-                        sel_prov["levies_max"] += 250
-                        state.logs.append(f"Developed lands in {sel_prov['name']}!")
-                    else:
-                        state.logs.append("Need 50 Gold to develop lands!")
-
-                # 4. BUILD SETTLEMENT BUTTON (2 Tiles, Rotatable with T)
-                bld_btn = pygame.Rect(880, 550, 290, 42)
+                # 3. BUILD CITY BUTTON (2 Tiles, Rotatable with T, 1000 Gold)
+                bld_btn = pygame.Rect(880, 510, 290, 44)
                 b_bld_hover = bld_btn.collidepoint(mouse_pos)
                 b_bld_active = state.build_mode
-                bld_bg = (140, 80, 20) if b_bld_active else ((85, 50, 15) if b_bld_hover else (60, 35, 10))
+                bld_bg = (150, 75, 15) if b_bld_active else ((85, 48, 12) if b_bld_hover else (55, 32, 10))
                 pygame.draw.rect(screen, bld_bg, bld_btn, border_radius=6)
-                pygame.draw.rect(screen, COLOR_GOLD if b_bld_active else (200, 140, 40), bld_btn, 2 if b_bld_active else 1, border_radius=6)
+                pygame.draw.rect(screen, COLOR_GOLD if b_bld_active else (210, 150, 40), bld_btn, 2 if b_bld_active else 1, border_radius=6)
                 
-                bld_lbl = "CANCEL BUILD MODE (ESC)" if b_bld_active else "BUILD CITY (2 TILES - 100g)"
-                screen.blit(font_md.render(bld_lbl, True, COLOR_GOLD if b_bld_active else COLOR_TEXT_WHITE), (895, 559))
+                bld_lbl = "CANCEL BUILD MODE (ESC)" if b_bld_active else "FOUND CITY (2 TILES - 1,000g)"
+                screen.blit(font_md.render(bld_lbl, True, COLOR_GOLD if b_bld_active else COLOR_TEXT_WHITE), (890, 521))
                 if mouse_clicked and b_bld_hover:
                     state.build_mode = not state.build_mode
 
                 if state.build_mode:
-                    hint1 = font_xs.render("• Hover mouse over 2 adjacent tiles inside province.", True, COLOR_TEXT_WHITE)
+                    hint1 = font_xs.render("• Hover 2 adjacent tiles inside this province.", True, COLOR_TEXT_WHITE)
                     hint2 = font_xs.render("• Press 'T' to rotate orientation (Horiz / Vert).", True, COLOR_GOLD)
-                    hint3 = font_xs.render("• Click to place settlement when green.", True, COLOR_TEXT_GREEN)
-                    screen.blit(hint1, (880, 600))
-                    screen.blit(hint2, (880, 618))
-                    screen.blit(hint3, (880, 636))
+                    hint3 = font_xs.render("• Requires 1,000 Gold (+10 Tax, +500 Max Levies).", True, COLOR_TEXT_GREEN)
+                    screen.blit(hint1, (880, 565))
+                    screen.blit(hint2, (880, 583))
+                    screen.blit(hint3, (880, 601))
             else:
                 # Enemy Province Instructions
                 screen.blit(font_md.render("Viking Controlled Territory", True, COLOR_TEXT_RED), (880, 415))
