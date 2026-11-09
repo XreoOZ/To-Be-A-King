@@ -1563,7 +1563,7 @@ def run_game():
                 cy = int(cy + (next_pos[1] - base_pos[1]) * pct)
 
             is_player = (army.owner == state.player_id)
-            is_sel_army = (army.id == state.selected_army_id)
+            is_sel_army = (army.id == state.selected_army_id or army.id in state.selected_army_ids)
 
             # RTS Golden Ground Selection Ring
             if is_sel_army:
@@ -1980,22 +1980,7 @@ def run_game():
                 # Bright green border
                 pygame.draw.rect(screen, (100, 255, 120), pygame.Rect(bx, by, bw, bh), 1)
 
-        # Highlight selected army badges with green ring — EXACT same pos calc as badge draw
-        for aid in state.selected_army_ids:
-            sel_a = next((a for a in state.armies if a.id == aid), None)
-            if sel_a:
-                base_pos = province_anchors.get(sel_a.province)
-                if not base_pos:
-                    continue
-                bx, by = base_pos[0] - 15, base_pos[1] - 25
-                if sel_a.is_moving and sel_a.next_province:
-                    next_pos = province_anchors.get(sel_a.next_province, base_pos)
-                    pct = sel_a.move_progress / 100.0
-                    bx = int(bx + (next_pos[0] - base_pos[0]) * pct)
-                    by = int(by + (next_pos[1] - base_pos[1]) * pct)
-                # Outline matches badge size exactly (104×28)
-                pygame.draw.rect(screen, (100, 255, 120),
-                                 pygame.Rect(bx - 2, by - 2, 108, 32), 2, border_radius=5)
+
 
         # ---------------------------------------------------------
         # 5. VASSAL AUTONOMOUS BUILD PETITION POPUP MODAL
