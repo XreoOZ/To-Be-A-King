@@ -378,6 +378,9 @@ class GameState:
     def order_army_march(self, army, target_province_id):
         if not army:
             return
+        if army.in_battle:
+            self.logs.append(f"{army.name} is locked in combat and cannot retreat!")
+            return
         if army.province == target_province_id:
             return
         
@@ -779,19 +782,24 @@ def run_game():
                         state.selected_army_ids = []
                         state.selected_army_id  = None
 
-        # Right-click march orders for box-selected armies
-        if right_clicked and state.selected_army_ids:
-            # Accurate province detection: reverse-lookup tile under cursor
-            mx, my = mouse_pos
-            target_province = None
-            # Convert screen pos -> grid cell -> province
-            col_idx = (mx - map_origin_x) // tile_w
-            row_idx = (my - (map_origin_y + 45)) // tile_h
-            target_province = cell_to_prov.get((col_idx, row_idx))
-            if target_province:
-                for aid in state.selected_army_ids:
-                    army_obj = next((a for a in state.armies if a.id == aid), None)
-                    if army_obj:
+        # Right-click march orders for selected armies (box-select or single selected army)
+        if right_clicked:
+            armies_to_order = []
+            if state.selected_army_ids:
+                armies_to_order = [a for a in state.armies if a.id in state.selected_army_ids and a.owner == state.player_id]
+            elif state.selected_army_id:
+                sel_single = next((a for a in state.armies if a.id == state.selected_army_id and a.owner == state.player_id), None)
+                if sel_single:
+                    armies_to_order = [sel_single]
+
+            if armies_to_order:
+                # Accurate province detection: reverse-lookup tile under cursor
+                mx, my = mouse_pos
+                col_idx = (mx - map_origin_x) // tile_w
+                row_idx = (my - (map_origin_y + 45)) // tile_h
+                target_province = cell_to_prov.get((col_idx, row_idx))
+                if target_province:
+                    for army_obj in armies_to_order:
                         state.order_army_march(army_obj, target_province)
         # Time advancement
         if state.speed > 0:
@@ -1058,10 +1066,11 @@ def run_game():
 
                 if mouse_clicked and is_hovered:
                     if not state.build_mode:
-                        curr_army = state.get_selected_army()
-                        if curr_army and curr_army.owner == state.player_id and prov_id != curr_army.province:
-                            state.order_army_march(curr_army, prov_id)
+                        # CK2 style: Left-clicking a province inspects that province and unselects armies!
                         state.selected_province = prov_id
+                        state.selected_army_id = None
+                        state.selected_army_ids = []
+                        state.selected_settlement = None
 
         # -----------------------------------------------------------
         # PASS 2: Draw borders ONLY on edges between different PROVINCES
