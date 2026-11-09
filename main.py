@@ -446,41 +446,51 @@ class GameState:
                         self.merge_armies_in_province(a.province, a.owner)
 
         # 2. Check Battles (Opposing armies in same province)
-        for pid in PROVINCES.keys():
-            armies_p1 = [a for a in self.armies if a.province == pid and a.owner == self.player_id and not a.is_moving]
-            armies_p2 = [a for a in self.armies if a.province == pid and a.owner == self.enemy_id and not a.is_moving]
+        for pid in list(PROVINCES.keys()):
+            # Merge both sides first, THEN get fresh references
+            self.merge_armies_in_province(pid, self.player_id)
+            self.merge_armies_in_province(pid, self.enemy_id)
 
-            if armies_p1 and armies_p2:
-                # Merge multiple armies on each side first
-                self.merge_armies_in_province(pid, self.player_id)
-                self.merge_armies_in_province(pid, self.enemy_id)
-                
-                # Fetch leading armies
-                a1 = armies_p1[0]
-                a2 = armies_p2[0]
-                a1.in_battle = True
-                a2.in_battle = True
-                a1.is_sieging = False
-                a2.is_sieging = False
+            p1_list = [a for a in self.armies if a.province == pid and a.owner == self.player_id and not a.is_moving]
+            p2_list = [a for a in self.armies if a.province == pid and a.owner == self.enemy_id and not a.is_moving]
 
-                # Combat Round
-                alfred_martial = self.player["stats"]["martial"]
-                halfdan_martial = self.enemy["stats"]["martial"]
+            if not (p1_list and p2_list):
+                # No clash – make sure in_battle is cleared for any lone survivors
+                for a in p1_list + p2_list:
+                    a.in_battle = False
+                continue
 
-                dmg_to_a2 = int(a1.troops * 0.035 * (1 + alfred_martial * 0.02)) + random.randint(10, 30)
-                dmg_to_a1 = int(a2.troops * 0.035 * (1 + halfdan_martial * 0.02)) + random.randint(10, 30)
+            a1 = p1_list[0]
+            a2 = p2_list[0]
+            a1.in_battle = True
+            a2.in_battle  = True
+            a1.is_sieging = False
+            a2.is_sieging = False
 
-                a1.troops = max(0, a1.troops - dmg_to_a1)
-                a2.troops = max(0, a2.troops - dmg_to_a2)
+            # One combat round per game-tick
+            alfred_martial  = self.player["stats"]["martial"]
+            halfdan_martial = self.enemy["stats"]["martial"]
 
-                if a1.troops <= 0:
-                    self.logs.append(f"Defeat! {a1.name} was wiped out at {PROVINCES[pid]['name']}!")
-                    self.armies.remove(a1)
-                    a2.in_battle = False
-                elif a2.troops <= 0:
-                    self.logs.append(f"Glorious Victory! Destroyed the Viking host at {PROVINCES[pid]['name']}!")
-                    self.armies.remove(a2)
-                    a1.in_battle = False
+            dmg_to_a2 = max(1, int(a1.troops * 0.08 * (1 + alfred_martial * 0.02))  + random.randint(10, 50))
+            dmg_to_a1 = max(1, int(a2.troops * 0.08 * (1 + halfdan_martial * 0.02)) + random.randint(10, 50))
+
+            a1.troops = max(0, a1.troops - dmg_to_a1)
+            a2.troops = max(0, a2.troops - dmg_to_a2)
+
+            if a1.troops <= 0 and a2.troops <= 0:
+                # Mutual annihilation
+                self.logs.append(f"Both armies annihilated at {PROVINCES[pid]['name']}!")
+                if a1 in self.armies: self.armies.remove(a1)
+                if a2 in self.armies: self.armies.remove(a2)
+            elif a1.troops <= 0:
+                self.logs.append(f"Defeat! {a1.name} was wiped out at {PROVINCES[pid]['name']}!")
+                if a1 in self.armies: self.armies.remove(a1)
+                a2.in_battle = False
+            elif a2.troops <= 0:
+                self.logs.append(f"Glorious Victory! Destroyed the Viking host at {PROVINCES[pid]['name']}!")
+                if a2 in self.armies: self.armies.remove(a2)
+                a1.in_battle = False
+            # else: both alive → battle continues next tick (in_battle stays True, blocks movement)
 
         # 3. Check Sieges (Army in enemy province with no defending army)
         for a in list(self.armies):
