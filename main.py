@@ -440,9 +440,18 @@ class GameState:
                 if a.move_progress >= 100.0:
                     a.province = a.path.pop(0)
                     a.move_progress = 0.0
-                    
-                    # If reached final destination, auto merge if friendly army exists
-                    if not a.path:
+
+                    # INTERCEPTION CHECK: if enemy is in this province, stop and fight
+                    enemy_owner = self.enemy_id if a.owner == self.player_id else self.player_id
+                    blockers = [e for e in self.armies
+                                if e.province == a.province and e.owner == enemy_owner]
+                    if blockers:
+                        # Stop marching — battle logic picks it up next tick
+                        a.path = []
+                        a.move_progress = 0.0
+
+                    # If reached final destination with no blocker, auto-merge
+                    elif not a.path:
                         self.merge_armies_in_province(a.province, a.owner)
 
         # 2. Check Battles (Opposing armies in same province)
@@ -1323,18 +1332,22 @@ def run_game():
                 # Bright green border
                 pygame.draw.rect(screen, (100, 255, 120), pygame.Rect(bx, by, bw, bh), 1)
 
-        # Highlight selected army badges with green ring
+        # Highlight selected army badges with green ring — EXACT same pos calc as badge draw
         for aid in state.selected_army_ids:
             sel_a = next((a for a in state.armies if a.id == aid), None)
             if sel_a:
-                ax, ay = province_anchors.get(sel_a.province, (0, 0))
+                base_pos = province_anchors.get(sel_a.province)
+                if not base_pos:
+                    continue
+                bx, by = base_pos[0] - 15, base_pos[1] - 25
                 if sel_a.is_moving and sel_a.next_province:
-                    nxt = province_anchors.get(sel_a.next_province, (ax, ay))
+                    next_pos = province_anchors.get(sel_a.next_province, base_pos)
                     pct = sel_a.move_progress / 100.0
-                    ax = int(ax + (nxt[0] - ax) * pct)
-                    ay = int(ay + (nxt[1] - ay) * pct)
+                    bx = int(bx + (next_pos[0] - base_pos[0]) * pct)
+                    by = int(by + (next_pos[1] - base_pos[1]) * pct)
+                # Outline matches badge size exactly (84×24)
                 pygame.draw.rect(screen, (100, 255, 120),
-                                 pygame.Rect(ax - 43, ay - 26, 86, 26), 2, border_radius=4)
+                                 pygame.Rect(bx - 2, by - 2, 88, 28), 2, border_radius=5)
 
         pygame.display.flip()
 
