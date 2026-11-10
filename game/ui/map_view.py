@@ -732,6 +732,12 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                 pygame.draw.line(screen, COLOR_GOLD, (hx + curr_tile_w - 1, hy + curr_tile_h - 1), (hx + curr_tile_w - 1 - cs, hy + curr_tile_h - 1), 2)
                 pygame.draw.line(screen, COLOR_GOLD, (hx + curr_tile_w - 1, hy + curr_tile_h - 1), (hx + curr_tile_w - 1, hy + curr_tile_h - 1 - cs), 2)
     
+    # Sub-day frame interpolation for buttery-smooth 60 FPS visual movement
+    sub_day = 0.0
+    if getattr(state, "speed", 0) > 0:
+        interval = state.speed_factors.get(state.speed, 500)
+        sub_day = min(1.0, max(0.0, getattr(state, "tick_timer", 0) / float(interval)))
+
     # ---------------------------------------------------------
     # PASS 3.8: Tactical March Path Arrows (Tile-by-Tile)
     # ---------------------------------------------------------
@@ -750,7 +756,9 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
             nc, nr = army.next_tile
             nx = origin_x + (nc * curr_tile_w) + (curr_tile_w // 2)
             ny = origin_y + (nr * curr_tile_h) + (curr_tile_h // 2)
-            pct = army.move_progress / 100.0
+            # Smooth 60 FPS sub-day position interpolation
+            eff_prog = army.move_progress + (sub_day * getattr(army, "move_speed", 100.0))
+            pct = min(1.0, max(0.0, eff_prog / 100.0))
             cur_ax = int(cur_ax + (nx - cur_ax) * pct)
             cur_ay = int(cur_ay + (ny - cur_ay) * pct)
         waypoints.append((cur_ax, cur_ay))
@@ -776,18 +784,21 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     # DRAW ARMIES ON MAP (Waving War Banners & Troop Standard)
     # ---------------------------------------------------------
     anim_ticks = pygame.time.get_ticks()
+
     
     for army in state.armies:
         tc, tr = getattr(army, "tile", get_province_capital_tile(army.province))
         cx = origin_x + (tc * curr_tile_w) + (curr_tile_w // 2)
         cy = origin_y + (tr * curr_tile_h) + (curr_tile_h // 2)
     
-        # If moving, interpolate position smoothly along route
+        # If moving, interpolate position smoothly along route at 60 FPS
         if army.is_moving and getattr(army, "next_tile", None) and not army.in_battle:
             nc, nr = army.next_tile
             nx = origin_x + (nc * curr_tile_w) + (curr_tile_w // 2)
             ny = origin_y + (nr * curr_tile_h) + (curr_tile_h // 2)
-            pct = army.move_progress / 100.0
+            # Smooth 60 FPS sub-day position interpolation
+            eff_prog = army.move_progress + (sub_day * getattr(army, "move_speed", 100.0))
+            pct = min(1.0, max(0.0, eff_prog / 100.0))
             cx = int(cx + (nx - cx) * pct)
             cy = int(cy + (ny - cy) * pct)
     
@@ -950,7 +961,11 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
             n_pos = province_anchors.get(army.courier_next_prov)
             dest_pos = province_anchors.get(army.province)
             if c_pos and n_pos:
-                pct = army.courier_progress / 100.0
+                # 60 FPS continuous sub-day courier gliding
+                from game.config import DAYS_PER_TILE
+                courier_step = 100.0 / max(1.0, float(DAYS_PER_TILE))
+                eff_c_prog = army.courier_progress + (sub_day * courier_step)
+                pct = min(1.0, max(0.0, eff_c_prog / 100.0))
                 mx = int(c_pos[0] + (n_pos[0] - c_pos[0]) * pct)
                 my = int(c_pos[1] + (n_pos[1] - c_pos[1]) * pct)
                 

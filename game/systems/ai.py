@@ -155,60 +155,19 @@ def run_realm_ai(state, ruler_id):
     has_border_threat = len(threatened_borders) > 0
     is_at_peace = (not hostile_armies and not hostile_provs and not has_invasion and not has_border_threat)
 
-    # 3. Official Peacetime & SIAGA (Border Standoff Vigilance)
+    # 3. Peacetime Demobilization: Sovereign realms demobilize when not at war
     is_official_peace = (getattr(state, "war_status", "war") == "peace")
-    if is_official_peace:
-        # Detect neutral foreign forces near realm borders
-        foreign_armies = [a for a in state.armies if a.owner != ruler_id and a.troops > 0]
-        border_standoff_provs = set()
-        total_neutral_border_troops = 0
-
-        for fa in foreign_armies:
-            fa_loc = fa.province
-            for rp in realm_provs:
-                if fa_loc in ADJACENCY.get(rp, []):
-                    border_standoff_provs.add(rp)
-                    total_neutral_border_troops += fa.troops
-
-        if not border_standoff_provs:
-            # Stand Down: No foreign armies at the border. If player disbanded, AI disbands too.
+    if is_official_peace or is_at_peace:
+        # Check if an unauthorized foreign army has actually trespassed into our territory
+        actual_invaders = [a for a in state.armies if a.owner != ruler_id and a.province in realm_provs and a.troops > 0]
+        if not actual_invaders and not hostile_armies:
+            # Complete Peacetime: Demobilize all field hosts! Save treasury upkeep and replenish town garrisons.
             if my_armies:
                 for a in list(my_armies):
                     if not getattr(a, "is_demobilizing", False) and not a.in_battle:
                         state.disband_army(a)
-                state.logs.append(f"🕊 Stand Down: Frontier peaceful. {r_name} demobilizes border guards.")
+                state.logs.append(f"🕊 Stand Down: Peace in the realm. {r_name} demobilizes hosts to preserve treasury.")
             return
-
-        # SIAGA Alert: Foreign forces sighted on border. Mobilize and hold border line ("diam membeku").
-        cooldown = getattr(state, "enemy_raise_cooldown", 0) if ruler_id == state.enemy_id else 0
-        if cooldown <= 0 and (len(my_armies) == 0 or total_my_field < total_neutral_border_troops * 0.8) and unraised_my_levies >= 40:
-            count, men = state.raise_all_realm_levies(ruler_id)
-            if count > 0:
-                state.logs.append(f"🛡 Border Alert (SIAGA): Foreign hosts sighted near border! {r_name} summons {count} hosts (+{men:,} men) to secure the frontier!")
-                my_armies = [a for a in state.armies if a.owner == ruler_id and a.troops > 0]
-
-        target_prov_list = list(border_standoff_provs)
-        for a in my_armies:
-            if a.in_battle or a.is_mustering or a.courier_en_route:
-                continue
-
-            # If already stationed in a border province, freeze and hold position ("diam membeku")
-            if a.province in target_prov_list:
-                if a.is_moving:
-                    dest_p = CELL_TO_PROV.get(a.tile_path[-1]) if a.tile_path else a.province
-                    if dest_p not in realm_provs:
-                        a.tile_path = []
-                        a.is_moving = False
-                        a.move_progress = 0.0
-                continue
-
-            # March towards the nearest border standoff province
-            if not a.is_moving:
-                nearest_bp = min(target_prov_list, key=lambda bp: len(find_shortest_path(a.province, bp) or [999]))
-                target_tile = get_province_capital_tile(nearest_bp)
-                if a.tile != target_tile:
-                    state.order_army_march_to_tile(a, target_tile)
-        return
 
     # Dynamic Demobilization & Peacetime Economy for Unofficial Peace
     if is_at_peace:
