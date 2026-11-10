@@ -444,6 +444,60 @@ class Army:
         return self.path[0] if self.path else None
 
 # -------------------------------------------------------------
+# Modular Building System Specifications & Balancing
+# -------------------------------------------------------------
+BUILDING_SPECS = {
+    "city": {
+        "name": "City",
+        "title": "Commercial Town",
+        "tiles": 1,
+        "cost": 600,
+        "income": 3,
+        "upkeep": 0,
+        "garrison": 100,
+        "recruits": 0,
+        "icon": "🏙"
+    },
+    "fort": {
+        "name": "Fort",
+        "title": "Stone Fortress",
+        "tiles": 2,
+        "cost": 1000,
+        "income": 1,
+        "upkeep": 0,
+        "garrison": 300,
+        "recruits": 0,
+        "icon": "🏰"
+    },
+    "barrack": {
+        "name": "Barracks",
+        "title": "Military Barracks",
+        "tiles": 1,
+        "cost": 800,
+        "income": 0,
+        "upkeep": 1,
+        "garrison": 100,
+        "recruits": 10,
+        "icon": "⚔"
+    }
+}
+
+BARRACK_UPGRADE_COSTS = {
+    0: 300,   # Level 0 -> 1
+    1: 450,   # Level 1 -> 2
+    2: 600,   # Level 2 -> 3
+    3: 750,   # Level 3 -> 4
+    4: 1000   # Level 4 -> 5
+}
+
+def get_barrack_stats(level):
+    lvl = max(0, min(5, int(level)))
+    garrison = 100 + min(400, lvl * 100)
+    recruits = 10 + lvl * 5
+    upkeep = 1 + lvl
+    return {"level": lvl, "garrison": garrison, "recruits": recruits, "upkeep": upkeep}
+
+# -------------------------------------------------------------
 # City Siege & Contested Province Helpers
 # -------------------------------------------------------------
 def get_province_holdings(state, pid):
@@ -603,11 +657,11 @@ class GameState:
         self.drag_rect = None           # pygame.Rect of current drag area
         self.selected_army_ids = []     # list of army.id currently selected
         
-        # City Building Mode State
-        self.build_mode = False          # True when building a settlement
-        self.build_type = "town"         # "town" (2 tiles) or "castle" (1 tile)
-        self.build_orientation = "H"     # "H" (Horizontal) or "V" (Vertical) for 2-tile
-        self.settlements = {}            # (c, r) -> {"province": pid, "type": "town", "name": str}
+        # Modular Building Mode State
+        self.build_mode = False          # True when placing a holding
+        self.build_type = "city"         # "city" (1 tile), "fort" (2 tiles), "barrack" (1 tile)
+        self.build_orientation = "H"     # "H" (Horizontal) or "V" (Vertical) for 2-tile fort
+        self.settlements = {}            # (c, r) -> {"province": pid, "type": "city", "name": str, ...}
         self.selected_settlement = None  # (c, r) coordinate if a city is clicked
         self.settlement_id_counter = 1
         
@@ -948,19 +1002,70 @@ class GameState:
             self.ai_routine()
 
     def monthly_tick(self):
-        # Tax collection and levy reinforcement
+        # 1. Base Province & Vassal monthly economy
         for pid, prov in PROVINCES.items():
             owner = CHARACTERS.get(prov["owner"])
             if owner:
-                owner["gold"] += prov["tax"]
-                # Reinforce unraised garrison slowly
+                owner["gold"] += prov.get("tax", 0)
+                # Slow passive replenishment
                 if prov["levies_current"] < prov["levies_max"]:
-                    prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 50)
+                    prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 15)
                 # Vassal tax contribution & economy
                 for v in self.vassals.get(pid, []):
-                    owner["gold"] += v.get("tax_contribution", 3)
-                    v["gold"] = v.get("gold", 150) + random.randint(15, 35)
-        
+                    owner["gold"] += v.get("tax_contribution", 1)
+                    v["gold"] = v.get("gold", 150) + random.randint(10, 25)
+
+        # 2. Modular Building Economic & Recruitment Tick
+        processed_holdings = set()
+        for coord, sdata in self.settlements.items():
+            hid = sdata.get("id") or coord
+            if hid in processed_holdings:
+                continue
+            processed_holdings.add(hid)
+
+            htype = sdata.get("type", "city")
+            if htype == "town":
+                htype = "city"
+            pid = sdata.get("province")
+            prov = PROVINCES.get(pid)
+            if not prov:
+                continue
+
+            is_crown = sdata.get("is_crown_demesne", False)
+            prov_ruler = CHARACTERS.get(prov["owner"])
+
+            if htype == "city":
+                if is_crown and prov_ruler:
+                    prov_ruler["gold"] += 3
+                else:
+                    # Vassal city: vassal gains +3g, contributes +1g tax to liege
+                    v_id = sdata.get("vassal_id")
+                    v_obj = next((v for v in self.vassals.get(pid, []) if v.get("id") == v_id or v.get("name") == sdata.get("lord")), None)
+                    if v_obj:
+                        v_obj["gold"] = v_obj.get("gold", 150) + 3
+                    if prov_ruler:
+                        prov_ruler["gold"] += 1
+
+            elif htype == "fort":
+                if is_crown and prov_ruler:
+                    prov_ruler["gold"] += 1
+                else:
+                    v_id = sdata.get("vassal_id")
+                    v_obj = next((v for v in self.vassals.get(pid, []) if v.get("id") == v_id or v.get("name") == sdata.get("lord")), None)
+                    if v_obj:
+                        v_obj["gold"] = v_obj.get("gold", 150) + 1
+
+            elif htype == "barrack":
+                lvl = sdata.get("level", 0)
+                bstats = get_barrack_stats(lvl)
+                upkeep = bstats["upkeep"]
+                recruits = bstats["recruits"]
+
+                if is_crown and prov_ruler:
+                    prov_ruler["gold"] = max(0, prov_ruler["gold"] - upkeep)
+                # Boost province levies pool directly
+                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + recruits)
+
         # Army upkeep cost (1 gold per 500 men)
         player_troops = self.get_field_troops(self.player_id)
         upkeep = player_troops // 500
@@ -970,7 +1075,7 @@ class GameState:
         self.player["piety"] += 1
         self.enemy["prestige"] += 1
 
-        # Vassal autonomous build request chance: ONLY IF Vassal has at least 1,000 Gold AND owns a fief with free unbuilt tiles!
+        # Vassal autonomous build request chance: ONLY IF Vassal has sufficient Gold AND owns a fief with free tiles!
         if not self.vassal_build_requests:
             player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.player_id]
             if player_provs and random.random() < 0.35:
@@ -978,15 +1083,18 @@ class GameState:
                 for pid in player_provs:
                     v_list = self.vassals.get(pid, [])
                     for v in v_list:
-                        if v.get("gold", 0) >= 1000:
-                            # Vassal MUST own a fief in this province
+                        v_gold = v.get("gold", 0)
+                        if v_gold >= 600:
                             v_fiefs = [f for f in self.fiefs.values() if f.get("province") == pid and (f.get("holder") == v["name"] or f.get("vassal_id") == v.get("id"))]
                             for f in v_fiefs:
-                                # Fief must have at least one tile without an existing settlement
                                 free_tiles = [t for t in f.get("tiles", []) if t not in self.settlements]
-                                if free_tiles:
+                                if not free_tiles:
+                                    continue
+                                
+                                # Try 2-tile fort if vassal has >= 1000g
+                                pair = None
+                                if v_gold >= 1000 and len(free_tiles) >= 2:
                                     free_set = set(free_tiles)
-                                    pair = None
                                     for (c, r) in free_tiles:
                                         if (c + 1, r) in free_set:
                                             pair = [(c, r), (c + 1, r)]
@@ -994,9 +1102,8 @@ class GameState:
                                         elif (c, r + 1) in free_set:
                                             pair = [(c, r), (c, r + 1)]
                                             break
-                                    if not pair or len(pair) != 2:
-                                        continue
-                                    
+                                
+                                if pair and v_gold >= 1000:
                                     eligible_petitions.append({
                                         "vassal": v["name"],
                                         "vassal_ref": v,
@@ -1005,12 +1112,28 @@ class GameState:
                                         "fief_id": f["id"],
                                         "fief_name": f["name"],
                                         "build_tiles": pair,
+                                        "build_type": "fort",
                                         "cost": 1000
                                     })
+                                else:
+                                    # 1-tile city petition
+                                    eligible_petitions.append({
+                                        "vassal": v["name"],
+                                        "vassal_ref": v,
+                                        "province_id": pid,
+                                        "province_name": PROVINCES[pid]["name"],
+                                        "fief_id": f["id"],
+                                        "fief_name": f["name"],
+                                        "build_tiles": [free_tiles[0]],
+                                        "build_type": "city",
+                                        "cost": 600
+                                    })
+
                 if eligible_petitions:
                     req_choice = random.choice(eligible_petitions)
                     self.vassal_build_requests.append(req_choice)
-                    self.logs.append(f"Charter Petition: {req_choice['vassal']} (1,000g) petitions to build inside {req_choice['fief_name']} ({req_choice['province_name']})!")
+                    b_title = "Fort (1,000g)" if req_choice["build_type"] == "fort" else "City (600g)"
+                    self.logs.append(f"Charter Petition: {req_choice['vassal']} petitions to build {b_title} inside {req_choice['fief_name']} ({req_choice['province_name']})!")
 
     def yearly_tick(self):
         self.player["age"] += 1
@@ -1352,106 +1475,154 @@ def run_game():
         used_tiles_by_prov = {pid: set() for pid in prov_tile_list.keys()}
 
         # -------------------------------------------------------------
-        # 1. RULER PERSONAL DEMESNE (3 Personal Crown Cities for King & Jarl)
+        # 1. RULER PERSONAL DEMESNE
+        # Penguasa starter default: 1 City (1 tile), 1 Fort (2 tiles), 1 Barracks (1 tile) = 4 tiles
         # -------------------------------------------------------------
-        royal_demesnes = [
-            # King Alfred's 3 Personal Royal Cities
-            {"owner": target_state.player_id, "lord": target_state.player["name"], "province": "wessex", "city": "Royal Citadel of Winchester", "fief": "Crown Demesne of Winchester"},
-            {"owner": target_state.player_id, "lord": target_state.player["name"], "province": "wessex", "city": "Royal Borough of Wilton", "fief": "Crown Demesne of Wilton"},
-            {"owner": target_state.player_id, "lord": target_state.player["name"], "province": "kent_essex", "city": "Royal Castle of London", "fief": "Crown Demesne of London"},
-            
-            # Jarl Halfdan's 3 Personal Viking Strongholds
-            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "jorvik", "city": "Great Hall of Jorvik", "fief": "Crown Demesne of Jorvik"},
-            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "jorvik", "city": "Citadel of Eoforwic", "fief": "Crown Demesne of Eoforwic"},
-            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "deira", "city": "Viking Stronghold of Deira", "fief": "Crown Demesne of Deira"},
+        ruler_specs = [
+            # King Alfred (Wessex)
+            {
+                "owner": target_state.player_id,
+                "lord": target_state.player["name"],
+                "province": "wessex",
+                "holdings": [
+                    {"type": "city", "name": "Royal City of Winchester", "fief": "Crown Demesne of Winchester", "tiles": 1},
+                    {"type": "fort", "name": "Royal Citadel of Wilton", "fief": "Crown Demesne of Wilton", "tiles": 2},
+                    {"type": "barrack", "name": "King's Saxon Barracks", "fief": "Crown Demesne of Aldhelm's", "tiles": 1, "level": 0}
+                ]
+            },
+            # Jarl Halfdan (Jorvik)
+            {
+                "owner": target_state.enemy_id,
+                "lord": target_state.enemy["name"],
+                "province": "jorvik",
+                "holdings": [
+                    {"type": "city", "name": "Viking Trading Town of Jorvik", "fief": "Crown Demesne of Jorvik", "tiles": 1},
+                    {"type": "fort", "name": "Great Hall Citadel of Eoforwic", "fief": "Crown Demesne of Eoforwic", "tiles": 2},
+                    {"type": "barrack", "name": "Halfdan's War Camp Barracks", "fief": "Crown Demesne of the Raven", "tiles": 1, "level": 0}
+                ]
+            }
         ]
 
-        for spec in royal_demesnes:
-            pid = spec["province"]
+        for r_spec in ruler_specs:
+            pid = r_spec["province"]
             tiles = prov_tile_list.get(pid, [])
             tile_set = set(tiles)
             used = used_tiles_by_prov[pid]
-            pair = None
-            for (c, r) in tiles:
-                if (c, r) not in used and (c + 1, r) in tile_set and (c + 1, r) not in used:
-                    pair = [(c, r), (c + 1, r)]
-                    break
-            if not pair:
-                for (c, r) in tiles:
-                    if (c, r) not in used and (c, r + 1) in tile_set and (c, r + 1) not in used:
-                        pair = [(c, r), (c, r + 1)]
-                        break
-            if pair and len(pair) == 2:
-                s_id = f"settlement_{settlement_counter}"
-                settlement_counter += 1
-                for t in pair:
-                    used.add(t)
-                    target_state.settlements[t] = {
-                        "id": s_id,
-                        "province": pid,
-                        "type": "town",
-                        "name": spec["city"],
-                        "lord": f"{spec['lord']} (Crown Demesne)",
-                        "vassal_id": None,
-                        "is_crown_demesne": True
-                    }
-                fid = f"fief_{fief_counter}"
-                fief_counter += 1
-                target_state.fiefs[fid] = {
-                    "id": fid,
-                    "province": pid,
-                    "tiles": pair,
-                    "name": spec["fief"],
-                    "holder": spec["lord"],
-                    "vassal_id": None,
-                    "is_crown_demesne": True
-                }
 
-        # -------------------------------------------------------------
-        # 2. VASSAL STARTER HOLDINGS & FIEFS (Remaining tiles)
-        # -------------------------------------------------------------
-        for pid, tiles in prov_tile_list.items():
-            v_list = target_state.vassals.get(pid, [])
-            tile_set = set(tiles)
-            pname = PROVINCES[pid]["name"].split()[0]
-            used = used_tiles_by_prov[pid]
-            
-            for idx, v in enumerate(v_list):
-                city_name = f"{v['name'].split()[1]}'s {random.choice(['Keep', 'Burgh', 'Castle', 'Borough'])}"
-                pair = None
-                for (c, r) in tiles:
-                    if (c, r) not in used and (c + 1, r) in tile_set and (c + 1, r) not in used:
-                        pair = [(c, r), (c + 1, r)]
-                        break
-                if not pair:
+            for h_spec in r_spec["holdings"]:
+                h_type = h_spec["type"]
+                needed = h_spec["tiles"]
+                allocated = []
+
+                if needed == 2:
                     for (c, r) in tiles:
-                        if (c, r) not in used and (c, r + 1) in tile_set and (c, r + 1) not in used:
-                            pair = [(c, r), (c, r + 1)]
+                        if (c, r) not in used and (c + 1, r) in tile_set and (c + 1, r) not in used:
+                            allocated = [(c, r), (c + 1, r)]
+                            break
+                    if not allocated:
+                        for (c, r) in tiles:
+                            if (c, r) not in used and (c, r + 1) in tile_set and (c, r + 1) not in used:
+                                allocated = [(c, r), (c, r + 1)]
+                                break
+                else:
+                    for (c, r) in tiles:
+                        if (c, r) not in used:
+                            allocated = [(c, r)]
                             break
 
-                if pair and len(pair) == 2:
+                if allocated:
                     s_id = f"settlement_{settlement_counter}"
                     settlement_counter += 1
-                    for t in pair:
+                    for t in allocated:
                         used.add(t)
                         target_state.settlements[t] = {
                             "id": s_id,
                             "province": pid,
-                            "type": "town",
-                            "name": city_name,
-                            "lord": v["name"],
-                            "vassal_id": v["id"],
-                            "is_crown_demesne": False
+                            "type": h_type,
+                            "name": h_spec["name"],
+                            "lord": f"{r_spec['lord']} (Crown Demesne)",
+                            "vassal_id": None,
+                            "is_crown_demesne": True,
+                            "is_crown_fief": True,
+                            "level": h_spec.get("level", 0)
                         }
-                    v["city_name"] = city_name
-                    v["tiles"] = pair
                     fid = f"fief_{fief_counter}"
                     fief_counter += 1
                     target_state.fiefs[fid] = {
                         "id": fid,
                         "province": pid,
-                        "tiles": pair,
-                        "name": f"Barony of {v['name'].split()[1]}",
+                        "tiles": list(allocated),
+                        "name": h_spec["fief"],
+                        "holder": r_spec["lord"],
+                        "vassal_id": None,
+                        "is_crown_demesne": True
+                    }
+
+        # -------------------------------------------------------------
+        # 2. VASSAL STARTER HOLDINGS & FIEFS
+        # Every vassal is randomized: gets 1 City (1 tile) OR 1 Fort (2 tiles)
+        # -------------------------------------------------------------
+        for pid, tiles in prov_tile_list.items():
+            v_list = target_state.vassals.get(pid, [])
+            tile_set = set(tiles)
+            used = used_tiles_by_prov[pid]
+
+            for idx, v in enumerate(v_list):
+                b_type = random.choice(["city", "fort"])
+                allocated = []
+
+                if b_type == "fort":
+                    for (c, r) in tiles:
+                        if (c, r) not in used and (c + 1, r) in tile_set and (c + 1, r) not in used:
+                            allocated = [(c, r), (c + 1, r)]
+                            break
+                    if not allocated:
+                        for (c, r) in tiles:
+                            if (c, r) not in used and (c, r + 1) in tile_set and (c, r + 1) not in used:
+                                allocated = [(c, r), (c, r + 1)]
+                                break
+                    if not allocated:
+                        b_type = "city"
+
+                if b_type == "city" and not allocated:
+                    for (c, r) in tiles:
+                        if (c, r) not in used:
+                            allocated = [(c, r)]
+                            break
+
+                if allocated:
+                    s_id = f"settlement_{settlement_counter}"
+                    settlement_counter += 1
+                    v_name_parts = v["name"].split()
+                    v_label = v_name_parts[1] if len(v_name_parts) > 1 else v["name"]
+
+                    if b_type == "city":
+                        holding_name = f"{v_label}'s {random.choice(['Borough', 'Burgh', 'Town', 'Market'])}"
+                    else:
+                        holding_name = f"{v_label}'s {random.choice(['Keep', 'Castle', 'Fortress', 'Stronghold'])}"
+
+                    for t in allocated:
+                        used.add(t)
+                        target_state.settlements[t] = {
+                            "id": s_id,
+                            "province": pid,
+                            "type": b_type,
+                            "name": holding_name,
+                            "lord": v["name"],
+                            "vassal_id": v["id"],
+                            "is_crown_demesne": False,
+                            "is_crown_fief": False,
+                            "level": 0
+                        }
+                    v["city_name"] = holding_name
+                    v["tiles"] = list(allocated)
+                    fid = f"fief_{fief_counter}"
+                    fief_counter += 1
+                    target_state.fiefs[fid] = {
+                        "id": fid,
+                        "province": pid,
+                        "tiles": list(allocated),
+                        "name": f"Barony of {v_label}",
                         "holder": v["name"],
                         "vassal_id": v["id"],
                         "is_crown_demesne": False
@@ -1474,12 +1645,12 @@ def run_game():
             if f.get("province") == province_id:
                 for t in f.get("tiles", []):
                     claimed_tiles.add(t)
-        
+
         free_tiles = [t for t in p_tiles if t not in claimed_tiles]
-        
-        if len(free_tiles) < 2:
+
+        if len(free_tiles) < 1:
             pname = PROVINCES[province_id]["name"]
-            target_state.logs.append(f"Cannot carve fief: Only {len(free_tiles)} unclaimed tile(s) left in {pname} (Min 2 required). Dissolve an existing fief first.")
+            target_state.logs.append(f"Cannot carve fief: No unclaimed tiles left in {pname}. Dissolve an existing fief first.")
             return None
 
         target_state.fief_id_counter += 1
@@ -1498,7 +1669,7 @@ def run_game():
         target_state.selected_fief_id = fid
         target_state.editing_fief_id = fid
         target_state.selected_settlement = None
-        target_state.logs.append(f"Partition Mode: Click at least 2 green unclaimed tiles on map for '{target_state.fiefs[fid]['name']}', then click DONE.")
+        target_state.logs.append(f"Partition Mode: Click green unclaimed tiles on map for '{target_state.fiefs[fid]['name']}', then click DONE.")
         return fid
 
     # Build reverse lookup: pixel -> province (for accurate click detection)
@@ -2491,62 +2662,108 @@ def run_game():
             tw, th = cw - 4, ch - 4
             tx, ty = cx + 2, cy + 2
 
-            if orient == "H":
-                # Grand Castle / Fortified Burgh spanning across 2 horizontal tiles
-                curtain_h = max(4, int(th * 0.65))
-                pygame.draw.rect(screen, (75, 85, 105), (tx + 1, ty + th - curtain_h, tw - 2, curtain_h))
-                
-                # Left defensive tower
-                tow_w = max(4, int(tw * 0.18))
-                pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + 1, tow_w, th - 1))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx, ty - 1, tow_w + 2, 3))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tow_w // 2 - 1, ty + 4, 2, 4))
-                
-                # Right defensive tower
-                pygame.draw.rect(screen, (85, 95, 115), (tx + tw - tow_w - 1, ty + 1, tow_w, th - 1))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - tow_w - 1, ty - 1, tow_w + 2, 3))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tw - tow_w // 2 - 1, ty + 4, 2, 4))
-                
-                # Central Great Keep (stands high and proud in center)
-                keep_w = max(6, int(tw * 0.32))
-                keep_x = tx + (tw - keep_w) // 2
-                pygame.draw.rect(screen, (100, 112, 134), (keep_x, ty, keep_w, th))
-                # Central Grand Crown Battlements
-                pygame.draw.rect(screen, COLOR_GOLD, (keep_x, ty - 2, 3, 3))
-                pygame.draw.rect(screen, COLOR_GOLD, (keep_x + keep_w // 2 - 2, ty - 3, 4, 4))
-                pygame.draw.rect(screen, COLOR_GOLD, (keep_x + keep_w - 3, ty - 2, 3, 3))
-                
-                # Grand Arch Gatehouse
-                gate_w = max(4, int(keep_w * 0.45))
-                gate_h = max(4, int(th * 0.42))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
+            h_type = sdata.get("type", "fort" if len(h_tiles) == 2 else "city")
+            if h_type == "town":
+                h_type = "city"
 
-            elif orient == "V":
-                # High Citadel Tower spanning across 2 vertical tiles
-                tow_w = tw
-                up_h = max(6, int(th * 0.45))
-                pygame.draw.rect(screen, (100, 112, 134), (tx + 1, ty + 1, tow_w - 2, up_h))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx, ty - 1, 4, 3))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tow_w - 4, ty - 1, 4, 3))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tow_w // 2 - 2, ty - 2, 4, 3))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tow_w // 2 - 1, ty + 5, 3, 4))
-                # Mid battlements
-                pygame.draw.rect(screen, COLOR_GOLD, (tx, ty + up_h, tow_w, 2))
-                # Lower Bailey & Gatehouse
-                pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + up_h + 2, tow_w - 2, th - up_h - 2))
-                gate_w = max(4, int(tow_w * 0.35))
-                gate_h = max(4, int(th * 0.25))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tow_w // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
+            if h_type == "city":
+                # Medieval Commercial City / Market Burgh (Warm Timber & Terracotta Gable Roof)
+                # Foundation stone & half-timbered walls
+                pygame.draw.rect(screen, (150, 138, 122), (tx + 1, ty + int(th * 0.38), tw - 2, th - int(th * 0.38)))
+                pygame.draw.line(screen, (60, 45, 30), (tx + 1, ty + int(th * 0.38)), (tx + tw - 1, ty + int(th * 0.38)), 1)
+                pygame.draw.line(screen, (60, 45, 30), (tx + tw // 2, ty + int(th * 0.38)), (tx + tw // 2, ty + th - 1), 1)
+                # Peaked terracotta roof
+                roof_poly = [(tx + tw // 2, ty - 1), (tx, ty + int(th * 0.4)), (tx + tw, ty + int(th * 0.4))]
+                pygame.draw.polygon(screen, (185, 78, 42), roof_poly)
+                pygame.draw.polygon(screen, (220, 105, 55), roof_poly, 1)
+                # Golden weathervane finial
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 1, ty - 3, 3, 3))
+                # Glowing warm window lights
+                w_w, w_h = max(2, int(tw * 0.12)), max(2, int(th * 0.12))
+                pygame.draw.rect(screen, (245, 215, 80), (tx + max(2, int(tw * 0.18)), ty + int(th * 0.52), w_w, w_h))
+                pygame.draw.rect(screen, (245, 215, 80), (tx + tw - max(2, int(tw * 0.18)) - w_w, ty + int(th * 0.52), w_w, w_h))
+                # Market entrance arch
+                gate_w = max(3, int(tw * 0.28))
+                gate_h = max(3, int(th * 0.3))
+                pygame.draw.rect(screen, (25, 20, 16), (tx + tw // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
 
-            else:
-                # Compact single tile keep
-                pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + 2, tw - 2, th - 2))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx, ty, 3, 4))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 3, ty, 3, 4))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty - 1, 4, 3))
-                gate_w = max(4, int(tw * 0.3))
-                gate_h = max(4, int(th * 0.35))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
+            elif h_type == "barrack":
+                # Sturdy Military Garrison & Fyrd Training Hall
+                pygame.draw.rect(screen, (68, 75, 88), (tx + 1, ty + 2, tw - 2, th - 2))
+                # Iron battlements / crenellations on roof
+                pygame.draw.rect(screen, (88, 96, 110), (tx, ty, 3, 4))
+                pygame.draw.rect(screen, (88, 96, 110), (tx + tw - 3, ty, 3, 4))
+                pygame.draw.rect(screen, (88, 96, 110), (tx + tw // 2 - 2, ty, 4, 3))
+                pygame.draw.rect(screen, (40, 44, 52), (tx, ty + 3, tw, 2))
+                # Red military pennant on top pole
+                pygame.draw.line(screen, (190, 195, 205), (tx + tw - 3, ty - 6), (tx + tw - 3, ty + 3), 1)
+                pygame.draw.polygon(screen, (220, 45, 45), [(tx + tw - 3, ty - 6), (tx + tw + 6, ty - 3), (tx + tw - 3, ty)])
+                # Iron-studded door
+                gate_w = max(4, int(tw * 0.32))
+                gate_h = max(4, int(th * 0.38))
+                pygame.draw.rect(screen, (28, 30, 36), (tx + tw // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
+                # Golden crossed spears / insignia
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty + int(th * 0.28), 4, 3))
+                # Level badge if upgraded
+                b_lvl = sdata.get("level", 0)
+                if b_lvl > 0:
+                    lvl_badge = font_xs.render(f"L{b_lvl}", True, COLOR_GOLD)
+                    screen.blit(lvl_badge, (tx + 2, ty + 2))
+
+            else: # Fort
+                if orient == "H":
+                    # Grand Castle / Fortified Burgh spanning across 2 horizontal tiles
+                    curtain_h = max(4, int(th * 0.65))
+                    pygame.draw.rect(screen, (75, 85, 105), (tx + 1, ty + th - curtain_h, tw - 2, curtain_h))
+                    
+                    # Left defensive tower
+                    tow_w = max(4, int(tw * 0.18))
+                    pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + 1, tow_w, th - 1))
+                    pygame.draw.rect(screen, COLOR_GOLD, (tx, ty - 1, tow_w + 2, 3))
+                    pygame.draw.rect(screen, (20, 24, 32), (tx + tow_w // 2 - 1, ty + 4, 2, 4))
+                    
+                    # Right defensive tower
+                    pygame.draw.rect(screen, (85, 95, 115), (tx + tw - tow_w - 1, ty + 1, tow_w, th - 1))
+                    pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - tow_w - 1, ty - 1, tow_w + 2, 3))
+                    pygame.draw.rect(screen, (20, 24, 32), (tx + tw - tow_w // 2 - 1, ty + 4, 2, 4))
+                    
+                    # Central Great Keep
+                    keep_w = max(6, int(tw * 0.32))
+                    keep_x = tx + (tw - keep_w) // 2
+                    pygame.draw.rect(screen, (100, 112, 134), (keep_x, ty, keep_w, th))
+                    pygame.draw.rect(screen, COLOR_GOLD, (keep_x, ty - 2, 3, 3))
+                    pygame.draw.rect(screen, COLOR_GOLD, (keep_x + keep_w // 2 - 2, ty - 3, 4, 4))
+                    pygame.draw.rect(screen, COLOR_GOLD, (keep_x + keep_w - 3, ty - 2, 3, 3))
+                    
+                    # Grand Arch Gatehouse
+                    gate_w = max(4, int(keep_w * 0.45))
+                    gate_h = max(4, int(th * 0.42))
+                    pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
+
+                elif orient == "V":
+                    # High Citadel Tower spanning across 2 vertical tiles
+                    tow_w = tw
+                    up_h = max(6, int(th * 0.45))
+                    pygame.draw.rect(screen, (100, 112, 134), (tx + 1, ty + 1, tow_w - 2, up_h))
+                    pygame.draw.rect(screen, COLOR_GOLD, (tx, ty - 1, 4, 3))
+                    pygame.draw.rect(screen, COLOR_GOLD, (tx + tow_w - 4, ty - 1, 4, 3))
+                    pygame.draw.rect(screen, COLOR_GOLD, (tx + tow_w // 2 - 2, ty - 2, 4, 3))
+                    pygame.draw.rect(screen, (20, 24, 32), (tx + tow_w // 2 - 1, ty + 5, 3, 4))
+                    pygame.draw.rect(screen, COLOR_GOLD, (tx, ty + up_h, tow_w, 2))
+                    pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + up_h + 2, tow_w - 2, th - up_h - 2))
+                    gate_w = max(4, int(tow_w * 0.35))
+                    gate_h = max(4, int(th * 0.25))
+                    pygame.draw.rect(screen, (20, 24, 32), (tx + tow_w // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
+
+                else:
+                    # Compact single tile keep
+                    pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + 2, tw - 2, th - 2))
+                    pygame.draw.rect(screen, COLOR_GOLD, (tx, ty, 3, 4))
+                    pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 3, ty, 3, 4))
+                    pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty - 1, 4, 3))
+                    gate_w = max(4, int(tw * 0.3))
+                    gate_h = max(4, int(th * 0.35))
+                    pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
 
             # If holding is occupied by enemy, display conqueror's miniature banner on keep turret!
             if h.get("occupied_by"):
@@ -2564,7 +2781,7 @@ def run_game():
                 state.selected_army_id = None
 
         # -----------------------------------------------------------
-        # PASS 4: Build Mode Hover & Placement Ghost (Unified Preview)
+        # PASS 4: Build Mode Hover & Placement Ghost (Modular Preview)
         # -----------------------------------------------------------
         if state.build_mode and state.selected_province:
             # Determine tile hovered
@@ -2572,22 +2789,29 @@ def run_game():
             hc = int((mx - origin_x) // curr_tile_w)
             hr = int((my - origin_y) // curr_tile_h)
 
+            b_spec = BUILDING_SPECS.get(state.build_type, BUILDING_SPECS["city"])
+            b_cost = b_spec["cost"]
+            b_tiles_num = b_spec["tiles"]
+
             target_tiles = []
-            if state.build_orientation == "H":
-                target_tiles = [(hc, hr), (hc + 1, hr)]
+            if b_tiles_num == 1:
+                target_tiles = [(hc, hr)]
             else:
-                target_tiles = [(hc, hr), (hc, hr + 1)]
+                if state.build_orientation == "H":
+                    target_tiles = [(hc, hr), (hc + 1, hr)]
+                else:
+                    target_tiles = [(hc, hr), (hc, hr + 1)]
 
             # Check validity
             prov_obj = PROVINCES.get(state.selected_province)
             is_valid = True
             invalid_reason = ""
-            if prov_obj["owner"] != state.player_id:
+            if not prov_obj or prov_obj["owner"] != state.player_id:
                 is_valid = False
                 invalid_reason = "Not Player Territory"
-            elif state.player["gold"] < 1000:
+            elif state.player["gold"] < b_cost:
                 is_valid = False
-                invalid_reason = "Requires 1,000 Gold"
+                invalid_reason = f"Requires {b_cost:,} Gold"
             else:
                 for tc, tr in target_tiles:
                     if cell_to_prov.get((tc, tr)) != state.selected_province:
@@ -2612,7 +2836,7 @@ def run_game():
                             break
                     tile_fiefs.append(tf)
 
-                if tile_fiefs[0] != tile_fiefs[1]:
+                if b_tiles_num > 1 and tile_fiefs[0] != tile_fiefs[1]:
                     is_valid = False
                     invalid_reason = "Across Fief Borders"
                 else:
@@ -2624,7 +2848,7 @@ def run_game():
                         if not is_crown:
                             is_vassal_fief = True
 
-            # Draw Ghost Box (Continuous 2-tile preview)
+            # Draw Ghost Box (Continuous 1-tile or 2-tile preview)
             if not is_valid:
                 ghost_col = (220, 50, 50, 140)
                 border_c = (255, 80, 80)
@@ -2645,7 +2869,7 @@ def run_game():
             gh = (max_gr - min_gr + 1) * curr_tile_h
             
             # Preview centered ghost
-            pad_x = max(5, int(gw * 0.14))
+            pad_x = max(4, int(gw * 0.14))
             pad_y = max(3, int(gh * 0.16))
             cw = gw - 2 * pad_x
             ch = gh - 2 * pad_y
@@ -2658,13 +2882,17 @@ def run_game():
             pygame.draw.rect(screen, border_c, (cx, cy, cw, ch), 2, border_radius=3)
 
             # Contextual Ghost Tag / Hint
+            tag_label = f"Build {b_spec['name']} ({b_cost}g)"
             if is_valid and is_vassal_fief and target_fief:
                 v_holder = target_fief.get("holder", "Vassal")
-                v_hint = font_xs.render(f"⚠ Vassal Fief: {v_holder}", True, (255, 235, 120))
+                v_hint = font_xs.render(f"⚠ Vassal Fief ({v_holder})", True, (255, 235, 120))
                 screen.blit(v_hint, (cx, max(0, cy - 16)))
             elif not is_valid and invalid_reason:
                 r_hint = font_xs.render(f"✕ {invalid_reason}", True, (255, 140, 140))
                 screen.blit(r_hint, (cx, max(0, cy - 16)))
+            else:
+                t_hint = font_xs.render(tag_label, True, (200, 255, 220))
+                screen.blit(t_hint, (cx, max(0, cy - 16)))
 
             # Left click to place
             if mouse_clicked and is_valid:
@@ -2677,33 +2905,46 @@ def run_game():
                         "fief_name": target_fief.get("name", "Vassal Fief"),
                         "vassal_id": target_fief.get("vassal_id"),
                         "vassal_name": v_holder,
-                        "cost": 1000
+                        "cost": b_cost,
+                        "build_type": state.build_type
                     }
                     state.build_mode = False
                 else:
-                    state.player["gold"] -= 1000
-                    prov_obj["tax"] += 10
-                    prov_obj["levies_max"] += 500
-                    prov_obj["levies_current"] += 500
+                    state.player["gold"] -= b_cost
+                    p_short = prov_obj['name'].split()[0]
+                    if state.build_type == "city":
+                        prov_obj["tax"] += 3
+                        prov_obj["levies_max"] += 100
+                        prov_obj["levies_current"] += 100
+                        city_name = f"{p_short} City"
+                    elif state.build_type == "fort":
+                        prov_obj["tax"] += 1
+                        prov_obj["levies_max"] += 300
+                        prov_obj["levies_current"] += 300
+                        city_name = f"{p_short} Citadel"
+                    else:
+                        prov_obj["levies_max"] += 100
+                        prov_obj["levies_current"] += 100
+                        city_name = f"{p_short} Barracks"
+
                     state.settlement_id_counter += 1
                     s_id = f"settlement_{state.settlement_id_counter}"
-                    city_name = f"{prov_obj['name'].split()[0]} Burgh"
                     for tc, tr in target_tiles:
                         state.settlements[(tc, tr)] = {
                             "id": s_id,
                             "province": state.selected_province,
-                            "type": "town",
+                            "type": state.build_type,
                             "name": city_name,
                             "lord": f"{state.player['name']} (Crown Demesne)",
                             "vassal_id": None,
                             "is_crown_demesne": True,
-                            "is_crown_fief": True
+                            "is_crown_fief": True,
+                            "level": 0
                         }
                     # Ensure these tiles belong to a Crown Fief if not already claimed
                     if target_fief is None:
                         state.fief_id_counter += 1
                         fid = f"fief_{state.fief_id_counter}"
-                        p_short = prov_obj['name'].split()[0]
                         state.fiefs[fid] = {
                             "id": fid,
                             "province": state.selected_province,
@@ -2713,7 +2954,7 @@ def run_game():
                             "vassal_id": None,
                             "is_crown_demesne": True
                         }
-                    state.logs.append(f"Founded Crown City in {prov_obj['name']} (-1000g, +10 Tax, +500 Levies)!")
+                    state.logs.append(f"Constructed Crown {b_spec['name']} in {prov_obj['name']} (-{b_cost}g)!")
                     state.build_mode = False
 
         # Province Name Labels (Medieval Plaque / Banner)
@@ -3016,43 +3257,111 @@ def run_game():
         sel_prov = PROVINCES.get(state.selected_province)
         sel_army = state.get_selected_army()
 
-        # If a city is specifically selected, display City Holding Inspector Card!
+        # If a city or holding is specifically selected, display Holding Inspector Card!
         if state.selected_settlement and state.selected_settlement in state.settlements:
             s_coord = state.selected_settlement
             s_data = state.settlements[s_coord]
             p_parent = PROVINCES.get(s_data["province"])
             
+            h_type = s_data.get("type", "city")
+            if h_type == "town":
+                h_type = "city"
+
             c_head = font_lg.render(s_data["name"], True, COLOR_GOLD)
             screen.blit(c_head, (880, 80))
-            sub_c = font_sm.render(f"Holding Type: Fortified Town ({s_data['province'].title()})", True, COLOR_TEXT_WHITE)
+            
+            p_cap = s_data['province'].replace("_", " ").title()
+            if h_type == "city":
+                sub_c = font_sm.render(f"Holding Type: 🏙 Commercial City ({p_cap})", True, COLOR_TEXT_WHITE)
+            elif h_type == "fort":
+                sub_c = font_sm.render(f"Holding Type: 🏰 Stone Fortress ({p_cap})", True, COLOR_TEXT_WHITE)
+            else:
+                lvl = s_data.get("level", 0)
+                sub_c = font_sm.render(f"Holding Type: ⚔ Military Barracks Lvl {lvl} ({p_cap})", True, COLOR_TEXT_WHITE)
             screen.blit(sub_c, (880, 110))
             
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, 135), (1170, 135), 1)
             screen.blit(font_md.render("Holding Overview", True, COLOR_GOLD), (880, 145))
             h_matching_tiles = [coord for coord, s in state.settlements.items() if s.get("name") == s_data["name"] and s.get("province") == s_data["province"]]
             t_loc_str = ", ".join(f"({c},{r})" for c, r in h_matching_tiles)
-            screen.blit(font_sm.render(f"Location: {t_loc_str} ({len(h_matching_tiles)} Tiles)", True, COLOR_TEXT_MUTED), (880, 175))
+            screen.blit(font_sm.render(f"Location: {t_loc_str} ({len(h_matching_tiles)} Tiles)", True, COLOR_TEXT_MUTED), (880, 172))
             lord_str = s_data.get('lord', 'Crown Demesne').replace("Royal Demesne", "Crown Demesne")
-            screen.blit(font_sm.render(f"Ruling Lord: {lord_str}", True, COLOR_GOLD), (880, 200))
-            screen.blit(font_sm.render("Fortification Level: II (Stone Walls)", True, COLOR_TEXT_WHITE), (880, 225))
-            screen.blit(font_sm.render("Economic Income: +6 Gold / month", True, COLOR_TEXT_GREEN), (880, 250))
-            screen.blit(font_sm.render("Local Garrison: 300 Defenders", True, COLOR_TEXT_WHITE), (880, 275))
+            screen.blit(font_sm.render(f"Ruling Lord: {lord_str}", True, COLOR_GOLD), (880, 194))
+
+            cur_y = 216
+            if h_type == "city":
+                screen.blit(font_sm.render("Economic Income: +3 Gold / month", True, COLOR_TEXT_GREEN), (880, cur_y))
+                screen.blit(font_sm.render("Local Garrison: 100 Defenders", True, COLOR_TEXT_WHITE), (880, cur_y + 22))
+                screen.blit(font_xs.render("• Generates gold to fund realm armies & barracks.", True, COLOR_TEXT_MUTED), (880, cur_y + 44))
+                cur_y += 70
+
+            elif h_type == "fort":
+                screen.blit(font_sm.render("Economic Income: +1 Gold / month (Tolls)", True, COLOR_TEXT_GREEN), (880, cur_y))
+                screen.blit(font_sm.render("Local Garrison: 300 Defenders", True, COLOR_TEXT_WHITE), (880, cur_y + 22))
+                screen.blit(font_sm.render("Fortification: High Defense (Twin Turrets)", True, (160, 210, 255)), (880, cur_y + 44))
+                screen.blit(font_xs.render("• Shields the province and prolongs siege defense.", True, COLOR_TEXT_MUTED), (880, cur_y + 66))
+                cur_y += 92
+
+            else: # Barracks
+                lvl = s_data.get("level", 0)
+                bstats = get_barrack_stats(lvl)
+                screen.blit(font_sm.render(f"Recruitment Rate: +{bstats['recruits']} Men / month", True, COLOR_TEXT_GREEN), (880, cur_y))
+                screen.blit(font_sm.render(f"Holding Upkeep: -{bstats['upkeep']} Gold / month", True, (255, 120, 120)), (880, cur_y + 22))
+                screen.blit(font_sm.render(f"Garrison Capacity: {bstats['garrison']} / 500 Men", True, COLOR_TEXT_WHITE), (880, cur_y + 44))
+                cur_y += 70
+
+                # Upgrade & Downgrade buttons for Barracks
+                is_crown_barrack = s_data.get("is_crown_demesne", False)
+                if is_crown_barrack and p_parent and p_parent["owner"] == state.player_id:
+                    # Upgrade button
+                    if lvl < 5:
+                        up_cost = BARRACK_UPGRADE_COSTS.get(lvl, 500)
+                        can_afford = state.player["gold"] >= up_cost
+                        up_btn = pygame.Rect(880, cur_y, 290, 32)
+                        up_hov = up_btn.collidepoint(mouse_pos)
+                        pygame.draw.rect(screen, (35, 95, 50) if (up_hov and can_afford) else ((25, 65, 35) if can_afford else (45, 45, 50)), up_btn, border_radius=4)
+                        pygame.draw.rect(screen, COLOR_TEXT_GREEN if can_afford else (90, 90, 95), up_btn, 1, border_radius=4)
+                        up_txt = font_xs.render(f"▲ UPGRADE TO LEVEL {lvl+1} ({up_cost}g  •  +5 Recruits/m)", True, COLOR_TEXT_WHITE if can_afford else COLOR_TEXT_MUTED)
+                        screen.blit(up_txt, (892, cur_y + 8))
+                        if mouse_clicked and up_hov and can_afford:
+                            state.player["gold"] -= up_cost
+                            new_lvl = lvl + 1
+                            for tc in h_matching_tiles:
+                                state.settlements[tc]["level"] = new_lvl
+                            p_parent["levies_max"] = min(2500, p_parent.get("levies_max", 1000) + 100)
+                            state.logs.append(f"Upgraded {s_data['name']} to Level {new_lvl} (-{up_cost}g)! Now generates +{10 + new_lvl * 5} recruits/mo.")
+                        cur_y += 38
+
+                    # Downgrade button
+                    if lvl > 0:
+                        down_btn = pygame.Rect(880, cur_y, 290, 30)
+                        down_hov = down_btn.collidepoint(mouse_pos)
+                        pygame.draw.rect(screen, (90, 45, 30) if down_hov else (65, 32, 22), down_btn, border_radius=4)
+                        pygame.draw.rect(screen, (220, 110, 60), down_btn, 1, border_radius=4)
+                        down_txt = font_xs.render(f"▼ DEMOBILIZE / DOWNGRADE (Save 1g/m Upkeep)", True, (255, 210, 190))
+                        screen.blit(down_txt, (890, cur_y + 7))
+                        if mouse_clicked and down_hov:
+                            new_lvl = lvl - 1
+                            for tc in h_matching_tiles:
+                                state.settlements[tc]["level"] = new_lvl
+                            state.logs.append(f"Downgraded {s_data['name']} to Level {new_lvl}. Saved 1 Gold/month upkeep.")
+                        cur_y += 36
             
             if s_data.get("vassal_id"):
-                v_btn = pygame.Rect(880, 310, 290, 34)
+                v_btn = pygame.Rect(880, cur_y + 8, 290, 34)
                 b_v_hov = v_btn.collidepoint(mouse_pos)
                 pygame.draw.rect(screen, (40, 75, 110) if b_v_hov else (30, 55, 85), v_btn, border_radius=6)
                 pygame.draw.rect(screen, (100, 180, 255), v_btn, 1, border_radius=6)
-                screen.blit(font_xs.render("👑 VIEW VASSAL PROFILE & DOSSIER", True, COLOR_TEXT_WHITE), (915, 318))
+                screen.blit(font_xs.render("👑 VIEW VASSAL PROFILE & DOSSIER", True, COLOR_TEXT_WHITE), (915, cur_y + 16))
                 if mouse_clicked and b_v_hov:
                     v_list = state.vassals.get(s_data["province"], [])
                     matching_v = next((v for v in v_list if v.get("id") == s_data["vassal_id"] or v.get("name") == s_data["lord"]), None)
                     if matching_v:
                         state.inspecting_vassal = {"province": s_data["province"], "vassal": matching_v}
                         state.logs.append(f"Opened royal dossier for vassal {matching_v['name']}.")
-                cls_y = 352
+                cls_y = cur_y + 48
             else:
-                cls_y = 315
+                cls_y = cur_y + 8
 
             # Close/Back button
             cls_btn = pygame.Rect(880, cls_y, 290, 34)
@@ -3233,46 +3542,103 @@ def run_game():
             # -------------------------------------------------------------
             elif state.right_tab == "buildings":
                 screen.blit(font_md.render("Constructed Province Holdings", True, COLOR_GOLD), (880, 160))
-                # List all cities in this province
-                prov_cities = {}
+                # List all unique holdings in this province
+                prov_holdings = {}
                 for coord, sdata in state.settlements.items():
                     if sdata["province"] == state.selected_province:
-                        c_name = sdata["name"]
-                        if c_name not in prov_cities:
-                            prov_cities[c_name] = {"lord": sdata.get("lord", "None"), "tile": coord}
+                        hid = sdata.get("id") or sdata.get("name")
+                        if hid not in prov_holdings:
+                            prov_holdings[hid] = {
+                                "name": sdata["name"],
+                                "lord": sdata.get("lord", "None"),
+                                "type": sdata.get("type", "city"),
+                                "level": sdata.get("level", 0),
+                                "tile": coord
+                            }
 
                 cy = 190
-                for c_name, c_info in list(prov_cities.items())[:7]:
+                for hid, h_info in list(prov_holdings.items())[:6]:
                     c_box = pygame.Rect(880, cy, 290, 42)
                     is_c_hov = c_box.collidepoint(mouse_pos)
                     pygame.draw.rect(screen, (45, 52, 68) if is_c_hov else (32, 38, 50), c_box, border_radius=4)
                     pygame.draw.rect(screen, COLOR_PANEL_BORDER, c_box, 1, border_radius=4)
-                    screen.blit(font_xs.render(f"🏰 {c_name}", True, COLOR_GOLD), (888, cy + 5))
-                    screen.blit(font_xs.render(f"Lord: {c_info['lord']}  •  +6 Gold/m", True, COLOR_TEXT_MUTED), (888, cy + 22))
+
+                    htype = h_info["type"]
+                    if htype == "town":
+                        htype = "city"
+                    h_icon = "🏙" if htype == "city" else ("🏰" if htype == "fort" else "⚔")
+                    screen.blit(font_xs.render(f"{h_icon} {h_info['name']}", True, COLOR_GOLD), (888, cy + 5))
+
+                    if htype == "city":
+                        stat_sub = "Lord: " + h_info['lord'] + "  •  +3 Gold/m  •  100 Gar"
+                    elif htype == "fort":
+                        stat_sub = "Lord: " + h_info['lord'] + "  •  +1 Gold/m  •  300 Gar"
+                    else:
+                        bstats = get_barrack_stats(h_info['level'])
+                        stat_sub = f"Lord: {h_info['lord']}  •  -{bstats['upkeep']}g Upk  •  +{bstats['recruits']} Rec/m"
+                    screen.blit(font_xs.render(stat_sub, True, COLOR_TEXT_MUTED), (888, cy + 22))
+
                     if mouse_clicked and is_c_hov:
-                        state.selected_settlement = c_info["tile"]
+                        state.selected_settlement = h_info["tile"]
                     cy += 48
 
                 if is_player_owned:
-                    # Found New City Button
-                    pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, cy + 10), (1170, cy + 10), 1)
-                    bld_btn = pygame.Rect(880, cy + 25, 290, 42)
-                    b_bld_hov = bld_btn.collidepoint(mouse_pos)
-                    b_bld_active = state.build_mode
-                    pygame.draw.rect(screen, (150, 75, 15) if b_bld_active else ((75, 45, 15) if b_bld_hov else (55, 32, 10)), bld_btn, border_radius=6)
-                    pygame.draw.rect(screen, COLOR_GOLD if b_bld_active else (210, 150, 40), bld_btn, 2 if b_bld_active else 1, border_radius=6)
-                    b_lbl = "CANCEL PLACEMENT (ESC)" if b_bld_active else "FOUND NEW CITY (2 TILES - 1,000g)"
-                    screen.blit(font_xs.render(b_lbl, True, COLOR_GOLD if b_bld_active else COLOR_TEXT_WHITE), (895, cy + 38))
-                    if mouse_clicked and b_bld_hov:
-                        state.build_mode = not state.build_mode
+                    pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, cy + 6), (1170, cy + 6), 1)
+                    screen.blit(font_md.render("Construct New Holding", True, COLOR_GOLD), (880, cy + 14))
+
+                    menu_specs = [
+                        ("city", "🏙 CITY (1 Tile - 600g)", "+100 Garrison  •  +3 Gold / month", 600),
+                        ("fort", "🏰 FORT (2 Tiles - 1,000g)", "+300 Garrison  •  +1 Gold / month  [T: Rotate]", 1000),
+                        ("barrack", "⚔ BARRACKS (1 Tile - 800g)", "+100 Gar  •  +10 Recruits/mo  •  -1g Upkeep", 800)
+                    ]
+
+                    btn_y = cy + 36
+                    for b_type_key, b_title, b_sub, b_cost in menu_specs:
+                        b_rect = pygame.Rect(880, btn_y, 290, 36)
+                        b_hov = b_rect.collidepoint(mouse_pos)
+                        is_active = (state.build_mode and state.build_type == b_type_key)
+                        can_afford = (state.player["gold"] >= b_cost)
+
+                        if is_active:
+                            bg_c = (140, 80, 20)
+                            border_c = COLOR_GOLD
+                        elif b_hov and can_afford:
+                            bg_c = (55, 42, 28)
+                            border_c = (230, 180, 50)
+                        elif not can_afford:
+                            bg_c = (35, 36, 42)
+                            border_c = (70, 72, 80)
+                        else:
+                            bg_c = (38, 34, 30)
+                            border_c = (140, 110, 50)
+
+                        pygame.draw.rect(screen, bg_c, b_rect, border_radius=4)
+                        pygame.draw.rect(screen, border_c, b_rect, 2 if is_active else 1, border_radius=4)
+
+                        title_col = COLOR_GOLD if is_active else (COLOR_TEXT_WHITE if can_afford else COLOR_TEXT_MUTED)
+                        screen.blit(font_xs.render(b_title, True, title_col), (888, btn_y + 4))
+                        screen.blit(font_xs.render(b_sub, True, (240, 220, 170) if is_active else COLOR_TEXT_MUTED), (888, btn_y + 19))
+
+                        if mouse_clicked and b_hov:
+                            if is_active:
+                                state.build_mode = False
+                            else:
+                                state.build_mode = True
+                                state.build_type = b_type_key
+
+                        btn_y += 42
 
                     if state.build_mode:
-                        hint1 = font_xs.render("• Hover 2 adjacent tiles inside this province.", True, COLOR_TEXT_WHITE)
-                        hint2 = font_xs.render("• Press 'T' to rotate orientation (Horiz / Vert).", True, COLOR_GOLD)
-                        hint3 = font_xs.render("• Click to establish new city holding.", True, COLOR_TEXT_GREEN)
-                        screen.blit(hint1, (880, cy + 75))
-                        screen.blit(hint2, (880, cy + 93))
-                        screen.blit(hint3, (880, cy + 111))
+                        cur_spec = BUILDING_SPECS.get(state.build_type, BUILDING_SPECS["city"])
+                        hint1 = font_xs.render(f"• Active: Placing {cur_spec['name']} ({cur_spec['tiles']} Tile{'s' if cur_spec['tiles'] > 1 else ''})", True, (255, 225, 100))
+                        screen.blit(hint1, (880, btn_y + 6))
+                        if cur_spec["tiles"] > 1:
+                            hint2 = font_xs.render("• Press 'T' to rotate (Horiz / Vert)", True, COLOR_GOLD)
+                        else:
+                            hint2 = font_xs.render("• Hover 1 free tile in this province", True, COLOR_TEXT_WHITE)
+                        hint3 = font_xs.render("• Click to establish holding  •  ESC to cancel", True, COLOR_TEXT_GREEN)
+                        screen.blit(hint2, (880, btn_y + 22))
+                        screen.blit(hint3, (880, btn_y + 38))
 
             # -------------------------------------------------------------
             # TAB 3: VASSALS (Detailed Realm & Province Vassals)
@@ -3347,7 +3713,7 @@ def run_game():
                     pygame.draw.rect(screen, (70, 50, 15), eb_rect, border_radius=4)
                     pygame.draw.rect(screen, COLOR_GOLD, eb_rect, 2, border_radius=4)
                     screen.blit(font_xs.render(f"🖌 CARVING: {f_name} ({num_tiles} tiles)", True, COLOR_GOLD), (886, 184))
-                    screen.blit(font_xs.render("Click green tiles on map (Min 2)", True, (240, 240, 240)), (886, 202))
+                    screen.blit(font_xs.render("Click green tiles on map (Min 1)", True, (240, 240, 240)), (886, 202))
                     
                     # DONE button
                     done_btn = pygame.Rect(1028, 186, 68, 28)
@@ -3364,13 +3730,10 @@ def run_game():
                     screen.blit(font_xs.render("CANCEL", True, COLOR_TEXT_WHITE), (1108, 193))
 
                     if mouse_clicked and d_hov:
-                        if edit_f and len(edit_f.get("tiles", [])) < 2:
-                            if len(edit_f.get("tiles", [])) == 0:
-                                del state.fiefs[state.editing_fief_id]
-                                state.editing_fief_id = None
-                                state.logs.append(f"Cancelled carving {f_name}: No tiles were selected.")
-                            else:
-                                state.logs.append(f"Fief requires at least 2 tiles (currently has {len(edit_f['tiles'])}). Click more green tiles or click CANCEL.")
+                        if edit_f and len(edit_f.get("tiles", [])) < 1:
+                            del state.fiefs[state.editing_fief_id]
+                            state.editing_fief_id = None
+                            state.logs.append(f"Cancelled carving {f_name}: No tiles were selected.")
                         else:
                             if edit_f:
                                 # Synchronize all settlement holdings in this newly expanded/merged fief!
@@ -3608,10 +3971,13 @@ def run_game():
 
             fief_label = req.get("fief_name") or "their fief"
             b_tiles = req.get("build_tiles", [])
+            req_type = req.get("build_type", "city")
+            req_cost = req.get("cost", 600 if req_type == "city" else 1000)
+            req_name = "Commercial City" if req_type == "city" else "Fortress Keep"
 
             t1 = font_sm.render(f"My Liege, {req['vassal']} humbly requests your royal charter", True, COLOR_TEXT_WHITE)
-            t2 = font_sm.render(f"to construct a fortified market town inside {fief_label}.", True, COLOR_TEXT_WHITE)
-            t3 = font_xs.render("• Granting Charter: Vassal pays 1,000g, +5 Province Tax, +250 Levies.", True, COLOR_TEXT_GREEN)
+            t2 = font_sm.render(f"to construct a {req_name} inside {fief_label}.", True, COLOR_TEXT_WHITE)
+            t3 = font_xs.render(f"• Granting Charter: Vassal pays {req_cost}g, boosts provincial prosperity.", True, COLOR_TEXT_GREEN)
             t4 = font_xs.render(f"• Location: {len(b_tiles)} vacant tile(s) strictly inside {fief_label} ({req['province_name']}).", True, COLOR_GOLD)
 
             screen.blit(t1, (pop_x + 25, pop_y + 70))
@@ -3637,35 +4003,44 @@ def run_game():
                 pid = req["province_id"]
                 p_obj = PROVINCES.get(pid)
                 if p_obj:
-                    p_obj["tax"] += 5
-                    p_obj["levies_max"] += 250
-                    p_obj["levies_current"] += 250
-                    req["vassal_ref"]["gold"] = max(0, req["vassal_ref"]["gold"] - 1000)
-                    
-                    # Construct town strictly on free tiles within this vassal's owned fief!
+                    if req_type == "city":
+                        p_obj["tax"] += 3
+                        p_obj["levies_max"] += 100
+                        p_obj["levies_current"] += 100
+                        city_title = f"{req['vassal'].split()[1]}'s {random.choice(['Borough', 'Burgh', 'Town', 'Market'])}"
+                    else:
+                        p_obj["tax"] += 1
+                        p_obj["levies_max"] += 300
+                        p_obj["levies_current"] += 300
+                        city_title = f"{req['vassal'].split()[1]}'s {random.choice(['Keep', 'Castle', 'Fortress'])}"
+
+                    req["vassal_ref"]["gold"] = max(0, req["vassal_ref"]["gold"] - req_cost)
+
+                    # Construct holding strictly on free tiles within this vassal's owned fief!
                     b_tiles = req.get("build_tiles", [])
-                    city_title = f"{req['vassal'].split()[1]}'s {random.choice(['Borough', 'Castle', 'Burgh', 'Keep'])}"
                     state.settlement_id_counter += 1
                     s_id = f"settlement_{state.settlement_id_counter}"
                     for t in b_tiles:
                         state.settlements[t] = {
                             "id": s_id,
                             "province": pid,
-                            "type": "town",
+                            "type": req_type,
                             "name": city_title,
                             "lord": req["vassal"],
                             "vassal_id": req["vassal_ref"]["id"],
-                            "is_crown_demesne": False
+                            "is_crown_demesne": False,
+                            "is_crown_fief": False,
+                            "level": 0
                         }
                         if "tiles" not in req["vassal_ref"]:
                             req["vassal_ref"]["tiles"] = []
                         if t not in req["vassal_ref"]["tiles"]:
                             req["vassal_ref"]["tiles"].append(t)
-                    
+
                     if not req["vassal_ref"].get("city_name"):
                         req["vassal_ref"]["city_name"] = city_title
 
-                    state.logs.append(f"Granted charter! {req['vassal']} established {city_title} inside {fief_label}.")
+                    state.logs.append(f"Granted charter! {req['vassal']} established {city_title} ({req_name}) inside {fief_label}.")
                 state.vassal_build_requests.pop(0)
 
             elif modal_mouse_clicked and den_hov:
@@ -4006,11 +4381,15 @@ def run_game():
             # Body Warning & Description
             v_name = conf["vassal_name"]
             f_name = conf["fief_name"]
-            t1 = font_sm.render(f"My Liege, you are establishing a settlement inside {f_name}.", True, COLOR_TEXT_WHITE)
+            b_cost = conf.get("cost", 1000)
+            b_type = conf.get("build_type", "city")
+            b_spec = BUILDING_SPECS.get(b_type, BUILDING_SPECS["city"])
+
+            t1 = font_sm.render(f"My Liege, you are establishing a {b_spec['name']} inside {f_name}.", True, COLOR_TEXT_WHITE)
             t2 = font_sm.render(f"This land is legally held by your feudal subject, {v_name}.", True, (255, 235, 140))
-            t3 = font_xs.render("• Under Feudal Law, all cities founded on vassal fiefs belong to the Vassal.", True, (160, 210, 255))
-            t4 = font_xs.render(f"• Full Lordship and revenue of this city will be permanently granted to {v_name}.", True, COLOR_TEXT_GREEN)
-            t5 = font_xs.render("• Royal Treasury: -1,000 Gold  |  Province: +10 Tax, +500 Levies (Bolsters Realm).", True, COLOR_GOLD)
+            t3 = font_xs.render(f"• Under Feudal Law, all holdings founded on vassal fiefs belong to the Vassal.", True, (160, 210, 255))
+            t4 = font_xs.render(f"• Lordship and revenue of this {b_spec['name']} will be granted to {v_name}.", True, COLOR_TEXT_GREEN)
+            t5 = font_xs.render(f"• Royal Treasury: -{b_cost:,} Gold  |  Constructs {b_spec['name']} ({b_spec['desc']}).", True, COLOR_GOLD)
 
             screen.blit(t1, (pop_x + 25, pop_y + 76))
             screen.blit(t2, (pop_x + 25, pop_y + 98))
@@ -4035,12 +4414,20 @@ def run_game():
             screen.blit(font_sm.render("CANCEL (DO NOT BUILD)", True, COLOR_TEXT_WHITE), (pop_x + pop_w - 35 - btn_w + 42, pop_y + 225))
 
             if modal_mouse_clicked and c_hov:
-                state.player["gold"] -= 1000
+                state.player["gold"] -= b_cost
                 p_obj = PROVINCES.get(conf["province_id"])
                 if p_obj:
-                    p_obj["tax"] += 10
-                    p_obj["levies_max"] += 500
-                    p_obj["levies_current"] += 500
+                    if b_type == "city":
+                        p_obj["tax"] += 3
+                        p_obj["levies_max"] += 100
+                        p_obj["levies_current"] += 100
+                    elif b_type == "fort":
+                        p_obj["tax"] += 1
+                        p_obj["levies_max"] += 300
+                        p_obj["levies_current"] += 300
+                    else:
+                        p_obj["levies_max"] += 100
+                        p_obj["levies_current"] += 100
 
                 v_obj = None
                 for v in state.vassals.get(conf["province_id"], []):
@@ -4049,7 +4436,13 @@ def run_game():
                         break
 
                 v_short = v_name.split()[1] if len(v_name.split()) > 1 else v_name
-                city_name = f"{v_short}'s {random.choice(['Keep', 'Burgh', 'Castle', 'Borough'])}"
+                if b_type == "city":
+                    city_name = f"{v_short}'s {random.choice(['Borough', 'Burgh', 'Town', 'Market'])}"
+                elif b_type == "fort":
+                    city_name = f"{v_short}'s {random.choice(['Keep', 'Castle', 'Fortress'])}"
+                else:
+                    city_name = f"{v_short}'s Barracks"
+
                 state.settlement_id_counter += 1
                 s_id = f"settlement_{state.settlement_id_counter}"
 
@@ -4057,12 +4450,13 @@ def run_game():
                     state.settlements[(tc, tr)] = {
                         "id": s_id,
                         "province": conf["province_id"],
-                        "type": "town",
+                        "type": b_type,
                         "name": city_name,
                         "lord": v_name,
                         "vassal_id": conf.get("vassal_id"),
                         "is_crown_demesne": False,
-                        "is_crown_fief": False
+                        "is_crown_fief": False,
+                        "level": 0
                     }
                     if v_obj:
                         if "tiles" not in v_obj:
@@ -4075,7 +4469,7 @@ def run_game():
                         v_obj["city_name"] = city_name
                     v_obj["gold"] = v_obj.get("gold", 150) + 100
 
-                state.logs.append(f"Invested 1,000g in {f_name}! Constructed {city_name} owned by {v_name}.")
+                state.logs.append(f"Invested {b_cost:,}g in {f_name}! Constructed {city_name} owned by {v_name}.")
                 state.vassal_build_confirm = None
 
             elif modal_mouse_clicked and can_hov:
