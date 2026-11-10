@@ -131,6 +131,21 @@ class GameState:
         
         # Generate random 1-5 vassals for all provinces
         self.generate_province_vassals()
+        setup_province_starter_cities(self)
+
+    def are_hostile(self, char1, char2):
+        """
+        Returns True if char1 and char2 are actively at war.
+        During peacetime vassalage (war_status == 'vassalage'), liege and vassal are NOT hostile!
+        """
+        if not char1 or not char2 or char1 == char2:
+            return False
+        if getattr(self, "war_status", "war") == "vassalage":
+            if getattr(self, "player_liege", None) == self.enemy_id and {char1, char2} == {self.player_id, self.enemy_id}:
+                return False
+            if getattr(self, "enemy_liege", None) == self.player_id and {char1, char2} == {self.player_id, self.enemy_id}:
+                return False
+        return True
 
     def reset(self):
         """Reinitialize entire game state and 1:1 starter cities matching vassals in-place."""
@@ -335,12 +350,20 @@ class GameState:
             if s.get("province") == "wessex":
                 s["occupied_by"] = None
 
-        # Stand down wartime offensive armies
+        # Stand down wartime offensive armies & remove enemy invaders from Wessex
         for a in list(self.armies):
             if a.owner == self.player_id:
                 self.disband_army(a)
-            elif a.owner == self.enemy_id and (a.province == "wessex" or a.is_sieging):
-                self.disband_army(a)
+            elif a.owner == self.enemy_id:
+                # If army is in Wessex, return troops immediately to origin garrison and vacate Wessex
+                if a.province == "wessex" or (getattr(a, "tile", None) and CELL_TO_PROV.get(a.tile) == "wessex"):
+                    prov = PROVINCES.get(a.flag_origin)
+                    if prov:
+                        prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + a.troops)
+                    if a in self.armies:
+                        self.armies.remove(a)
+                else:
+                    self.disband_army(a)
 
         self.subjugation_event = {
             "type": "player_vassalized",
@@ -386,10 +409,19 @@ class GameState:
             if s.get("province") == "jorvik":
                 s["occupied_by"] = None
 
-        # Stand down enemy armies
+        # Stand down enemy armies & clear invaders from Jorvik
         for a in list(self.armies):
             if a.owner == self.enemy_id:
                 self.disband_army(a)
+            elif a.owner == self.player_id:
+                if a.province == "jorvik" or (getattr(a, "tile", None) and CELL_TO_PROV.get(a.tile) == "jorvik"):
+                    prov = PROVINCES.get(a.flag_origin)
+                    if prov:
+                        prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + a.troops)
+                    if a in self.armies:
+                        self.armies.remove(a)
+                else:
+                    self.disband_army(a)
 
         self.subjugation_event = {
             "type": "enemy_vassalized",
@@ -1152,7 +1184,7 @@ class GameState:
     def update_armies(self):
         # Sanity check: Clear in_battle flag for any army that has no enemy on its tile
         for a in self.armies:
-            opponents = [o for o in self.armies if getattr(o, "tile", None) == getattr(a, "tile", None) and o.owner != a.owner]
+            opponents = [o for o in self.armies if getattr(o, "tile", None) == getattr(a, "tile", None) and self.are_hostile(a.owner, o.owner)]
             if not opponents:
                 a.in_battle = False
 
@@ -1173,9 +1205,8 @@ class GameState:
                     a.move_progress = 0.0
 
                     # INTERCEPTION CHECK: if enemy is on this tile, stop and fight
-                    enemy_owner = self.enemy_id if a.owner == self.player_id else self.player_id
                     blockers = [e for e in self.armies
-                                if getattr(e, "tile", None) == a.tile and e.owner == enemy_owner]
+                                if getattr(e, "tile", None) == a.tile and self.are_hostile(a.owner, e.owner)]
                     if blockers:
                         a.tile_path = []
                         a.move_progress = 0.0
@@ -1211,7 +1242,7 @@ class GameState:
             p1_list = [a for a in armies_on_tile if a.owner == self.player_id]
             p2_list = [a for a in armies_on_tile if a.owner == self.enemy_id]
 
-            if not (p1_list and p2_list):
+            if not (p1_list and p2_list) or not self.are_hostile(self.player_id, self.enemy_id):
                 for a in armies_on_tile:
                     a.in_battle = False
                 continue
@@ -1276,12 +1307,12 @@ class GameState:
                 a.siege_progress = 0
                 continue
 
-            defenders = [enemy for enemy in self.armies if getattr(enemy, "tile", None) == a.tile and enemy.owner != a.owner]
+            defenders = [enemy for enemy in self.armies if getattr(enemy, "tile", None) == a.tile and self.are_hostile(a.owner, enemy.owner)]
             if defenders:
                 a.is_sieging = False
                 continue
 
-            is_enemy_prov = (prov["owner"] != a.owner)
+            is_enemy_prov = self.are_hostile(a.owner, prov["owner"])
 
             # Strict Tile-Based Siege: Army must stand directly on the settlement tile
             cur_settlement = self.settlements.get(a.tile)
@@ -1302,8 +1333,8 @@ class GameState:
                         needs_siege = True
                         is_liberation = False
                 else:
-                    # Friendly province: need to liberate if occupied by enemy
-                    if occ is not None and occ != a.owner:
+                    # Friendly / Vassal province: liberate only if occupied by a hostile power
+                    if occ is not None and self.are_hostile(occ, prov["owner"]):
                         needs_siege = True
                         is_liberation = True
 

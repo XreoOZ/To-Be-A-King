@@ -164,9 +164,10 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     player_crown_items = []
     covered_holding_tiles = set()
     for f in state.fiefs.values():
-        if (f.get("vassal_id") is None and
-            PROVINCES.get(f.get("province"), {}).get("owner") == state.player_id and
-            (f.get("holder") == state.player["name"] or f.get("is_crown_demesne"))):
+        prov_owner = PROVINCES.get(f.get("province"), {}).get("owner")
+        is_my_prov = (prov_owner == state.player_id)
+        is_my_holding = (f.get("holder") == state.player["name"] or f.get("is_crown_demesne"))
+        if f.get("vassal_id") is None and (is_my_prov or is_my_holding):
             f["holder"] = state.player["name"]
             f["is_crown_demesne"] = True
             player_crown_items.append({
@@ -182,7 +183,10 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     for h in get_all_settlement_holdings(state):
         sdata = h["data"]
         pid = h["province"]
-        if PROVINCES.get(pid, {}).get("owner") == state.player_id and (sdata.get("is_crown_demesne") or sdata.get("vassal_id") is None):
+        prov_owner = PROVINCES.get(pid, {}).get("owner")
+        is_my_prov = (prov_owner == state.player_id)
+        is_my_holding = (sdata.get("lord") == f"{state.player['name']} (Crown Demesne)" or sdata.get("is_crown_demesne"))
+        if (is_my_prov or is_my_holding) and sdata.get("vassal_id") is None:
             sdata["lord"] = f"{state.player['name']} (Crown Demesne)"
             sdata["is_crown_demesne"] = True
             if not any(t in covered_holding_tiles for t in h["tiles"]):

@@ -97,6 +97,14 @@ def run_realm_ai(state, ruler_id):
     if ruler.get("liege") == state.player_id:
         return
 
+    # Check if the player is a peaceful vassal of this liege
+    if getattr(state, "player_liege", None) == ruler_id and getattr(state, "war_status", "war") == "vassalage":
+        # AI does not wage war against its own vassal in peacetime!
+        for a in list(state.armies):
+            if a.owner == ruler_id and not a.in_battle and not a.is_sieging and not a.is_mustering and not a.courier_en_route:
+                state.disband_army(a)
+        return
+
     realm_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") == ruler_id]
     if not realm_provs:
         return
@@ -108,7 +116,7 @@ def run_realm_ai(state, ruler_id):
     standardize_realm_laws(state, ruler_id)
 
     # 2. Tactical Reconnaissance: Hostile and Realm Armies
-    hostile_armies = [a for a in state.armies if a.owner != ruler_id and a.troops > 0]
+    hostile_armies = [a for a in state.armies if getattr(state, "are_hostile", lambda o1, o2: o1 != o2)(ruler_id, a.owner) and a.troops > 0]
     my_armies = [a for a in state.armies if a.owner == ruler_id and a.troops > 0]
 
     invading_threats = {}    # realm pid -> list of invading hostile armies
@@ -263,7 +271,7 @@ def run_realm_ai(state, ruler_id):
                 state.logs.append(f"⚔ Counter-Attack: {r_name} leads {main_host.troops:,} men to confront enemy forces in {PROVINCES[target_inv_prov]['name']}!")
         else:
             # Severely Outnumbered: Diversionary Flank
-            hostile_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") != ruler_id and p.get("owner") is not None]
+            hostile_provs = [pid for pid, p in PROVINCES.items() if getattr(state, "are_hostile", lambda o1, o2: o1 != o2)(ruler_id, p.get("owner"))]
             undefended_enemy = [pid for pid in hostile_provs if not any(ha.province == pid for ha in hostile_armies)]
             if undefended_enemy and not main_host.is_moving:
                 flank_target = undefended_enemy[0]
@@ -314,7 +322,7 @@ def run_realm_ai(state, ruler_id):
                     return
 
             # Cunning Target Selection: Evaluate all hostile provinces by strategic score!
-            hostile_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") != ruler_id and p.get("owner") is not None]
+            hostile_provs = [pid for pid, p in PROVINCES.items() if getattr(state, "are_hostile", lambda o1, o2: o1 != o2)(ruler_id, p.get("owner"))]
             if hostile_provs:
                 scored_targets = [(pid, evaluate_target_province(state, pid, realm_provs, hostile_armies, ruler_id)) for pid in hostile_provs]
                 scored_targets.sort(key=lambda x: x[1], reverse=True)
