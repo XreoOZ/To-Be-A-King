@@ -512,7 +512,7 @@ class GameState:
         return sum(1 for p in PROVINCES.values() if p["owner"] == char_id)
 
     def get_unraised_levies(self, char_id):
-        return sum(p["levies_current"] for p in PROVINCES.values() if p["owner"] == char_id)
+        return sum(p.get("levies_current", p.get("levies_max", 100)) for p in PROVINCES.values() if p.get("owner") == char_id)
 
     def get_field_troops(self, char_id):
         return sum(a.troops for a in self.armies if a.owner == char_id)
@@ -2443,6 +2443,9 @@ def setup_province_starter_cities(target_state):
             st = get_vassal_landed_status(target_state, v, pid)
             v["tax_contribution"] = st["tax_paid"]
             v["levy_contribution"] = st["levy_contribution"]
+
+    # Synchronize all province garrison and levy caps from physical holdings
+    sync_province_holdings_stats(target_state, is_init=True)
 
     standardize_enemy_ai_laws(target_state)
 
