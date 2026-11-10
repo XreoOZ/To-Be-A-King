@@ -137,16 +137,53 @@ class GameState:
     def are_hostile(self, char1, char2):
         """
         Returns True if char1 and char2 are actively at war.
-        During peacetime vassalage (war_status == 'vassalage'), liege and vassal are NOT hostile!
+        During peacetime ('peace' or 'vassalage'), characters are NOT hostile!
         """
         if not char1 or not char2 or char1 == char2:
             return False
-        if getattr(self, "war_status", "war") == "vassalage":
+        ws = getattr(self, "war_status", "war")
+        if ws == "peace":
+            return False
+        if ws == "vassalage":
             if getattr(self, "player_liege", None) == self.enemy_id and {char1, char2} == {self.player_id, self.enemy_id}:
                 return False
             if getattr(self, "enemy_liege", None) == self.player_id and {char1, char2} == {self.player_id, self.enemy_id}:
                 return False
         return True
+
+    def declare_war(self, initiator_id=None, target_id=None, reason="Formal Declaration"):
+        """Declares war between two realms, initiating active hostility."""
+        if initiator_id is None:
+            initiator_id = self.player_id
+        if target_id is None:
+            target_id = self.enemy_id
+
+        if getattr(self, "war_status", "war") == "war":
+            return
+
+        self.war_status = "war"
+        p_char = CHARACTERS.get(initiator_id, {})
+        t_char = CHARACTERS.get(target_id, {})
+        p_name = p_char.get("name", initiator_id)
+        t_name = t_char.get("name", target_id)
+        self.logs.append(f"⚔ WAR DECLARED! {p_name} has declared war on {t_name}! ({reason})")
+
+    def offer_peace(self, initiator_id=None, target_id=None):
+        """Signs a truce / peace agreement between two realms, ending hostilities."""
+        if initiator_id is None:
+            initiator_id = self.player_id
+        if target_id is None:
+            target_id = self.enemy_id
+
+        if getattr(self, "war_status", "war") == "peace":
+            return
+
+        self.war_status = "peace"
+        p_char = CHARACTERS.get(initiator_id, {})
+        t_char = CHARACTERS.get(target_id, {})
+        p_name = p_char.get("name", initiator_id)
+        t_name = t_char.get("name", target_id)
+        self.logs.append(f"🕊 PEACE CONCLUDED: A truce has been established between {p_name} and {t_name}.")
 
     def reset(self):
         """Reinitialize entire game state and 1:1 starter cities matching vassals in-place."""
@@ -926,6 +963,8 @@ class GameState:
             return
 
         occ = cur_settlement.get("occupied_by")
+        if getattr(self, "war_status", "war") == "peace" and prov.get("owner") != army.owner:
+            self.declare_war(army.owner, prov["owner"], reason="Unprovoked Siege")
         is_enemy_prov = self.are_hostile(army.owner, prov["owner"])
 
         needs_siege = False
@@ -1301,8 +1340,19 @@ class GameState:
                 a.move_progress += a.move_speed
                 if a.move_progress >= 100.0:
                     a.tile = a.tile_path.pop(0)
-                    a.province = CELL_TO_PROV.get(a.tile, a.province)
+                    new_prov = CELL_TO_PROV.get(a.tile, a.province)
+                    if new_prov != a.province:
+                        a.province = new_prov
+                        prov_owner = PROVINCES.get(new_prov, {}).get("owner")
+                        if prov_owner and prov_owner != a.owner and getattr(self, "war_status", "war") == "peace":
+                            self.declare_war(a.owner, prov_owner, reason="Border Incursion")
                     a.move_progress = 0.0
+
+                    # Check peace-break if stepping onto a foreign army's tile
+                    if getattr(self, "war_status", "war") == "peace":
+                        other_armies = [e for e in self.armies if getattr(e, "tile", None) == a.tile and e.owner != a.owner and e.troops > 0]
+                        if other_armies:
+                            self.declare_war(a.owner, other_armies[0].owner, reason="Troop Clash")
 
                     # INTERCEPTION CHECK: if enemy is on this tile, stop and fight
                     blockers = [e for e in self.armies
