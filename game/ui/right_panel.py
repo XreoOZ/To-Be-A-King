@@ -641,6 +641,7 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                                         state.settlements[t]["is_crown_demesne"] = False
                                         state.settlements[t]["is_crown_fief"] = False
                         state.editing_fief_id = None
+                        sync_province_holdings_stats(state, state.selected_province)
                         state.logs.append(f"Successfully established boundaries for {f_name} ({len(edit_f['tiles'])} tiles)!")
     
                 elif mouse_clicked and can_hov:
@@ -736,6 +737,7 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                     screen.blit(del_lbl, (b_del.x + (b_del.w - del_lbl.get_width()) // 2, fy + 40))
                     if mouse_clicked and d_hov:
                         fid_to_del = f_data["id"]
+                        f_prov = f_data.get("province", state.selected_province)
                         for t in f_data["tiles"]:
                             if t in state.settlements:
                                 state.settlements[t]["lord"] = f"{state.player['name']} (Crown Demesne)"
@@ -747,10 +749,11 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                             state.selected_fief_id = None
                         if state.editing_fief_id == fid_to_del:
                             state.editing_fief_id = None
-                        state.logs.append(f"Dissolved {f_data['name']}. Land returned to Crown province.")
+                        sync_province_holdings_stats(state, f_prov)
+                        state.logs.append(f"Dissolved {f_data['name']}. Land returned to unpartitioned Crown province.")
                         break
                 else:
-                    # Revoke Fief Button (Transfers vassal ownership to Crown Demesne and dissolves fief partition)
+                    # Revoke Fief Button (Transfers vassal ownership to Crown Demesne & integrates garrison into Crown forces)
                     b_revoke = pygame.Rect(content_x + 90, fy + 36, content_w - 98, 22)
                     r_hov = b_revoke.collidepoint(mouse_pos)
                     pygame.draw.rect(screen, (100, 45, 45) if r_hov else (70, 30, 30), b_revoke, border_radius=3)
@@ -760,7 +763,8 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                     if mouse_clicked and r_hov:
                         v_prev = f_data["holder"]
                         v_prev_id = f_data.get("vassal_id")
-                        fid_to_del = f_data["id"]
+                        fid_target = f_data["id"]
+                        f_prov = f_data.get("province", state.selected_province)
     
                         # 1. Transfer all settlements on this fief directly to the King (Crown Demesne)
                         for t in f_data["tiles"]:
@@ -768,7 +772,7 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                                 state.settlements[t]["lord"] = f"{state.player['name']} (Crown Demesne)"
                                 state.settlements[t]["vassal_id"] = None
                                 state.settlements[t]["is_crown_demesne"] = True
-                                state.settlements[t]["is_crown_fief"] = False
+                                state.settlements[t]["is_crown_fief"] = True
     
                         # 2. Update former vassal's held tiles
                         for pid, v_list in state.vassals.items():
@@ -781,14 +785,18 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                                     v["tax_contribution"] = st_v["tax_paid"]
                                     v["levy_contribution"] = st_v["levy_contribution"]
     
-                        # 3. Dissolve the fief partition so land returns directly to the King as unpartitioned Crown land
-                        del state.fiefs[fid_to_del]
-                        if state.selected_fief_id == fid_to_del:
-                            state.selected_fief_id = None
-                        if state.editing_fief_id == fid_to_del:
-                            state.editing_fief_id = None
+                        # 3. Retain the fief as Crown Demesne (King Alfred is now the direct holder!)
+                        f_data["holder"] = state.player["name"]
+                        f_data["vassal_id"] = None
+                        f_data["is_crown_demesne"] = True
+                        f_data["is_crown_fief"] = True
+                        p_short = PROVINCES.get(f_prov, {}).get("name", "Crown").split()[0]
+                        f_data["name"] = f"Crown Barony of {p_short}"
     
-                        state.logs.append(f"Revoked & dissolved {f_data['name']} from {v_prev}! Returned directly to Crown Demesne.")
+                        # 4. CRITICAL: Synchronize province garrison and levies strictly to new Crown demesne!
+                        sync_province_holdings_stats(state, f_prov)
+    
+                        state.logs.append(f"Revoked {f_data['name']} from {v_prev}! Fiefdom and all garrisons returned directly to Crown Demesne.")
                         break
     
                 if mouse_clicked and is_f_hov and not (e_hov or g_hov or d_hov or r_hov):

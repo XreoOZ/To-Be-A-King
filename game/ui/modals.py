@@ -233,6 +233,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                     st_new = get_vassal_landed_status(state, c_v, f_target["province"])
                     c_v["tax_contribution"] = st_new["tax_paid"]
                     c_v["levy_contribution"] = st_new["levy_contribution"]
+                    sync_province_holdings_stats(state, f_target["province"])
                     
                     state.logs.append(f"Royal Investiture: Bestowed {f_target['name']} upon {c_v['name']} (+100g)!")
                     state.granting_fief_id = None
