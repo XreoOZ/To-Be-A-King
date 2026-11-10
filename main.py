@@ -841,6 +841,7 @@ class GameState:
         self.left_tab = "armies"
         self.vassal_page = 0
         self.demesne_page = 0
+        self.demesne_selected_province = None  # None = show province list; str = province id to show fiefs inside
         self.fief_page = 0
         self.laws_page = 0
         
@@ -2322,11 +2323,15 @@ def run_game():
         elif mouse_clicked and is_hov_tv:
             state.left_tab = "vassals"
         elif mouse_clicked and is_hov_td:
-            state.left_tab = "demesne"
+            if state.left_tab != "demesne":
+                state.left_tab = "demesne"
+                state.demesne_selected_province = None
+                state.demesne_page = 0
+            else:
+                state.demesne_selected_province = None
+                state.demesne_page = 0
         elif mouse_clicked and is_hov_tl:
             state.left_tab = "laws"
-        elif mouse_clicked and is_hov_td:
-            state.left_tab = "demesne"
 
         if state.left_tab == "armies":
             # Active Saxon Armies Roster
@@ -2379,93 +2384,199 @@ def run_game():
                 log_y += 24
 
         elif state.left_tab == "demesne":
-            # Crown Demesne View (Personal Crown Fiefs & Cities)
-            total_cf = len(player_crown_items)
-            header_lbl = font_md.render(f"Crown Demesne ({total_cf} Holdings)", True, COLOR_GOLD)
-            screen.blit(header_lbl, (25, 302))
+            # Group player crown holdings and fiefs by province
+            crown_by_prov = {}
+            for it in player_crown_items:
+                pid = it["province"]
+                if pid not in crown_by_prov:
+                    crown_by_prov[pid] = []
+                crown_by_prov[pid].append(it)
 
-            per_page = 5
-            max_pages = max(1, (total_cf + per_page - 1) // per_page)
-            state.demesne_page = max(0, min(state.demesne_page, max_pages - 1))
+            crown_provinces = sorted(
+                list(crown_by_prov.keys()),
+                key=lambda p: (0 if p == "wessex" else 1, PROVINCES.get(p, {}).get("name", p))
+            )
 
-            # Header Top Pagination Controls (< 1/2 >)
-            top_btn_prev = pygame.Rect(216, 302, 18, 18)
-            top_btn_next = pygame.Rect(268, 302, 18, 18)
-            is_top_prev_hov = top_btn_prev.collidepoint(mouse_pos)
-            is_top_next_hov = top_btn_next.collidepoint(mouse_pos)
+            # Safety check: if demesne_selected_province no longer exists in crown_by_prov, reset it
+            if state.demesne_selected_province and state.demesne_selected_province not in crown_by_prov:
+                state.demesne_selected_province = None
 
-            p_top_prev_col = COLOR_TEXT_WHITE if (state.demesne_page > 0 and not is_top_prev_hov) else (COLOR_GOLD if is_top_prev_hov else (70, 75, 85))
-            p_top_next_col = COLOR_TEXT_WHITE if (state.demesne_page < max_pages - 1 and not is_top_next_hov) else (COLOR_GOLD if is_top_next_hov else (70, 75, 85))
-            screen.blit(font_xs.render("<", True, p_top_prev_col), (221, 304))
-            p_top_str = f"{state.demesne_page + 1}/{max_pages}"
-            p_top_lbl = font_xs.render(p_top_str, True, COLOR_TEXT_MUTED)
-            screen.blit(p_top_lbl, (244 - p_top_lbl.get_width() // 2, 304))
-            screen.blit(font_xs.render(">", True, p_top_next_col), (273, 304))
+            # -------------------------------------------------------------
+            # LEVEL 1: LIST OF PROVINCES CONTAINING PLAYER'S CROWN FIEFS
+            # -------------------------------------------------------------
+            if state.demesne_selected_province is None:
+                total_provs = len(crown_provinces)
+                total_holdings = len(player_crown_items)
+                header_lbl = font_md.render(f"Crown Demesne ({total_holdings} Holdings)", True, COLOR_GOLD)
+                screen.blit(header_lbl, (25, 302))
 
-            if mouse_clicked and is_top_prev_hov and state.demesne_page > 0:
-                state.demesne_page -= 1
-            elif mouse_clicked and is_top_next_hov and state.demesne_page < max_pages - 1:
-                state.demesne_page += 1
+                per_page = 5
+                max_pages = max(1, (total_provs + per_page - 1) // per_page)
+                state.demesne_page = max(0, min(state.demesne_page, max_pages - 1))
 
-            start_i = state.demesne_page * per_page
-            cur_page_fiefs = player_crown_items[start_i:start_i + per_page]
+                start_i = state.demesne_page * per_page
+                cur_page_provs = crown_provinces[start_i:start_i + per_page]
 
-            fy = 328
-            for f in cur_page_fiefs:
-                f_rect = pygame.Rect(25, fy, 260, 50)
-                is_sel = (f["id"] == state.selected_fief_id or (not f["is_fief"] and f.get("tiles") and state.selected_settlement in f["tiles"]))
-                b_hover_f = f_rect.collidepoint(mouse_pos)
-                
-                bg_col = (70, 55, 20) if is_sel else ((50, 60, 78) if b_hover_f else (34, 40, 52))
-                pygame.draw.rect(screen, bg_col, f_rect, border_radius=4)
-                pygame.draw.rect(screen, COLOR_GOLD if is_sel else (80, 140, 220), f_rect, 1, border_radius=4)
+                fy = 328
+                for pid in cur_page_provs:
+                    p_items = crown_by_prov[pid]
+                    p_info = PROVINCES.get(pid, {})
+                    p_name = p_info.get("name", pid).split()[0]
+                    p_tiles_cnt = sum(len(it.get("tiles", [])) for it in p_items)
 
-                screen.blit(font_sm.render(f"🏰 {f['name']}", True, COLOR_GOLD), (34, fy + 4))
-                p_short = PROVINCES[f['province']]['name'].split()[0]
-                kind_str = "Crown Fief" if f["is_fief"] else "Crown City"
-                status_str = f"Province: {p_short} • {len(f['tiles'])}t ({kind_str})"
-                screen.blit(font_xs.render(status_str, True, (210, 230, 255)), (34, fy + 26))
+                    p_card = pygame.Rect(25, fy, 260, 50)
+                    is_p_hov = p_card.collidepoint(mouse_pos)
+                    is_active_prov = (state.selected_province == pid)
 
-                if mouse_clicked and b_hover_f:
-                    state.selected_province = f["province"]
-                    if f["is_fief"]:
-                        state.selected_fief_id = f["id"]
-                    else:
-                        state.selected_fief_id = None
-                    if f.get("tiles"):
-                        state.selected_settlement = f["tiles"][0]
-                    state.selected_army_id = None
+                    bg_c = (60, 50, 24) if is_active_prov else ((50, 60, 78) if is_p_hov else (34, 40, 52))
+                    border_c = COLOR_GOLD if (is_p_hov or is_active_prov) else (80, 140, 220)
 
-                fy += 54
+                    pygame.draw.rect(screen, bg_c, p_card, border_radius=4)
+                    pygame.draw.rect(screen, border_c, p_card, 1, border_radius=4)
 
-            if not player_crown_items:
-                screen.blit(font_sm.render("No crown holdings held directly.", True, COLOR_TEXT_MUTED), (25, 350))
-                screen.blit(font_xs.render("Revoke fiefs to expand royal land.", True, COLOR_TEXT_MUTED), (25, 370))
+                    screen.blit(font_sm.render(f"🏰 {p_name}", True, COLOR_GOLD), (34, fy + 4))
+                    screen.blit(font_xs.render(f"Crown Fiefs: {len(p_items)} Holdings • {p_tiles_cnt}t", True, (210, 230, 255)), (34, fy + 26))
 
-            # Bottom Pagination Controls
-            py_btn = 645
-            btn_prev = pygame.Rect(25, py_btn, 80, 26)
-            btn_next = pygame.Rect(205, py_btn, 80, 26)
-            
-            is_prev_hov = btn_prev.collidepoint(mouse_pos)
-            is_next_hov = btn_next.collidepoint(mouse_pos)
-            
-            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
-            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
-            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.demesne_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
-            
-            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
-            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
-            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.demesne_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
-            
-            page_str = f"Page {state.demesne_page + 1}/{max_pages}"
-            p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
-            screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
-            
-            if mouse_clicked and is_prev_hov and state.demesne_page > 0:
-                state.demesne_page -= 1
-            elif mouse_clicked and is_next_hov and state.demesne_page < max_pages - 1:
-                state.demesne_page += 1
+                    arr_lbl = font_xs.render("View ›", True, COLOR_GOLD if is_p_hov else (160, 200, 240))
+                    screen.blit(arr_lbl, (280 - arr_lbl.get_width() - 8, fy + 16))
+
+                    if mouse_clicked and is_p_hov:
+                        state.demesne_selected_province = pid
+                        state.demesne_page = 0
+                        state.selected_province = pid
+                        state.logs.append(f"Opened Crown Demesne holdings in {p_name}.")
+
+                    fy += 54
+
+                if not crown_provinces:
+                    screen.blit(font_sm.render("No crown holdings held directly.", True, COLOR_TEXT_MUTED), (25, 350))
+                    screen.blit(font_xs.render("Revoke fiefs to expand royal land.", True, COLOR_TEXT_MUTED), (25, 370))
+
+                # Bottom Pagination Controls for Province List
+                py_btn = 645
+                btn_prev = pygame.Rect(25, py_btn, 80, 26)
+                btn_next = pygame.Rect(205, py_btn, 80, 26)
+                is_prev_hov = btn_prev.collidepoint(mouse_pos)
+                is_next_hov = btn_next.collidepoint(mouse_pos)
+
+                pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
+                pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
+                screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.demesne_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
+
+                pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
+                pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
+                screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.demesne_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
+
+                page_str = f"Page {state.demesne_page + 1}/{max_pages}"
+                p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
+                screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
+
+                if mouse_clicked and is_prev_hov and state.demesne_page > 0:
+                    state.demesne_page -= 1
+                elif mouse_clicked and is_next_hov and state.demesne_page < max_pages - 1:
+                    state.demesne_page += 1
+
+            # -------------------------------------------------------------
+            # LEVEL 2: LIST OF FIEFS/HOLDINGS INSIDE THE SELECTED PROVINCE
+            # -------------------------------------------------------------
+            else:
+                sel_pid = state.demesne_selected_province
+                prov_fiefs = crown_by_prov.get(sel_pid, [])
+                p_info = PROVINCES.get(sel_pid, {})
+                p_name = p_info.get("name", sel_pid).split()[0]
+
+                # Back Button & Province Header
+                back_btn = pygame.Rect(25, 298, 105, 24)
+                is_back_hov = back_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (45, 65, 90) if is_back_hov else (30, 42, 60), back_btn, border_radius=4)
+                pygame.draw.rect(screen, COLOR_GOLD if is_back_hov else (80, 140, 220), back_btn, 1, border_radius=4)
+                screen.blit(font_xs.render("◄ ALL PROVS", True, COLOR_GOLD if is_back_hov else COLOR_TEXT_WHITE), (33, 303))
+
+                header_lbl = font_sm.render(f"🏰 {p_name} ({len(prov_fiefs)})", True, COLOR_GOLD)
+                screen.blit(header_lbl, (140, 302))
+
+                per_page = 5
+                max_pages = max(1, (len(prov_fiefs) + per_page - 1) // per_page)
+                state.demesne_page = max(0, min(state.demesne_page, max_pages - 1))
+
+                start_i = state.demesne_page * per_page
+                cur_page_fiefs = prov_fiefs[start_i:start_i + per_page]
+
+                if mouse_clicked and is_back_hov:
+                    state.demesne_selected_province = None
+                    state.demesne_page = 0
+
+                fy = 328
+                for f in cur_page_fiefs:
+                    f_rect = pygame.Rect(25, fy, 260, 50)
+                    is_sel = (f["id"] == state.selected_fief_id or (not f["is_fief"] and f.get("tiles") and state.selected_settlement in f["tiles"]))
+                    b_hover_f = f_rect.collidepoint(mouse_pos)
+
+                    bg_col = (70, 55, 20) if is_sel else ((50, 60, 78) if b_hover_f else (34, 40, 52))
+                    pygame.draw.rect(screen, bg_col, f_rect, border_radius=4)
+                    pygame.draw.rect(screen, COLOR_GOLD if is_sel else (80, 140, 220), f_rect, 1, border_radius=4)
+
+                    # Determine building type in this fief
+                    h_type_str = "Crown Fief"
+                    for t in f.get("tiles", []):
+                        if t in state.settlements:
+                            stype = state.settlements[t].get("type", "city")
+                            if stype in ("city", "town"):
+                                h_type_str = "City (100 Gar • +3g)"
+                            elif stype == "fort":
+                                h_type_str = "Fortress (300 Gar • +1g)"
+                            elif stype == "barrack":
+                                h_type_str = "Barracks (Recruits)"
+                            break
+
+                    f_disp_name = f['name']
+                    if len(f_disp_name) > 22:
+                        f_disp_name = f_disp_name[:20] + "..."
+
+                    screen.blit(font_sm.render(f"👑 {f_disp_name}", True, COLOR_GOLD), (34, fy + 4))
+                    status_str = f"{len(f['tiles'])} Tile{'s' if len(f['tiles']) > 1 else ''} • {h_type_str}"
+                    screen.blit(font_xs.render(status_str, True, (210, 230, 255)), (34, fy + 26))
+
+                    if mouse_clicked and b_hover_f:
+                        state.selected_province = f["province"]
+                        if f["is_fief"]:
+                            state.selected_fief_id = f["id"]
+                        else:
+                            state.selected_fief_id = None
+                        if f.get("tiles"):
+                            state.selected_settlement = f["tiles"][0]
+                        state.selected_army_id = None
+                        state.logs.append(f"Inspecting {f['name']} in {p_name}.")
+
+                    fy += 54
+
+                if not prov_fiefs:
+                    screen.blit(font_sm.render(f"No crown fiefs in {p_name}.", True, COLOR_TEXT_MUTED), (25, 350))
+
+                # Bottom Pagination Controls for Fiefs in this Province
+                py_btn = 645
+                btn_prev = pygame.Rect(25, py_btn, 80, 26)
+                btn_next = pygame.Rect(205, py_btn, 80, 26)
+
+                is_prev_hov = btn_prev.collidepoint(mouse_pos)
+                is_next_hov = btn_next.collidepoint(mouse_pos)
+
+                pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
+                pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
+                screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.demesne_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
+
+                pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
+                pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
+                screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.demesne_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
+
+                page_str = f"Page {state.demesne_page + 1}/{max_pages}"
+                p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
+                screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
+
+                if mouse_clicked and is_prev_hov and state.demesne_page > 0:
+                    state.demesne_page -= 1
+                elif mouse_clicked and is_next_hov and state.demesne_page < max_pages - 1:
+                    state.demesne_page += 1
 
         elif state.left_tab == "vassals":
             # Realm Vassals Directory (All vassals across Kingdom of Wessex)
