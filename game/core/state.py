@@ -704,16 +704,16 @@ class GameState:
             new_army.crown_troops = c_troops
             new_army.vassal_levies = v_troops
             
-            m_days = 15 if is_emergency else 30
+            m_days = 30
             if is_royal:
                 new_army.is_mustering = True
-                new_army.muster_days = m_days
+                new_army.muster_days = 30
                 new_army.courier_en_route = False
             else:
                 full_route = find_shortest_path(capital_pid, pid)
                 if full_route and len(full_route) > 1:
                     hops = len(full_route) - 1
-                    total_days = max(1, hops * 2) if is_emergency else (hops * DAYS_PER_TILE)
+                    total_days = hops * DAYS_PER_TILE
                     new_army.courier_en_route = True
                     new_army.courier_path = full_route[1:]
                     new_army.courier_current_prov = full_route[0]
@@ -721,10 +721,10 @@ class GameState:
                     new_army.courier_progress = 0.0
                     new_army.courier_days_left = total_days
                     new_army.is_mustering = False
-                    new_army.muster_days = m_days
+                    new_army.muster_days = 30
                 else:
                     new_army.is_mustering = True
-                    new_army.muster_days = m_days
+                    new_army.muster_days = 30
                     new_army.courier_en_route = False
 
             self.armies.append(new_army)
