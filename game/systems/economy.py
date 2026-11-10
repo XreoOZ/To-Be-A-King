@@ -335,7 +335,16 @@ def get_realm_finances(state, char_id=None):
     for h in get_all_settlement_holdings(state):
         sdata = h["data"]
         pid = h["province"]
-        if PROVINCES.get(pid, {}).get("owner") == char_id and sdata.get("is_crown_demesne"):
+        prov_owner = PROVINCES.get(pid, {}).get("owner")
+        is_my_crown = False
+        if prov_owner == char_id and sdata.get("is_crown_demesne"):
+            is_my_crown = True
+        elif char_id == state.player_id and sdata.get("is_crown_demesne") and not sdata.get("vassal_id"):
+            occ = sdata.get("occupied_by")
+            if not occ or not state.are_hostile(occ, char_id):
+                is_my_crown = True
+
+        if is_my_crown:
             htype = sdata.get("type", "city")
             if htype == "fort":
                 val = 1
@@ -379,7 +388,9 @@ def get_realm_finances(state, char_id=None):
     for coord, sdata in state.settlements.items():
         if sdata.get("is_crown_demesne") and sdata.get("type") == "barrack":
             pid = sdata.get("province")
-            if PROVINCES.get(pid, {}).get("owner") == char_id:
+            prov_owner = PROVINCES.get(pid, {}).get("owner")
+            is_my_barrack = (prov_owner == char_id) or (char_id == state.player_id and not sdata.get("vassal_id"))
+            if is_my_barrack:
                 lvl = sdata.get("level", 0)
                 cost = 1 + lvl
                 total_facility_upkeep += cost
@@ -390,7 +401,19 @@ def get_realm_finances(state, char_id=None):
                     "cost": cost
                 })
 
-    total_expense = total_army_upkeep + total_facility_upkeep
+    tribute_expenses = []
+    total_tribute = 0
+    if char_id == state.player_id and getattr(state, "player_liege", None) == state.enemy_id:
+        w_tax = PROVINCES.get("wessex", {}).get("tax", 4)
+        trib = round(max(1.0, w_tax * 0.20 + 1.5), 1)
+        total_tribute = trib
+        liege_n = CHARACTERS.get(state.enemy_id, {}).get("name", "Overlord").split()[0]
+        tribute_expenses.append({
+            "name": f"Feudal Liege Tribute (To {liege_n})",
+            "cost": trib
+        })
+
+    total_expense = round(total_army_upkeep + total_facility_upkeep + total_tribute, 1)
     net_monthly = round(total_income - total_expense, 1)
 
     return {
@@ -406,6 +429,8 @@ def get_realm_finances(state, char_id=None):
         "army_expenses": army_expenses,
         "total_facility_upkeep": total_facility_upkeep,
         "barrack_expenses": barrack_expenses,
+        "total_tribute": total_tribute,
+        "tribute_expenses": tribute_expenses,
         "total_expense": total_expense,
         "net_monthly": net_monthly
     }

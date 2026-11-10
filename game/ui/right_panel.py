@@ -300,7 +300,11 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
     
     elif sel_prov:
         owner_char = CHARACTERS.get(sel_prov["owner"], CHARACTERS["char_alfred"])
-        is_player_owned = (sel_prov["owner"] == state.player_id)
+        is_vassal_seat = (getattr(state, "player_liege", None) is not None and (
+            state.selected_province == state.player_capital or
+            any(s.get("province") == state.selected_province and s.get("is_crown_demesne") and not s.get("vassal_id") for s in state.settlements.values())
+        ))
+        is_player_owned = (sel_prov["owner"] == state.player_id) or is_vassal_seat
     
         # Province Header
         p_title = font_lg.render(sel_prov["name"], True, COLOR_GOLD)
@@ -327,6 +331,12 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
             screen.blit(lbl, (cap_btn.x + (cap_btn.w - lbl.get_width()) // 2, cap_btn.y + 5))
             if mouse_clicked and cb_hov:
                 state.set_player_capital(state.selected_province)
+        elif is_vassal_seat and sel_prov["owner"] != state.player_id:
+            cap_rect = pygame.Rect(content_x + content_w - 180, 73, 180, 26)
+            pygame.draw.rect(screen, (35, 45, 65), cap_rect, border_radius=4)
+            pygame.draw.rect(screen, COLOR_GOLD, cap_rect, 1, border_radius=4)
+            lbl = font_xs.render("★ VASSAL DUCHY SEAT", True, COLOR_GOLD)
+            screen.blit(lbl, (cap_rect.x + (cap_rect.w - lbl.get_width()) // 2, cap_rect.y + 5))
         elif state.selected_province == active_enemy_cap:
             cap_rect = pygame.Rect(content_x + content_w - 150, 73, 150, 26)
             pygame.draw.rect(screen, (55, 25, 25), cap_rect, border_radius=4)

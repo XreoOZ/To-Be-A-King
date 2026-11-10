@@ -1046,13 +1046,19 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
             screen.blit(font_xs.render("Drillmasters & garrison maintenance (1+Lv gold):", True, COLOR_TEXT_MUTED), (32, 538))
     
+            by_item = 558
+            if fin.get('total_tribute', 0) > 0:
+                screen.blit(font_xs.render("• Suzerain Liege Tribute (20%):", True, (255, 190, 190)), (34, by_item))
+                screen.blit(font_xs.render(f"-{fin['total_tribute']}g/m", True, COLOR_TEXT_RED), (225, by_item))
+                by_item += 18
             if fin['barrack_expenses']:
-                by_item = 558
                 for b_exp in fin['barrack_expenses'][:2]:
+                    if by_item > 585:
+                        break
                     screen.blit(font_xs.render(f"• {b_exp['name']} ({b_exp['prov']}):", True, (230, 215, 215)), (34, by_item))
                     screen.blit(font_xs.render(f"-{b_exp['cost']}g/m", True, COLOR_TEXT_RED), (225, by_item))
                     by_item += 18
-            else:
+            elif fin.get('total_tribute', 0) <= 0:
                 screen.blit(font_xs.render("• Standard wooden palisades (0g additional upkeep)", True, COLOR_TEXT_MUTED), (34, 558))
     
             # 3. Monthly Financial Statement Card (y = 606, h = 70)
