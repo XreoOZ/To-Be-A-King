@@ -159,7 +159,7 @@ class GameState:
                     "levy_rate": l_rate,
                     "tax_locked": is_norse,
                     "levy_locked": is_norse,
-                    "gold": random.randint(150, 450),
+                    "gold": random.randint(20, 50),
                     "title": title,
                     "city_name": None,
                     "tiles": []

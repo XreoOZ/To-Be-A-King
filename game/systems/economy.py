@@ -150,7 +150,11 @@ def get_vassal_landed_status(state, v_dict, prov_id=None):
         gross = len(held_tiles) * 1
         total_garrison = len(held_tiles) * 35
 
-    tax_paid = max(0, int(round(gross * (tax_rate / 100.0))))
+    if gross > 0 and tax_rate > 0:
+        tax_paid = max(1, int(round(gross * (tax_rate / 100.0))))
+        tax_paid = min(tax_paid, gross)
+    else:
+        tax_paid = 0
     net_savings = max(0, gross - tax_paid)
 
     levy_contribution = max(0, int(round(total_garrison * (levy_rate / 100.0))))
