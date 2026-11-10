@@ -1194,6 +1194,13 @@ def run_game():
                     claimed_tiles.add(t)
         
         free_tiles = [t for t in p_tiles if t not in claimed_tiles]
+        
+        if len(free_tiles) < 2:
+            pname = PROVINCES[province_id]["name"]
+            target_state.logs.append(f"Cannot carve fief: Only {len(free_tiles)} unclaimed tile(s) left in {pname} (Min 2 required). Dissolve an existing fief first.")
+            return None
+
+        # Prefer adjacent pair of free tiles
         new_tiles = []
         for (fc, fr) in free_tiles:
             if (fc + 1, fr) in free_tiles:
@@ -1203,36 +1210,24 @@ def run_game():
                 new_tiles = [(fc, fr), (fc, fr + 1)]
                 break
                 
-        if not new_tiles and len(free_tiles) >= 2:
+        if not new_tiles:
             new_tiles = free_tiles[:2]
-        elif not new_tiles and len(p_tiles) >= 2:
-            prov_fiefs = [f for f in target_state.fiefs.values() if f.get("province") == province_id]
-            if prov_fiefs:
-                largest_f = max(prov_fiefs, key=lambda f: len(f.get("tiles", [])))
-                if len(largest_f["tiles"]) >= 4:
-                    new_tiles = largest_f["tiles"][-2:]
-                    for t in new_tiles:
-                        largest_f["tiles"].remove(t)
 
-        if new_tiles:
-            target_state.fief_id_counter += 1
-            fid = f"fief_{target_state.fief_id_counter}"
-            pname = PROVINCES[province_id]["name"].split()[0]
-            target_state.fiefs[fid] = {
-                "id": fid,
-                "province": province_id,
-                "tiles": new_tiles,
-                "holder": None,
-                "name": f"{pname} Fief #{target_state.fief_id_counter}",
-                "vassal_id": None
-            }
-            target_state.selected_fief_id = fid
-            target_state.editing_fief_id = fid
-            target_state.logs.append(f"Carved new fief '{target_state.fiefs[fid]['name']}'! Click tiles on map to edit its boundaries.")
-            return fid
-        else:
-            target_state.logs.append(f"Cannot carve fief: all land in {PROVINCES[province_id]['name']} is already assigned.")
-            return None
+        target_state.fief_id_counter += 1
+        fid = f"fief_{target_state.fief_id_counter}"
+        pname = PROVINCES[province_id]["name"].split()[0]
+        target_state.fiefs[fid] = {
+            "id": fid,
+            "province": province_id,
+            "tiles": new_tiles,
+            "holder": None,
+            "name": f"{pname} Fief #{target_state.fief_id_counter}",
+            "vassal_id": None
+        }
+        target_state.selected_fief_id = fid
+        target_state.editing_fief_id = fid
+        target_state.logs.append(f"Carved new fief '{target_state.fiefs[fid]['name']}' ({len(new_tiles)} tiles)! Click green tiles on map to customize.")
+        return fid
 
     # Build reverse lookup: pixel -> province (for accurate click detection)
     # cell_to_prov already handles this via tile grid
@@ -1693,6 +1688,26 @@ def run_game():
                     (min(255, col[0]+18), min(255, col[1]+18), min(255, col[2]+18)),
                     (cell_x, cell_y), (cell_x, cell_y + tile_h - 1))
 
+                # Visual Hover Feedback while Editing Fief Boundaries
+                if state.editing_fief_id and prov_id == state.selected_province and is_hovered:
+                    f_edit = state.fiefs.get(state.editing_fief_id)
+                    t_coord = (c, r)
+                    if f_edit and t_coord not in f_edit.get("tiles", []):
+                        occupied_f = next((other_f for other_fid, other_f in state.fiefs.items()
+                                           if other_fid != state.editing_fief_id and other_f.get("province") == prov_id and t_coord in other_f.get("tiles", [])), None)
+                        if occupied_f:
+                            # Occupied by another fief: red locked warning tint
+                            warn_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
+                            warn_surf.fill((220, 50, 50, 110))
+                            screen.blit(warn_surf, (cell_x, cell_y))
+                            pygame.draw.rect(screen, (255, 80, 80), (cell_x, cell_y, tile_w, tile_h), 2)
+                        else:
+                            # Unclaimed: green claimable preview tint
+                            free_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
+                            free_surf.fill((60, 220, 100, 110))
+                            screen.blit(free_surf, (cell_x, cell_y))
+                            pygame.draw.rect(screen, (100, 255, 120), (cell_x, cell_y, tile_w, tile_h), 2)
+
                 if mouse_clicked and is_hovered:
                     if state.editing_fief_id and prov_id == state.selected_province:
                         f_edit = state.fiefs.get(state.editing_fief_id)
@@ -1705,13 +1720,18 @@ def run_game():
                                 else:
                                     state.logs.append(f"{f_edit['name']} must retain at least 2 tiles!")
                             else:
-                                # Reassign tile from another fief if claimed
+                                # Check if tile already belongs to another fief in this province!
+                                claimed_by = None
                                 for other_fid, other_f in state.fiefs.items():
                                     if other_fid != state.editing_fief_id and other_f.get("province") == prov_id:
-                                        if t_coord in other_f["tiles"]:
-                                            other_f["tiles"].remove(t_coord)
-                                f_edit["tiles"].append(t_coord)
-                                state.logs.append(f"Assigned tile {t_coord} to {f_edit['name']}!")
+                                        if t_coord in other_f.get("tiles", []):
+                                            claimed_by = other_f
+                                            break
+                                if claimed_by:
+                                    state.logs.append(f"Cannot claim tile {t_coord}: Already belongs to '{claimed_by['name']}'! Fiefs cannot overlap.")
+                                else:
+                                    f_edit["tiles"].append(t_coord)
+                                    state.logs.append(f"Assigned unclaimed tile {t_coord} to {f_edit['name']}!")
                     elif not state.build_mode:
                         # CK2 style: Left-clicking a province inspects that province and unselects armies!
                         state.selected_province = prov_id
