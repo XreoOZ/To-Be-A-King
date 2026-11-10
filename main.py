@@ -684,7 +684,7 @@ class GameState:
 
         rallied = 0
         for a in player_armies:
-            if a.province != target_province_id:
+            if a.province != target_province_id and not a.in_battle and not a.is_mustering:
                 path = find_shortest_path(a.province, target_province_id)
                 if path and len(path) > 1:
                     a.path = path[1:]
@@ -916,9 +916,22 @@ class GameState:
         self.logs.append(f"AD {self.year}: War rages across the lands of Britain.")
 
     def update_armies(self):
+        # Sanity check: Clear in_battle flag for any army that has no enemy in its province
+        for a in self.armies:
+            opponents = [o for o in self.armies if o.province == a.province and o.owner != a.owner]
+            if not opponents:
+                a.in_battle = False
+
         # 1. Update movement
         for a in list(self.armies):
-            if a.is_moving and not a.in_battle:
+            if a.in_battle:
+                # Armies locked in battle cannot move or show path arrows
+                if a.path:
+                    a.path = []
+                    a.move_progress = 0.0
+                continue
+
+            if a.is_moving:
                 a.move_progress += a.move_speed
                 if a.move_progress >= 100.0:
                     a.province = a.path.pop(0)
@@ -934,6 +947,10 @@ class GameState:
                         if a.is_demobilizing:
                             a.is_demobilizing = False
                             self.logs.append(f"Ambush! {a.name} was attacked while returning home!")
+                        for b in blockers:
+                            b.path = []
+                            b.move_progress = 0.0
+                            b.is_sieging = False
 
                     # If reached final destination with no blocker:
                     elif not a.path:
@@ -954,22 +971,25 @@ class GameState:
             self.merge_armies_in_province(pid, self.player_id)
             self.merge_armies_in_province(pid, self.enemy_id)
 
-            p1_list = [a for a in self.armies if a.province == pid and a.owner == self.player_id and not a.is_moving]
-            p2_list = [a for a in self.armies if a.province == pid and a.owner == self.enemy_id and not a.is_moving]
+            armies_in_prov = [a for a in self.armies if a.province == pid]
+            p1_list = [a for a in armies_in_prov if a.owner == self.player_id]
+            p2_list = [a for a in armies_in_prov if a.owner == self.enemy_id]
 
             if not (p1_list and p2_list):
-                for a in p1_list + p2_list:
+                for a in armies_in_prov:
                     a.in_battle = False
                 continue
 
             a1 = p1_list[0]
             a2 = p2_list[0]
-            a1.in_battle = True
-            a2.in_battle  = True
-            a1.is_sieging = False
-            a2.is_sieging = False
-            a1.is_demobilizing = False
-            a2.is_demobilizing = False
+            
+            # Lock both hosts in combat and halt all marching, sieging, or demobilizing
+            for a in p1_list + p2_list:
+                a.in_battle = True
+                a.path = []
+                a.move_progress = 0.0
+                a.is_sieging = False
+                a.is_demobilizing = False
 
             # One combat round per game-tick
             alfred_martial  = self.player["stats"]["martial"]
@@ -989,10 +1009,14 @@ class GameState:
                 self.logs.append(f"Defeat! {a1.name} was wiped out at {PROVINCES[pid]['name']}!")
                 if a1 in self.armies: self.armies.remove(a1)
                 a2.in_battle = False
+                a2.path = []
+                a2.move_progress = 0.0
             elif a2.troops <= 0:
                 self.logs.append(f"Glorious Victory! Destroyed the Viking host at {PROVINCES[pid]['name']}!")
                 if a2 in self.armies: self.armies.remove(a2)
                 a1.in_battle = False
+                a1.path = []
+                a1.move_progress = 0.0
 
         # 3. Check Sieges (City-by-City Siege in Enemy or Contested Province)
         for a in list(self.armies):
@@ -1091,7 +1115,7 @@ class GameState:
         if not danelaw_provs:
             return
 
-        danelaw_armies = [a for a in self.armies if a.owner == self.enemy_id and not a.is_mustering]
+        danelaw_armies = [a for a in self.armies if a.owner == self.enemy_id and not a.is_mustering and not a.in_battle]
         
         # 1. Raise Levies if none active
         if not danelaw_armies and not any(a.owner == self.enemy_id for a in self.armies):
@@ -1111,17 +1135,17 @@ class GameState:
         # 2. Rally Viking armies into Jorvik or a border province
         rally_point = "jorvik" if "jorvik" in danelaw_provs else random.choice(danelaw_provs)
         for a in danelaw_armies:
-            if a.province != rally_point and not a.is_moving:
+            if a.province != rally_point and not a.is_moving and not a.in_battle:
                 path = find_shortest_path(a.province, rally_point)
                 if path and len(path) > 1:
                     a.path = path[1:]
                     a.move_progress = 0.0
 
         # 3. If armies gathered in rally point, march to attack player border province!
-        gathered = [a for a in danelaw_armies if a.province == rally_point and not a.is_moving]
+        gathered = [a for a in danelaw_armies if a.province == rally_point and not a.is_moving and not a.in_battle]
         if gathered:
             self.merge_armies_in_province(rally_point, self.enemy_id)
-            main_host = [a for a in self.armies if a.province == rally_point and a.owner == self.enemy_id]
+            main_host = [a for a in self.armies if a.province == rally_point and a.owner == self.enemy_id and not a.in_battle and not a.is_mustering]
             if main_host and main_host[0].troops >= 2000:
                 player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.player_id]
                 if player_provs:
@@ -2510,7 +2534,7 @@ def run_game():
             return get_border_midpoint(pid_a, pid_b)
 
         for army in state.armies:
-            if not army.is_moving:
+            if not army.is_moving or army.in_battle:
                 continue
             is_player_army = (army.owner == state.player_id)
             arrow_col = (240, 180, 50) if is_player_army else (80, 130, 220)
@@ -2552,7 +2576,7 @@ def run_game():
             cx, cy = base_pos[0], base_pos[1]
 
             # If moving, interpolate position smoothly along route
-            if army.is_moving and army.next_province:
+            if army.is_moving and army.next_province and not army.in_battle:
                 next_pos = province_anchors.get(army.next_province, base_pos)
                 pct = army.move_progress / 100.0
                 cx = int(cx + (next_pos[0] - base_pos[0]) * pct)
