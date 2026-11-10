@@ -1277,37 +1277,6 @@ def run_game():
                     v["city_name"] = None
                     v["tiles"] = []
 
-            # -------------------------------------------------------------
-            # 3. UNASSIGNED CROWN FIEFS (Any remaining tiles in pairs of min 2)
-            # -------------------------------------------------------------
-            remaining_tiles = [t for t in tiles if t not in used]
-            rem_set = set(remaining_tiles)
-            f_unclaimed_idx = 1
-            for (c, r) in remaining_tiles:
-                if (c, r) in used:
-                    continue
-                pair = None
-                if (c + 1, r) in rem_set and (c + 1, r) not in used:
-                    pair = [(c, r), (c + 1, r)]
-                elif (c, r + 1) in rem_set and (c, r + 1) not in used:
-                    pair = [(c, r), (c, r + 1)]
-                
-                if pair:
-                    for t in pair:
-                        used.add(t)
-                    fid = f"fief_{fief_counter}"
-                    fief_counter += 1
-                    target_state.fiefs[fid] = {
-                        "id": fid,
-                        "province": pid,
-                        "tiles": pair,
-                        "name": f"{pname} Fief #{f_unclaimed_idx}",
-                        "holder": None,
-                        "vassal_id": None,
-                        "is_crown_demesne": False
-                    }
-                    f_unclaimed_idx += 1
-
         # Synchronize target_state's counter so newly carved fiefs never collide with starter fiefs!
         target_state.fief_id_counter = max(target_state.fief_id_counter, fief_counter + 10)
 
