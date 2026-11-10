@@ -1566,6 +1566,7 @@ def run_game():
             box_start = None
             box_end = None
             right_clicked = False
+        game_mouse_clicked = mouse_clicked
 
         # Smooth keyboard pan navigation (Arrows / WASD)
         keys = pygame.key.get_pressed()
@@ -1902,7 +1903,7 @@ def run_game():
                 screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 17))
                 screen.blit(font_xs.render(f"Gold: {v_data['gold']}g  •  Levy: +{v_data['levy_contribution']}  •  Tax: +{v_data['tax_contribution']}g/m", True, COLOR_TEXT_MUTED), (32, vy + 30))
                 
-                if game_mouse_clicked and is_vc_hov:
+                if mouse_clicked and is_vc_hov:
                     state.selected_province = v_pid
                     state.inspecting_vassal = {"province": v_pid, "vassal": v_data}
                     if v_data.get("tiles"):
@@ -2643,7 +2644,7 @@ def run_game():
                 pygame.draw.rect(screen, (40, 75, 110) if b_v_hov else (30, 55, 85), v_btn, border_radius=6)
                 pygame.draw.rect(screen, (100, 180, 255), v_btn, 1, border_radius=6)
                 screen.blit(font_xs.render("👑 VIEW VASSAL PROFILE & DOSSIER", True, COLOR_TEXT_WHITE), (915, 318))
-                if game_mouse_clicked and b_v_hov:
+                if mouse_clicked and b_v_hov:
                     v_list = state.vassals.get(s_data["province"], [])
                     matching_v = next((v for v in v_list if v.get("id") == s_data["vassal_id"] or v.get("name") == s_data["lord"]), None)
                     if matching_v:
@@ -2659,7 +2660,7 @@ def run_game():
             pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_c_hov else COLOR_BUTTON_NORMAL, cls_btn, border_radius=6)
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, cls_btn, 1, border_radius=6)
             screen.blit(font_sm.render("← Back to Province View", True, COLOR_TEXT_WHITE), (940, cls_y + 8))
-            if game_mouse_clicked and b_c_hov:
+            if mouse_clicked and b_c_hov:
                 state.selected_settlement = None
                 state.selected_vassal_idx = None
 
@@ -2893,7 +2894,7 @@ def run_game():
                     screen.blit(font_xs.render(f"Fief: {c_info}", True, (200, 230, 255)), (888, vy + 17))
                     screen.blit(font_xs.render(f"Gold: {v['gold']}g  •  Levies: +{v['levy_contribution']}  •  Tax: +{v['tax_contribution']}g/m", True, COLOR_TEXT_MUTED), (888, vy + 29))
 
-                    if game_mouse_clicked and is_v_hov:
+                    if mouse_clicked and is_v_hov:
                         state.selected_vassal_idx = v_idx
                         state.inspecting_vassal = {"province": state.selected_province, "vassal": v}
                         if v.get("tiles"):
