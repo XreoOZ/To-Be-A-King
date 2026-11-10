@@ -802,23 +802,47 @@ class GameState:
         self.player["piety"] += 1
         self.enemy["prestige"] += 1
 
-        # Vassal autonomous build request chance: ONLY IF Vassal has at least 1,000 Gold!
+        # Vassal autonomous build request chance: ONLY IF Vassal has at least 1,000 Gold AND owns a fief with free unbuilt tiles!
         if not self.vassal_build_requests:
             player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.player_id]
             if player_provs and random.random() < 0.35:
-                target_pid = random.choice(player_provs)
-                v_list = self.vassals.get(target_pid, [])
-                wealthy_vassals = [v for v in v_list if v.get("gold", 0) >= 1000]
-                if wealthy_vassals:
-                    v_requester = random.choice(wealthy_vassals)
-                    self.vassal_build_requests.append({
-                        "vassal": v_requester["name"],
-                        "vassal_ref": v_requester,
-                        "province_id": target_pid,
-                        "province_name": PROVINCES[target_pid]["name"],
-                        "cost": 1000
-                    })
-                    self.logs.append(f"Charter Petition: {v_requester['name']} has accumulated 1,000g and requests royal charter to build a new borough in {PROVINCES[target_pid]['name']}!")
+                eligible_petitions = []
+                for pid in player_provs:
+                    v_list = self.vassals.get(pid, [])
+                    for v in v_list:
+                        if v.get("gold", 0) >= 1000:
+                            # Vassal MUST own a fief in this province
+                            v_fiefs = [f for f in self.fiefs.values() if f.get("province") == pid and (f.get("holder") == v["name"] or f.get("vassal_id") == v.get("id"))]
+                            for f in v_fiefs:
+                                # Fief must have at least one tile without an existing settlement
+                                free_tiles = [t for t in f.get("tiles", []) if t not in self.settlements]
+                                if free_tiles:
+                                    free_set = set(free_tiles)
+                                    pair = None
+                                    for (c, r) in free_tiles:
+                                        if (c + 1, r) in free_set:
+                                            pair = [(c, r), (c + 1, r)]
+                                            break
+                                        elif (c, r + 1) in free_set:
+                                            pair = [(c, r), (c, r + 1)]
+                                            break
+                                    if not pair:
+                                        pair = [free_tiles[0]]
+                                    
+                                    eligible_petitions.append({
+                                        "vassal": v["name"],
+                                        "vassal_ref": v,
+                                        "province_id": pid,
+                                        "province_name": PROVINCES[pid]["name"],
+                                        "fief_id": f["id"],
+                                        "fief_name": f["name"],
+                                        "build_tiles": pair,
+                                        "cost": 1000
+                                    })
+                if eligible_petitions:
+                    req_choice = random.choice(eligible_petitions)
+                    self.vassal_build_requests.append(req_choice)
+                    self.logs.append(f"Charter Petition: {req_choice['vassal']} (1,000g) petitions to build inside {req_choice['fief_name']} ({req_choice['province_name']})!")
 
     def yearly_tick(self):
         self.player["age"] += 1
@@ -2774,10 +2798,13 @@ def run_game():
             screen.blit(font_lg.render("ROYAL PETITION FROM VASSAL", True, COLOR_GOLD), (pop_x + 25, pop_y + 20))
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 55), (pop_x + pop_w - 25, pop_y + 55), 1)
 
+            fief_label = req.get("fief_name") or "their fief"
+            b_tiles = req.get("build_tiles", [])
+
             t1 = font_sm.render(f"My Liege, {req['vassal']} humbly requests your royal charter", True, COLOR_TEXT_WHITE)
-            t2 = font_sm.render(f"to construct a fortified market town in {req['province_name']}.", True, COLOR_TEXT_WHITE)
-            t3 = font_xs.render("• Granting Charter: Vassal pays cost, +5 Province Tax, +250 Levies.", True, COLOR_TEXT_GREEN)
-            t4 = font_xs.render("• Denying Charter: Vassal saves their treasury.", True, COLOR_TEXT_MUTED)
+            t2 = font_sm.render(f"to construct a fortified market town inside {fief_label}.", True, COLOR_TEXT_WHITE)
+            t3 = font_xs.render("• Granting Charter: Vassal pays 1,000g, +5 Province Tax, +250 Levies.", True, COLOR_TEXT_GREEN)
+            t4 = font_xs.render(f"• Location: {len(b_tiles)} vacant tile(s) strictly inside {fief_label} ({req['province_name']}).", True, COLOR_GOLD)
 
             screen.blit(t1, (pop_x + 25, pop_y + 70))
             screen.blit(t2, (pop_x + 25, pop_y + 92))
@@ -2807,23 +2834,27 @@ def run_game():
                     p_obj["levies_current"] += 250
                     req["vassal_ref"]["gold"] = max(0, req["vassal_ref"]["gold"] - 1000)
                     
-                    # Find free 2 tiles in this province to establish the new town!
-                    tiles = prov_tile_list.get(pid, [])
-                    tile_set = set(tiles)
-                    placed = False
-                    for (c, r) in tiles:
-                        if (c, r) not in state.settlements:
-                            if (c + 1, r) in tile_set and (c + 1, r) not in state.settlements:
-                                state.settlements[(c, r)] = {"province": pid, "type": "town", "name": f"{req['vassal'].split()[0]}'s Borough"}
-                                state.settlements[(c + 1, r)] = {"province": pid, "type": "town", "name": f"{req['vassal'].split()[0]}'s Borough"}
-                                placed = True
-                                break
-                            elif (c, r + 1) in tile_set and (c, r + 1) not in state.settlements:
-                                state.settlements[(c, r)] = {"province": pid, "type": "town", "name": f"{req['vassal'].split()[0]}'s Borough"}
-                                state.settlements[(c, r + 1)] = {"province": pid, "type": "town", "name": f"{req['vassal'].split()[0]}'s Borough"}
-                                placed = True
-                                break
-                    state.logs.append(f"Granted charter! {req['vassal']} established a thriving new borough in {p_obj['name']}.")
+                    # Construct town strictly on free tiles within this vassal's owned fief!
+                    b_tiles = req.get("build_tiles", [])
+                    city_title = f"{req['vassal'].split()[1]}'s {random.choice(['Borough', 'Castle', 'Burgh', 'Keep'])}"
+                    for t in b_tiles:
+                        state.settlements[t] = {
+                            "province": pid,
+                            "type": "town",
+                            "name": city_title,
+                            "lord": req["vassal"],
+                            "vassal_id": req["vassal_ref"]["id"],
+                            "is_crown_demesne": False
+                        }
+                        if "tiles" not in req["vassal_ref"]:
+                            req["vassal_ref"]["tiles"] = []
+                        if t not in req["vassal_ref"]["tiles"]:
+                            req["vassal_ref"]["tiles"].append(t)
+                    
+                    if not req["vassal_ref"].get("city_name"):
+                        req["vassal_ref"]["city_name"] = city_title
+
+                    state.logs.append(f"Granted charter! {req['vassal']} established {city_title} inside {fief_label}.")
                 state.vassal_build_requests.pop(0)
 
             elif mouse_clicked and den_hov:
