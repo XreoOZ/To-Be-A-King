@@ -310,7 +310,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         title_text = "ENEMY VASSAL DOSSIER" if is_enemy else "FEUDAL VASSAL DOSSIER"
         title_col = (255, 110, 110) if is_enemy else COLOR_GOLD
         screen.blit(font_lg.render(title_text, True, title_col), (pop_x + 25, pop_y + 16))
-        p_full = prov_data.get("name", "Wessex")
+        p_full = prov_data.get("name", "Capital")
         sub_text = f"Feudal Subject of {liege_char['name']} ({liege_char['realm']}) • Province of {p_full}"
         screen.blit(font_xs.render(sub_text, True, (255, 180, 180) if is_enemy else COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 44))
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 64), (pop_x + pop_w - 25, pop_y + 64), 1)
@@ -779,7 +779,9 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         screen.blit(font_sm.render(f"Available Levies: {total_garrison:,} Men", True, COLOR_TEXT_GREEN), (pop_x + 415, col_y + 40))
         screen.blit(font_xs.render(f"• Active Armies in Field: {total_armies_count} Hosts ({total_field:,} Men)", True, (255, 200, 120)), (pop_x + 365, col_y + 66))
         screen.blit(font_xs.render(f"• Sworn Feudal Lords: {len(r_vassals)} Vassals", True, COLOR_TEXT_WHITE), (pop_x + 415, col_y + 88))
-        screen.blit(font_xs.render(f"• Capital Province: {'Jorvik (York)' if is_ruler_enemy else 'Wessex (Winchester)'}", True, (150, 215, 255)), (pop_x + 365, col_y + 110))
+        r_cap_pid = state.get_realm_capital(r_id)
+        r_cap_name = PROVINCES.get(r_cap_pid, {}).get("name", "Capital")
+        screen.blit(font_xs.render(f"• Capital Province: {r_cap_name}", True, (150, 215, 255)), (pop_x + 365, col_y + 110))
         
         # Vassals preview list
         screen.blit(font_xs.render("• Key Vassal Lords:", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 132))
@@ -798,18 +800,17 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         loc_hov = loc_btn.collidepoint(mouse_pos)
         pygame.draw.rect(screen, (40, 85, 130) if loc_hov else (28, 60, 95), loc_btn, border_radius=6)
         pygame.draw.rect(screen, (100, 180, 255), loc_btn, 1, border_radius=6)
-        cap_name = "JORVIK" if is_ruler_enemy else "WESSEX"
+        cap_name = r_cap_name.upper()
         screen.blit(font_sm.render(f"▶ LOCATE CAPITAL ({cap_name})", True, COLOR_TEXT_WHITE), (pop_x + 75, pop_y + pop_h - 45))
         if modal_mouse_clicked and loc_hov:
-            cap_prov = "jorvik" if is_ruler_enemy else "wessex"
-            state.selected_province = cap_prov
-            cap_coord = (14, 12) if is_ruler_enemy else (4, 18)
+            state.selected_province = r_cap_pid
+            cap_coord = PROV_CAPITAL_TILES.get(r_cap_pid, (12, 10))
             curr_tw = max(18, int(BASE_TILE_W * state.zoom))
             curr_th = max(16, int(BASE_TILE_H * state.zoom))
             state.cam_pan_x = VIEWPORT_CENTER_X - (cap_coord[0] * curr_tw + curr_tw // 2)
             state.cam_pan_y = VIEWPORT_CENTER_Y - (cap_coord[1] * curr_th + curr_th // 2)
             state.inspecting_ruler = None
-            state.logs.append(f"Focusing camera on {r_char['name']}'s seat in {cap_prov.title()}.")
+            state.logs.append(f"Focusing camera on {r_char['name']}'s seat in {r_cap_name}.")
     
         # Button 2: Close Dossier (ESC)
         close_btn = pygame.Rect(pop_x + pop_w - 40 - btn_w, pop_y + pop_h - 55, btn_w, btn_h)
@@ -971,15 +972,12 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 30, pop_y + 64), (pop_x + pop_w - 30, pop_y + 64), 1)
 
         # Liege & Vassal Portraits / Heraldic Crests
-        p_alfred = portrait_cache.get("char_alfred")
-        p_halfdan = portrait_cache.get("char_halfdan")
-        c_alfred = coa_cache.get("char_alfred")
-        c_halfdan = coa_cache.get("char_halfdan")
-
-        left_char = p_halfdan if is_subjugated else p_alfred
-        right_char = p_alfred if is_subjugated else p_halfdan
-        left_coa = c_halfdan if is_subjugated else c_alfred
-        right_coa = c_alfred if is_subjugated else c_halfdan
+        liege_cid = state.player_liege or state.enemy_liege or state.player_id
+        vassal_cid = state.player_id if state.player_liege else state.enemy_id
+        left_char = portrait_cache.get(liege_cid)
+        right_char = portrait_cache.get(vassal_cid)
+        left_coa = coa_cache.get(liege_cid)
+        right_coa = coa_cache.get(vassal_cid)
 
         if left_char:
             s_left = pygame.transform.smoothscale(left_char, (58, 58))

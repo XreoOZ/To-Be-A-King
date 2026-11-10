@@ -47,37 +47,15 @@ def init_asset_caches():
         cfile = char.get("coa", "coa_wessex.png")
         coa_cache[cid] = load_image(os.path.join("heraldry", cfile), (36, 42))
 
-    prov_flag_cache.update({
-        "wessex": load_image(os.path.join("heraldry", "coa_wessex.png"), (24, 28)),
-        "mercia": load_image(os.path.join("heraldry", "coa_mercia.png"), (24, 28)),
-        "east_anglia": load_image(os.path.join("heraldry", "coa_east_anglia.png"), (24, 28)),
-        "kent_essex": make_heraldic_shield((175, 25, 45), is_kent=True),
-        "cornwall": make_heraldic_shield((24, 24, 28), is_cornwall=True),
-        "wales": load_image(os.path.join("heraldry", "coa_wales.png"), (24, 28)),
-        "jorvik": load_image(os.path.join("heraldry", "coa_danelaw.png"), (24, 28)),
-        "deira": load_image(os.path.join("heraldry", "coa_northumbria.png"), (24, 28)),
-        "bernicia": load_image(os.path.join("heraldry", "coa_northumbria.png"), (24, 28)),
-        "strathclyde": load_image(os.path.join("heraldry", "coa_scotland.png"), (24, 28)),
-        "lothian": load_image(os.path.join("heraldry", "coa_scotland.png"), (24, 28)),
-        "highlands": load_image(os.path.join("heraldry", "coa_scotland.png"), (24, 28)),
-    })
+    from game.data.provinces import PROVINCES
+    for pid, pdata in PROVINCES.items():
+        pcol = tuple(pdata.get("color", (120, 120, 120)))
+        prov_flag_cache[pid] = make_heraldic_shield(pcol)
 
 def make_banner_cloth(pid, width, height, is_large=True):
-    bg_palette = {
-        "wessex": (190, 30, 30),
-        "mercia": (22, 50, 130),
-        "east_anglia": (30, 80, 160),
-        "kent_essex": (170, 25, 45),
-        "cornwall": (24, 24, 28),
-        "wales": (28, 110, 50),
-        "jorvik": (35, 40, 50),
-        "deira": (135, 38, 42),
-        "bernicia": (30, 42, 85),
-        "strathclyde": (20, 55, 135),
-        "lothian": (20, 55, 135),
-        "highlands": (20, 55, 135),
-    }
-    bg = bg_palette.get(pid, (120, 30, 30))
+    from game.data.provinces import PROVINCES
+    pdata = PROVINCES.get(pid, {})
+    bg = tuple(pdata.get("color", (120, 30, 30)))
     surf = pygame.Surface((width, height), pygame.SRCALPHA)
     surf.fill(bg)
 

@@ -12,6 +12,7 @@ from game.config import (
     MAP_VIEWPORT_X, MAP_VIEWPORT_W, PANEL_Y, PANEL_H
 )
 from game.data.provinces import PROVINCES, PROVINCE_FACTION_COLORS
+from game.data.characters import CHARACTERS
 from game.data.buildings import BUILDING_SPECS
 from game.core.map import (
     prov_grid_centroids,
@@ -86,7 +87,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     
             prov_id  = cell_to_prov.get((c, r))
             prov_info = PROVINCES.get(prov_id)
-            owner = prov_info.get("owner", "char_alfred") if prov_info else "char_alfred"
+            owner = prov_info.get("owner", "char_human") if prov_info else "char_human"
             col = PROVINCE_FACTION_COLORS.get(owner, {}).get(prov_id)
             if not col:
                 col = tuple(prov_info["color"]) if prov_info else (150, 150, 150)
@@ -454,7 +455,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
         # If holding is occupied by enemy, display conqueror's miniature banner on keep turret!
         if h.get("occupied_by"):
             occ_id = h["occupied_by"]
-            occ_key = "wessex" if occ_id == state.player_id else "jorvik"
+            occ_key = state.get_realm_capital(occ_id)
             occ_flag = prov_flag_cache.get(occ_key)
             if occ_flag:
                 mini_f = pygame.transform.smoothscale(occ_flag, (12, 14))
@@ -1033,32 +1034,40 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     # ---------------------------------------------------------
     # TERRITORY CONTROL HUD BAR (Floating cleanly on top of map)
     # ---------------------------------------------------------
-    wessex_count = state.get_provinces_count(state.player_id)
-    danelaw_count = state.get_provinces_count(state.enemy_id)
-    total_provs = 12
+    total_provs = max(1, len(PROVINCES))
+    solaris_count = state.get_provinces_count("char_human")
+    ironpeak_count = state.get_provinces_count("char_ironpeak")
+    sylvan_count = state.get_provinces_count("char_sylvan")
     
     bar_x = MAP_VIEWPORT_X + 26
     bar_y = PANEL_Y + 12
     bar_w = MAP_VIEWPORT_W - 52
     bar_h = 24
     
+    col_solaris = CHARACTERS.get("char_human", {}).get("color", (215, 45, 45))
+    col_ironpeak = CHARACTERS.get("char_ironpeak", {}).get("color", (55, 75, 95))
+    col_sylvan = CHARACTERS.get("char_sylvan", {}).get("color", (35, 105, 55))
+    
     pygame.draw.rect(screen, (25, 30, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
-    wessex_pixel_w = int((wessex_count / total_provs) * bar_w)
-    pygame.draw.rect(screen, COLOR_WESSEX, (bar_x, bar_y, wessex_pixel_w, bar_h), border_radius=4)
-    pygame.draw.rect(screen, COLOR_DANELAW, (bar_x + wessex_pixel_w, bar_y, bar_w - wessex_pixel_w, bar_h), border_radius=4)
+    sol_w = int((solaris_count / total_provs) * bar_w)
+    iron_w = int((ironpeak_count / total_provs) * bar_w)
+    syl_w = bar_w - (sol_w + iron_w)
+    
+    if sol_w > 0:
+        pygame.draw.rect(screen, col_solaris, (bar_x, bar_y, sol_w, bar_h), border_radius=4)
+    if iron_w > 0:
+        pygame.draw.rect(screen, col_ironpeak, (bar_x + sol_w, bar_y, iron_w, bar_h))
+    if syl_w > 0:
+        pygame.draw.rect(screen, col_sylvan, (bar_x + sol_w + iron_w, bar_y, syl_w, bar_h), border_radius=4)
     pygame.draw.rect(screen, COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=4)
     
-    if getattr(state, "player_liege", None) == state.enemy_id:
-        w_lbl = font_sm.render(f"WESSEX (Vassal Duchy)", True, (255, 230, 230))
-        d_lbl = font_sm.render(f"DANELAW (High Kingdom): 12 Shires", True, (230, 240, 255))
-    elif getattr(state, "enemy_liege", None) == state.player_id:
-        w_lbl = font_sm.render(f"BRITAIN (High Kingdom): 12 Shires", True, COLOR_GOLD)
-        d_lbl = font_sm.render(f"JORVIK (Vassal Jarl)", True, (230, 240, 255))
-    else:
-        w_lbl = font_sm.render(f"WESSEX: {wessex_count} Provinces", True, (255, 230, 230))
-        d_lbl = font_sm.render(f"DANELAW: {danelaw_count} Provinces", True, (230, 240, 255))
-    screen.blit(w_lbl, (bar_x + 10, bar_y + 3))
-    screen.blit(d_lbl, (bar_x + bar_w - d_lbl.get_width() - 10, bar_y + 3))
+    s_lbl = font_xs.render(f"SOLARIS: {solaris_count} Prov", True, (255, 235, 235))
+    i_lbl = font_xs.render(f"IRONPEAK: {ironpeak_count} Prov", True, (230, 240, 255))
+    e_lbl = font_xs.render(f"SYLVANDELL: {sylvan_count} Prov", True, (230, 255, 235))
+    
+    screen.blit(s_lbl, (bar_x + 10, bar_y + 4))
+    screen.blit(i_lbl, (bar_x + bar_w // 2 - i_lbl.get_width() // 2, bar_y + 4))
+    screen.blit(e_lbl, (bar_x + bar_w - e_lbl.get_width() - 10, bar_y + 4))
 
     # ---------------------------------------------------------
     # FLOATING SIEGE CONTEXT MENU (Right-Click "SIEGE THE CASTLE")

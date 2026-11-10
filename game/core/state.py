@@ -22,9 +22,10 @@ from game.systems.ai import standardize_enemy_ai_laws, run_viking_ai, run_realm_
 
 class GameState:
     def __init__(self):
-        self.player_id = "char_alfred"
-        self.enemy_id = "char_halfdan"
-        self.selected_province = "wessex"
+        self.player_id = "char_human"
+        self.enemy_id = "char_ironpeak"
+        self.ai_rulers = ["char_ironpeak", "char_sylvan"]
+        self.selected_province = "solaris_prime"
         self.selected_army_id = None
         self.hovered_province = None
         self.hovered_army_id = None
@@ -107,18 +108,20 @@ class GameState:
         self.enemy_raise_cooldown = 0    # in days (3 months / 90 days cooldown)
         
         # Royal Capital & Realm Seats
-        self.player_capital = "wessex"
-        self.player_primary_capital = "wessex"
+        self.player_capital = "solaris_prime"
+        self.player_primary_capital = "solaris_prime"
         self.player_capital_was_lost = False
         
-        self.enemy_capital = "jorvik"
-        self.enemy_primary_capital = "jorvik"
+        self.enemy_capital = "iron_citadel"
+        self.enemy_primary_capital = "iron_citadel"
         self.enemy_capital_was_lost = False
 
         # Feudal Suzerainty & Dynamic Vassalage (No hard Defeat / Win!)
-        self.player_liege = None         # "char_halfdan" if Alfred is vassalized
-        self.enemy_liege = None          # "char_alfred" if Halfdan is vassalized
-        self.war_status = "war"          # "war" or "vassalage"
+        self.player_liege = None
+        self.enemy_liege = None
+        self.war_status = "peace"          # Default is PEACE across the continent!
+        self.active_wars = set()           # Set of frozenset({char1, char2})
+        self.active_diplomacy_target = "char_ironpeak"
         self.subjugation_event = None    # Feudal treaty story modal event
         
         # AI decision timer
@@ -126,8 +129,9 @@ class GameState:
         
         # Chronicle Logs
         self.logs = [
-            "AD 867: Britain stands divided between Saxons and Vikings.",
-            "Raise your levies from the provinces, assemble your army, and march!"
+            "Era of Kings: The continent of Aethelgard rests in delicate peace.",
+            "Three sovereigns hold power: Solaris (Human), Ironpeak (Dwarf), and Sylvandell (Elf).",
+            "Muster levies from your baronies, balance your treasury, and guide your realm to glory!"
         ]
         
         # Generate random 1-5 vassals for all provinces
@@ -142,26 +146,42 @@ class GameState:
         """
         if not char1 or not char2 or char1 == char2:
             return False
-        ws = getattr(self, "war_status", "war")
+
+        # Check explicit bilateral wars
+        if hasattr(self, "active_wars") and frozenset({char1, char2}) in self.active_wars:
+            return True
+
+        ws = getattr(self, "war_status", "peace")
         if ws == "peace":
             return False
+
+        if ws == "war":
+            if not getattr(self, "active_wars", None):
+                return {char1, char2} == {self.player_id, self.enemy_id}
+            return frozenset({char1, char2}) in self.active_wars
+
         if ws == "vassalage":
-            if getattr(self, "player_liege", None) == self.enemy_id and {char1, char2} == {self.player_id, self.enemy_id}:
+            if getattr(self, "player_liege", None) == char2 and char1 == self.player_id:
                 return False
-            if getattr(self, "enemy_liege", None) == self.player_id and {char1, char2} == {self.player_id, self.enemy_id}:
+            if getattr(self, "enemy_liege", None) == char1 and char2 == self.enemy_id:
                 return False
-        return True
+        return False
 
     def declare_war(self, initiator_id=None, target_id=None, reason="Formal Declaration"):
         """Declares war between two realms, initiating active hostility."""
         if initiator_id is None:
             initiator_id = self.player_id
         if target_id is None:
-            target_id = self.enemy_id
+            target_id = getattr(self, "active_diplomacy_target", self.enemy_id)
 
-        if getattr(self, "war_status", "war") == "war":
+        if not hasattr(self, "active_wars"):
+            self.active_wars = set()
+
+        war_pair = frozenset({initiator_id, target_id})
+        if war_pair in self.active_wars:
             return
 
+        self.active_wars.add(war_pair)
         self.war_status = "war"
         p_char = CHARACTERS.get(initiator_id, {})
         t_char = CHARACTERS.get(target_id, {})
@@ -174,12 +194,16 @@ class GameState:
         if initiator_id is None:
             initiator_id = self.player_id
         if target_id is None:
-            target_id = self.enemy_id
+            target_id = getattr(self, "active_diplomacy_target", self.enemy_id)
 
-        if getattr(self, "war_status", "war") == "peace":
-            return
+        if not hasattr(self, "active_wars"):
+            self.active_wars = set()
 
-        self.war_status = "peace"
+        war_pair = frozenset({initiator_id, target_id})
+        self.active_wars.discard(war_pair)
+        if len(self.active_wars) == 0:
+            self.war_status = "peace"
+
         p_char = CHARACTERS.get(initiator_id, {})
         t_char = CHARACTERS.get(target_id, {})
         p_name = p_char.get("name", initiator_id)
@@ -194,28 +218,38 @@ class GameState:
         self.logs.append("Game reset to 1 January 867 AD! Vassals & cities synchronized.")
 
     def generate_province_vassals(self):
-        saxon_first_names = ["Aethelred", "Aelfric", "Leofric", "Godric", "Wulfstan", "Eadric", "Beorn", "Ordgar", "Cenwulf", "Dunstan", "Brihtnoth", "Aldhelm"]
-        saxon_epithets = ["the Bold", "the Stout", "of the Marches", "Iron-Arm", "the Pious", "the Wealthy", "the Fierce", "the Wise", "Fair-Haired"]
-        viking_first_names = ["Ivar", "Ubba", "Sigurd", "Bjorn", "Guthrum", "Torstein", "Ragnar", "Hakon", "Harald", "Sven", "Einar", "Gorm"]
-        viking_epithets = ["Bloodaxe", "Skull-Cleaver", "the Raven", "Sea-Wolf", "the Dane", "the Ruthless", "Iron-Side", "Oath-Breaker", "Snake-Eye"]
-        
+        human_first = ["Aiden", "Gareth", "Valerius", "Lucian", "Rowan", "Cedric", "Tristan", "Julian", "Evander", "Kaelen", "Bastian", "Dorian"]
+        human_ep = ["the Bold", "Sun-Blessed", "of the Marches", "the Pious", "the Stalwart", "Golden-Blade", "the Wise", "Light-Bearer"]
+        human_titles = ["Baron", "Count", "Viscount", "Duke"]
+
+        dwarf_first = ["Thorin", "Balgor", "Grom", "Durnik", "Krag", "Thrum", "Barek", "Hulgar", "Moradin", "Brond", "Orrik", "Kazador"]
+        dwarf_ep = ["Iron-Fist", "Stone-Shield", "Anvil-Breaker", "Deep-Dweller", "the Unyielding", "Onyx-Eye", "Crag-Strider", "Forge-Keeper"]
+        dwarf_titles = ["Thane", "Ironlord", "Forge-Master", "Hearth-Warden"]
+
+        elf_first = ["Faeron", "Sylas", "Caelum", "Elidor", "Thalor", "Vesper", "Lirion", "Ithil", "Faelar", "Erydor", "Orion", "Bryn"]
+        elf_ep = ["Whisper-Wind", "Green-Bough", "Silver-Leaf", "the Swift", "Moon-Watcher", "Shadow-Stalker", "Ever-Green", "Star-Gazer"]
+        elf_titles = ["Warden", "Archon", "Elder", "High Keeper"]
+
         self.vassals = {}
         for pid, pdata in PROVINCES.items():
-            is_norse = (pdata["owner"] == self.enemy_id)
-            if pid == "jorvik":
-                count = 1  # 1 landed Norse Jarl alongside Halfdan's Citadel and War Camp in 4-tile Jorvik
-            elif pid in ("deira", "strathclyde", "kent_essex", "lothian"):
-                count = random.randint(2, 3)
+            owner = pdata.get("owner", self.player_id)
+            is_ai = (owner != self.player_id)
+            if owner == "char_ironpeak":
+                f_pool, ep_pool, t_pool = dwarf_first, dwarf_ep, dwarf_titles
+            elif owner == "char_sylvan":
+                f_pool, ep_pool, t_pool = elf_first, elf_ep, elf_titles
             else:
-                count = random.randint(3, 5)
+                f_pool, ep_pool, t_pool = human_first, human_ep, human_titles
+
+            # 2 to 3 vassals per province
+            count = random.randint(2, 3)
 
             v_list = []
             for i in range(count):
-                fn = random.choice(viking_first_names if is_norse else saxon_first_names)
-                ep = random.choice(viking_epithets if is_norse else saxon_epithets)
-                title = random.choice(["Jarl", "Hersir", "Gothi"] if is_norse else ["Thane", "Baron", "Ealdorman"])
-                # AI vassals start with standardized 20% levy and 20% tax (matching physical holdings)
-                t_rate = 20 if is_norse else 10
+                fn = random.choice(f_pool)
+                ep = random.choice(ep_pool)
+                title = random.choice(t_pool)
+                t_rate = 20 if is_ai else 10
                 l_rate = 20
                 v_list.append({
                     "id": f"{pid}_vassal_{i}",
@@ -224,9 +258,9 @@ class GameState:
                     "tax_contribution": 0,
                     "tax_rate": t_rate,
                     "levy_rate": l_rate,
-                    "tax_locked": is_norse,
-                    "levy_locked": is_norse,
-                    "gold": random.randint(20, 50),
+                    "tax_locked": is_ai,
+                    "levy_locked": is_ai,
+                    "gold": random.randint(30, 80),
                     "title": title,
                     "city_name": None,
                     "tiles": []
@@ -262,9 +296,18 @@ class GameState:
         Handles emergency capital relocation if capital is captured,
         and restoration when liberated.
         """
-        if owner_id == self.player_id:
-            pri = self.player_primary_capital
-            if PROVINCES.get(pri, {}).get("owner") == self.player_id:
+        primary_capitals = {
+            "char_human": "solaris_prime",
+            "char_ironpeak": "iron_citadel",
+            "char_sylvan": "eloria_heart"
+        }
+        pri = primary_capitals.get(owner_id, "solaris_prime")
+        owned = [pid for pid, p in PROVINCES.items() if p.get("owner") == owner_id]
+        if not owned:
+            return pri
+
+        if pri in owned:
+            if owner_id == self.player_id:
                 if self.player_capital_was_lost:
                     self.player_capital_was_lost = False
                     self.player_capital = pri
@@ -272,59 +315,21 @@ class GameState:
                         CHARACTERS[self.player_id]["province"] = pri
                     p_name = PROVINCES[pri]["name"]
                     self.logs.append(f"Royal Triumph! The Royal Seat has been restored to {p_name}!")
-                return pri
+            return pri
 
-            owned = [pid for pid, p in PROVINCES.items() if p.get("owner") == self.player_id]
-            if not owned:
-                return pri
-
-            if self.player_capital in owned and self.player_capital != pri:
-                return self.player_capital
-
-            sorted_owned = sorted(owned, key=lambda p: (PROVINCES[p].get("levies_max", 0), len(PROVINCES[p].get("tiles", []))), reverse=True)
-            new_cap = sorted_owned[0]
-            self.player_capital = new_cap
-            if self.player_id in CHARACTERS:
-                CHARACTERS[self.player_id]["province"] = new_cap
+        # Emergency capital
+        sorted_owned = sorted(owned, key=lambda p: (PROVINCES[p].get("levies_max", 0), len(PROVINCES[p].get("tiles", []))), reverse=True)
+        new_cap = sorted_owned[0]
+        if owner_id == self.player_id:
             if not self.player_capital_was_lost:
                 self.player_capital_was_lost = True
                 p_old = PROVINCES.get(pri, {}).get("name", pri.capitalize())
                 p_new = PROVINCES[new_cap]["name"]
-                self.logs.append(f"Catastrophe! {p_old} has fallen! King Alfred flees and establishes emergency royal capital in {p_new}!")
-            return new_cap
-
-        elif owner_id == self.enemy_id:
-            pri = self.enemy_primary_capital
-            if PROVINCES.get(pri, {}).get("owner") == self.enemy_id:
-                if self.enemy_capital_was_lost:
-                    self.enemy_capital_was_lost = False
-                    self.enemy_capital = pri
-                    if self.enemy_id in CHARACTERS:
-                        CHARACTERS[self.enemy_id]["province"] = pri
-                    p_name = PROVINCES[pri]["name"]
-                    self.logs.append(f"Seat of Power Restored! Jarl Halfdan has returned the Danelaw Royal Seat to {p_name}!")
-                return pri
-
-            owned = [pid for pid, p in PROVINCES.items() if p.get("owner") == self.enemy_id]
-            if not owned:
-                return pri
-
-            if self.enemy_capital in owned and self.enemy_capital != pri:
-                return self.enemy_capital
-
-            sorted_owned = sorted(owned, key=lambda p: (PROVINCES[p].get("levies_max", 0), len(PROVINCES[p].get("tiles", []))), reverse=True)
-            new_cap = sorted_owned[0]
-            self.enemy_capital = new_cap
-            if self.enemy_id in CHARACTERS:
-                CHARACTERS[self.enemy_id]["province"] = new_cap
-            if not self.enemy_capital_was_lost:
-                self.enemy_capital_was_lost = True
-                p_old = PROVINCES.get(pri, {}).get("name", pri.capitalize())
-                p_new = PROVINCES[new_cap]["name"]
-                self.logs.append(f"War Emergency! {p_old} has fallen! Jarl Halfdan establishes emergency war capital in {p_new}! War summons depart from here.")
-            return new_cap
-
-        return "wessex"
+                self.logs.append(f"Catastrophe! {p_old} has fallen! {self.player['name']} establishes emergency capital in {p_new}!")
+            self.player_capital = new_cap
+            if self.player_id in CHARACTERS:
+                CHARACTERS[self.player_id]["province"] = new_cap
+        return new_cap
 
     def set_player_capital(self, province_id):
         """Allows the player to move their Royal Capital to any owned province."""
@@ -1244,11 +1249,13 @@ class GameState:
         elif getattr(self, "enemy_liege", None) == self.player_id:
             trib = e_fin["total_tribute"]
             self.player["gold"] = round(self.player["gold"] + trib, 1)
-            self.logs.append(f"Received +{trib}g feudal tribute from Vassal Jarl Halfdan of Jorvik.")
+            v_name = CHARACTERS.get(self.enemy_id, {}).get("name", "Vassal"); self.logs.append(f"Received +{trib}g feudal tribute from {v_name}.")
 
         self.player["prestige"] += 1
         self.player["piety"] += 1
-        self.enemy["prestige"] += 1
+        for cid in getattr(self, "ai_rulers", [self.enemy_id]):
+            if cid in CHARACTERS:
+                CHARACTERS[cid]["prestige"] = CHARACTERS[cid].get("prestige", 0) + 1
 
         # Vassal Feudal Autonomy: Vassals autonomously build whatever they want on their fiefs!
         # If they have enough gold and free tiles in their territory, they erect Cities (600g), Barracks (800g), or Forts (1000g)!
@@ -1646,16 +1653,16 @@ class GameState:
                             else:
                                 # ALL holdings captured! Whole province flips!
                                 prov["owner"] = a.owner
-                                prov["color"] = list(PROVINCE_FACTION_COLORS.get(a.owner, {}).get(a.province, COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW))
+                                prov["color"] = list(PROVINCE_FACTION_COLORS.get(a.owner, {}).get(a.province, CHARACTERS.get(a.owner, {}).get("color", [100, 100, 100])))
                                 for t in [coord for coord, s in self.settlements.items() if s.get("province") == a.province]:
                                     self.settlements[t]["occupied_by"] = None
 
                                 if a.owner == self.player_id:
                                     self.player["prestige"] += 100
-                                    self.logs.append(f"TOTAL VICTORY! All boroughs in {prov['name']} have fallen! Province conquered by Wessex!")
+                                    conq_r = CHARACTERS.get(a.owner, {}).get("realm", "the Realm"); self.logs.append(f"TOTAL VICTORY! All strongholds in {prov['name']} have fallen! Conquered by {conq_r}!")
                                 else:
                                     self.enemy["prestige"] += 100
-                                    self.logs.append(f"DISASTER! All boroughs in {prov['name']} have fallen to the Danelaw!")
+                                    conq_r = CHARACTERS.get(a.owner, {}).get("realm", "the Realm"); self.logs.append(f"TERRITORY LOST! All strongholds in {prov['name']} have fallen to {conq_r}!")
 
                                 # Automatically relocate or restore capitals if needed
                                 self.get_realm_capital(self.player_id)
@@ -1690,17 +1697,17 @@ class GameState:
                         a.siege_progress += rate
                         if a.siege_progress >= 100:
                             prov["owner"] = a.owner
-                            prov["color"] = list(PROVINCE_FACTION_COLORS.get(a.owner, {}).get(a.province, COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW))
+                            prov["color"] = list(PROVINCE_FACTION_COLORS.get(a.owner, {}).get(a.province, CHARACTERS.get(a.owner, {}).get("color", [100, 100, 100])))
                             a.is_sieging = False
                             a.siege_progress = 0
                             a.target_city = None
                             a.siege_target_name = None
                             if a.owner == self.player_id:
                                 self.player["prestige"] += 100
-                                self.logs.append(f"Victory! {prov['name']} has been conquered by Wessex!")
+                                conq_r = CHARACTERS.get(a.owner, {}).get("realm", "the Realm"); self.logs.append(f"Victory! {prov['name']} has been conquered by {conq_r}!")
                             else:
                                 self.enemy["prestige"] += 100
-                                self.logs.append(f"Disaster! {prov['name']} has fallen to the Danelaw!")
+                                conq_r = CHARACTERS.get(a.owner, {}).get("realm", "the Realm"); self.logs.append(f"Territory Lost! {prov['name']} has fallen to {conq_r}!")
                             self.get_realm_capital(self.player_id)
                             self.get_realm_capital(self.enemy_id)
                     else:
@@ -1741,25 +1748,37 @@ def setup_province_starter_cities(target_state):
     # Penguasa starter default: 1 City (1 tile), 1 Fort (2 tiles), 1 Barracks (1 tile) = 4 tiles
     # -------------------------------------------------------------
     ruler_specs = [
-        # King Alfred (Wessex)
+        # King Alden (Solaris)
         {
-            "owner": target_state.player_id,
-            "lord": target_state.player["name"],
-            "province": "wessex",
+            "owner": "char_human",
+            "lord": CHARACTERS.get("char_human", {}).get("name", "King Alden"),
+            "province": "solaris_prime",
             "holdings": [
-                {"type": "city", "name": "Royal City of Winchester", "fief": "Crown Demesne of Winchester", "tiles": 1},
-                {"type": "fort", "name": "Royal Citadel of Wilton", "fief": "Crown Demesne of Wilton", "tiles": 2},
-                {"type": "barrack", "name": "King's Saxon Barracks", "fief": "Crown Demesne of Aldhelm's", "tiles": 1, "level": 0}
+                {"type": "city", "name": "Royal City of Solaria", "fief": "Crown Demesne of Solaria", "tiles": 1},
+                {"type": "fort", "name": "Sunspire Citadel", "fief": "Crown Demesne of Sunspire", "tiles": 2},
+                {"type": "barrack", "name": "Solaris Dawn Barracks", "fief": "Crown Demesne of the Dawn", "tiles": 1, "level": 1}
             ]
         },
-        # Jarl Halfdan (Jorvik)
+        # High Thane Thoradin (Ironpeak)
         {
-            "owner": target_state.enemy_id,
-            "lord": target_state.enemy["name"],
-            "province": "jorvik",
+            "owner": "char_ironpeak",
+            "lord": CHARACTERS.get("char_ironpeak", {}).get("name", "High Thane Thoradin"),
+            "province": "iron_citadel",
             "holdings": [
-                {"type": "fort", "name": "Great Hall Citadel of Eoforwic", "fief": "Crown Demesne of Eoforwic", "tiles": 2},
-                {"type": "barrack", "name": "Halfdan's War Camp Barracks", "fief": "Crown Demesne of the Raven", "tiles": 1, "level": 0}
+                {"type": "city", "name": "Great Anvil City", "fief": "Crown Demesne of Great Anvil", "tiles": 1},
+                {"type": "fort", "name": "Ironpeak Fortress", "fief": "Crown Demesne of Ironpeak", "tiles": 2},
+                {"type": "barrack", "name": "Ironbreaker Barracks", "fief": "Crown Demesne of Ironbreaker", "tiles": 1, "level": 1}
+            ]
+        },
+        # Queen Aerith (Sylvandell)
+        {
+            "owner": "char_sylvan",
+            "lord": CHARACTERS.get("char_sylvan", {}).get("name", "Queen Aerith"),
+            "province": "eloria_heart",
+            "holdings": [
+                {"type": "city", "name": "Heart of Eloria", "fief": "Crown Demesne of Eloria", "tiles": 1},
+                {"type": "fort", "name": "Elder Tree Sanctuary", "fief": "Crown Demesne of Sanctuary", "tiles": 2},
+                {"type": "barrack", "name": "Sylvan Ranger Barracks", "fief": "Crown Demesne of Sylvan Range", "tiles": 1, "level": 1}
             ]
         }
     ]

@@ -139,8 +139,8 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             f.get("holder") == state.player["name"] or
             (prov_owner == state.player_id and f.get("vassal_id") is None and f.get("holder") != state.enemy["name"])
         )
-        # Prevent stealing AI Halfdan's Jorvik fiefs
-        if f.get("province") == "jorvik" and (f.get("holder") == state.enemy["name"] or f.get("owner") == state.enemy_id):
+        # Prevent stealing AI fiefs
+        if f.get("owner") in getattr(state, "ai_rulers", [state.enemy_id]):
             is_player_fief = False
 
         if f.get("vassal_id") is None and is_player_fief:
@@ -165,8 +165,8 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             sdata.get("lord") == f"{state.player['name']} (Crown Demesne)" or
             (prov_owner == state.player_id and sdata.get("vassal_id") is None and sdata.get("lord") != f"{state.enemy['name']} (Crown Demesne)")
         )
-        # Prevent stealing AI Halfdan's Jorvik holdings
-        if pid == "jorvik" and (sdata.get("lord") == f"{state.enemy['name']} (Crown Demesne)" or sdata.get("owner") == state.enemy_id):
+        # Prevent stealing AI holdings
+        if sdata.get("owner") in getattr(state, "ai_rulers", [state.enemy_id]):
             is_player_holding = False
 
         if is_player_holding and sdata.get("vassal_id") is None:
@@ -294,7 +294,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
         crown_provinces = sorted(
             list(crown_by_prov.keys()),
-            key=lambda p: (0 if p == "wessex" else 1, PROVINCES.get(p, {}).get("name", p))
+            key=lambda p: (0 if p == state.player_capital else 1, PROVINCES.get(p, {}).get("name", p))
         )
     
         # Safety check: if demesne_selected_province no longer exists in crown_by_prov, reset it
@@ -1141,7 +1141,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             c_tot_lbl = font_xs.render(f"+{fin['total_crown_income']}g/m", True, COLOR_TEXT_GREEN)
             screen.blit(c_tot_lbl, (275 - c_tot_lbl.get_width(), 626))
     
-            screen.blit(font_xs.render("Direct rents from King Alfred's royal seats:", True, COLOR_TEXT_MUTED), (32, 642))
+            screen.blit(font_xs.render(f"Direct rents from {state.player['name']}'s royal seats:", True, COLOR_TEXT_MUTED), (32, 642))
             c_sample = fin['crown_holdings'][:2]
             if c_sample:
                 c_str = " • ".join([f"{c['name'][:10]}: +{c['val']}g" for c in c_sample])
@@ -1237,35 +1237,55 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         # -------------------------------------------------------------
         screen.blit(font_md.render("Foreign Relations & Diplomacy", True, COLOR_GOLD), (content_x, 302))
 
-        target_id = state.enemy_id
+        ai_targets = [("char_ironpeak", "Ironpeak Dominion"), ("char_sylvan", "Sylvandell Sovereignty")]
+        curr_target = getattr(state, "active_diplomacy_target", "char_ironpeak")
+        if curr_target not in [t[0] for t in ai_targets]:
+            curr_target = "char_ironpeak"
+            state.active_diplomacy_target = curr_target
+
+        pill_w = (content_w - 6) // 2
+        for idx, (t_id, t_title) in enumerate(ai_targets):
+            p_rect = pygame.Rect(content_x + idx * (pill_w + 6), 326, pill_w, 24)
+            is_sel = (t_id == curr_target)
+            is_hov = p_rect.collidepoint(mouse_pos)
+            bg = (55, 65, 85) if is_sel else ((40, 48, 62) if is_hov else (28, 34, 45))
+            bd = COLOR_GOLD if is_sel else ((100, 120, 150) if is_hov else (50, 60, 75))
+            pygame.draw.rect(screen, bg, p_rect, border_radius=4)
+            pygame.draw.rect(screen, bd, p_rect, 1, border_radius=4)
+            t_lbl = font_xs.render(t_title.split()[0], True, COLOR_GOLD if is_sel else COLOR_TEXT_MUTED)
+            screen.blit(t_lbl, (p_rect.x + (p_rect.w - t_lbl.get_width()) // 2, p_rect.y + 4))
+            if mouse_clicked and is_hov:
+                state.active_diplomacy_target = t_id
+
+        target_id = curr_target
         target_char = CHARACTERS.get(target_id, {})
-        t_name = target_char.get("name", "Foreign High King")
-        t_realm = target_char.get("realm", "Kingdom of Danelaw")
-        t_martial = target_char.get("stats", {}).get("martial", 16)
+        t_name = target_char.get("name", "Foreign Sovereign")
+        t_realm = target_char.get("realm", "Foreign Realm")
+        t_martial = target_char.get("martial", 16)
         t_age = target_char.get("age", 35)
         f_prov_count = sum(1 for p in PROVINCES.values() if p.get("owner") == target_id)
         f_troops = sum(a.troops for a in state.armies if a.owner == target_id)
 
         # 1. Foreign Ruler Card
-        d_card = pygame.Rect(content_x, 328, content_w, 92)
+        d_card = pygame.Rect(content_x, 356, content_w, 88)
         pygame.draw.rect(screen, (32, 38, 50), d_card, border_radius=6)
         pygame.draw.rect(screen, (70, 85, 110), d_card, 1, border_radius=6)
 
         f_p_img = portrait_cache.get(target_id)
         if f_p_img:
-            screen.blit(f_p_img, (content_x + 8, 334))
-            pygame.draw.rect(screen, COLOR_GOLD, (content_x + 8, 334, 64, 64), 1)
+            screen.blit(f_p_img, (content_x + 8, 362))
+            pygame.draw.rect(screen, COLOR_GOLD, (content_x + 8, 362, 64, 64), 1)
         f_c_img = coa_cache.get(target_id)
         if f_c_img:
-            screen.blit(f_c_img, (content_x + 52, 376))
+            screen.blit(f_c_img, (content_x + 52, 400))
 
-        screen.blit(font_sm.render(t_name, True, COLOR_GOLD), (content_x + 82, 334))
-        screen.blit(font_xs.render(f"{t_realm} ({f_prov_count} Provinces)", True, (200, 220, 245)), (content_x + 82, 354))
-        screen.blit(font_xs.render(f"Martial: {t_martial}  •  Age: {t_age}  •  Field: {f_troops:,} men", True, COLOR_TEXT_MUTED), (content_x + 82, 372))
+        screen.blit(font_sm.render(t_name, True, COLOR_GOLD), (content_x + 82, 360))
+        screen.blit(font_xs.render(f"{t_realm} ({f_prov_count} Prov)", True, (200, 220, 245)), (content_x + 82, 380))
+        screen.blit(font_xs.render(f"Martial: {t_martial}  •  Age: {t_age}  •  Field: {f_troops:,} men", True, COLOR_TEXT_MUTED), (content_x + 82, 398))
 
         # Status Badge
-        is_war = (getattr(state, "war_status", "war") == "war")
-        st_rect = pygame.Rect(content_x + 82, 392, 160, 20)
+        is_war = state.are_hostile(state.player_id, target_id)
+        st_rect = pygame.Rect(content_x + 82, 418, 160, 20)
         st_bg = (145, 30, 30) if is_war else (30, 100, 60)
         st_txt = "⚔ STATUS: AT WAR" if is_war else "🕊 STATUS: AT PEACE"
         pygame.draw.rect(screen, st_bg, st_rect, border_radius=3)
@@ -1273,24 +1293,24 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         screen.blit(st_lbl, (st_rect.x + (st_rect.w - st_lbl.get_width()) // 2, st_rect.y + 2))
 
         # 2. Primary Functional Action Button (Declare War / Offer Peace)
-        act_y = 430
-        btn_act = pygame.Rect(content_x, act_y, content_w, 36)
+        act_y = 450
+        btn_act = pygame.Rect(content_x, act_y, content_w, 34)
         b_hov = btn_act.collidepoint(mouse_pos)
 
         if is_war:
             pygame.draw.rect(screen, (30, 110, 70) if b_hov else (20, 80, 50), btn_act, border_radius=4)
             pygame.draw.rect(screen, (80, 220, 140), btn_act, 1, border_radius=4)
-            act_lbl = font_sm.render("🕊 OFFER PEACE (Establish Truce)", True, (240, 255, 240))
-            screen.blit(act_lbl, (btn_act.x + (btn_act.w - act_lbl.get_width()) // 2, act_y + 8))
+            act_lbl = font_sm.render("🕊 OFFER PEACE (Conclude Truce)", True, (240, 255, 240))
+            screen.blit(act_lbl, (btn_act.x + (btn_act.w - act_lbl.get_width()) // 2, act_y + 7))
             if mouse_clicked and b_hov:
                 state.offer_peace(state.player_id, target_id)
         else:
             pygame.draw.rect(screen, (135, 30, 30) if b_hov else (95, 20, 20), btn_act, border_radius=4)
             pygame.draw.rect(screen, (240, 80, 80), btn_act, 1, border_radius=4)
-            act_lbl = font_sm.render("⚔ DECLARE WAR (Sound the Horns)", True, (255, 235, 235))
-            screen.blit(act_lbl, (btn_act.x + (btn_act.w - act_lbl.get_width()) // 2, act_y + 8))
+            act_lbl = font_sm.render(f"⚔ DECLARE WAR ({t_realm.split()[0]})", True, (255, 235, 235))
+            screen.blit(act_lbl, (btn_act.x + (btn_act.w - act_lbl.get_width()) // 2, act_y + 7))
             if mouse_clicked and b_hov:
-                state.declare_war(state.player_id, target_id, reason="Formal Declaration")
+                state.declare_war(state.player_id, target_id, reason="Territorial Expansion")
 
         # 3. Frontier Intelligence & Standoff Status (SIAGA)
         foreign_at_border = []

@@ -183,7 +183,7 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
         a_title = font_lg.render(sel_army.name, True, COLOR_GOLD)
         screen.blit(a_title, (content_x, 80))
         
-        sub_title = font_sm.render(f"Strength: {sel_army.troops:,} Men  •  Owner: Wessex", True, COLOR_TEXT_WHITE)
+        owner_r = CHARACTERS.get(sel_army.owner, {}).get("realm", "Realm"); sub_title = font_sm.render(f"Strength: {sel_army.troops:,} Men  •  Owner: {owner_r}", True, COLOR_TEXT_WHITE)
         screen.blit(sub_title, (content_x, 110))
     
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 135), (content_x + content_w, 135), 1)
@@ -197,7 +197,7 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
         elif sel_army.courier_en_route:
             screen.blit(font_md.render(f"STATUS: ROYAL COURIER EN ROUTE ({sel_army.courier_days_left}d left)", True, (255, 215, 80)), (content_x, 202))
             dest_p = PROVINCES[sel_army.province]["name"].split()[0]
-            cap_p = "Winchester" if sel_army.owner == state.player_id else "Jorvik"
+            cap_pid = state.get_realm_capital(sel_army.owner); cap_p = PROVINCES.get(cap_pid, {}).get("name", "Capital")
             screen.blit(font_xs.render(f"Decree riding from {cap_p} to {dest_p}.", True, COLOR_TEXT_WHITE), (content_x, 222))
         elif sel_army.is_mustering:
             screen.blit(font_md.render(f"STATUS: MUSTERING ({sel_army.muster_days}d left)", True, COLOR_GOLD), (content_x, 202))
@@ -313,7 +313,7 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
             state.selected_army_id = None
     
     elif sel_prov:
-        owner_char = CHARACTERS.get(sel_prov["owner"], CHARACTERS["char_alfred"])
+        owner_char = CHARACTERS.get(sel_prov["owner"], CHARACTERS[state.player_id])
         is_vassal_seat = (getattr(state, "player_liege", None) is not None and (
             state.selected_province == state.player_capital or
             any(s.get("province") == state.selected_province and s.get("is_crown_demesne") and not s.get("vassal_id") for s in state.settlements.values())
