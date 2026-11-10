@@ -80,12 +80,22 @@ def build_dynamic_province_adjacency(cell_to_prov, max_reach=2, extra_connection
 
     return {p: sorted(list(neighbors)) for p, neighbors in adj.items()}
 
-def find_shortest_path(start_prov, goal_prov):
-    """Finds the shortest province sequence between two provinces using BFS."""
+def find_shortest_path(start_prov, goal_prov, owner=None):
+    """
+    Finds the shortest province sequence between two provinces using BFS.
+    If owner is provided (or inferable from start_prov) and start & goal are in the
+    same realm, restricts the sequence to strictly domestic provinces!
+    """
     if start_prov == goal_prov:
         return [start_prov]
     if start_prov not in ADJACENCY or goal_prov not in ADJACENCY:
         return None
+
+    if owner is None:
+        owner = PROVINCES.get(start_prov, {}).get("owner")
+    goal_owner = PROVINCES.get(goal_prov, {}).get("owner")
+
+    restrict_to_owner = (owner is not None and goal_owner == owner)
 
     visited = {start_prov}
     queue = deque([[start_prov]])
@@ -95,10 +105,16 @@ def find_shortest_path(start_prov, goal_prov):
         node = path[-1]
 
         for neighbor in ADJACENCY.get(node, []):
+            if restrict_to_owner and PROVINCES.get(neighbor, {}).get("owner") != owner:
+                continue
             if neighbor == goal_prov:
                 return path + [neighbor]
             if neighbor not in visited:
                 visited.add(neighbor)
                 queue.append(path + [neighbor])
+
+    # Fallback to unrestricted if terrain demands it
+    if restrict_to_owner:
+        return find_shortest_path(start_prov, goal_prov, owner=False)
 
     return None

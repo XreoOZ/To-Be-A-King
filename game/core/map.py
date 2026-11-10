@@ -1,3 +1,4 @@
+import heapq
 """
 Map Grid Parsing, Provincial Boundaries, Tile Adjacency, and BFS Pathfinding
 """
@@ -100,21 +101,92 @@ for (c, r) in CELL_TO_PROV:
             if nt in CELL_TO_PROV:
                 TILE_ADJACENCY[(c, r)].add(nt)
 
-def find_shortest_tile_path(start_tile, goal_tile):
+def find_shortest_tile_path(start_tile, goal_tile, owner=None):
+    """
+    Finds the optimal path between start_tile and goal_tile.
+    If owner is provided (e.g. army.owner):
+      - If destination is within owner's realm: STRICTLY paths only through tiles belonging
+        to owner, ensuring zero border intrusions into foreign lands.
+      - If destination is in foreign territory: paths through owner's land and crosses directly
+        into target realm, while strictly avoiding third-party neutral realms.
+    """
     if start_tile == goal_tile:
         return [start_tile]
     if start_tile not in TILE_ADJACENCY or goal_tile not in TILE_ADJACENCY:
         return None
-    queue = deque([[start_tile]])
-    visited = {start_tile}
-    while queue:
-        path = queue.popleft()
-        node = path[-1]
-        neighbors = sorted(TILE_ADJACENCY[node], key=lambda t: (t[0]-goal_tile[0])**2 + (t[1]-goal_tile[1])**2)
-        for neighbor in neighbors:
-            if neighbor == goal_tile:
-                return path + [neighbor]
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append(path + [neighbor])
-    return None
+
+    from game.data.provinces import PROVINCES
+
+    start_prov = CELL_TO_PROV.get(start_tile)
+    goal_prov = CELL_TO_PROV.get(goal_tile)
+    start_owner = PROVINCES.get(start_prov, {}).get("owner")
+    goal_owner = PROVINCES.get(goal_prov, {}).get("owner")
+
+    if owner is None:
+        owner = start_owner
+
+    # Determine allowed realms / owners
+    if goal_owner == owner and start_owner == owner:
+        # STRICT domestic: only tiles belonging to owner are allowed!
+        allowed_set = {owner}
+    else:
+        # User clicked foreign land, or army is in foreign land moving home/elsewhere
+        allowed_set = {owner, goal_owner}
+        if start_owner:
+            allowed_set.add(start_owner)
+
+    def heuristic(a, b):
+        dx = abs(a[0] - b[0])
+        dy = abs(a[1] - b[1])
+        return max(dx, dy) + 0.414 * min(dx, dy)
+
+    def get_tile_cost(tile):
+        p_id = CELL_TO_PROV.get(tile)
+        t_owner = PROVINCES.get(p_id, {}).get("owner")
+        if t_owner not in allowed_set:
+            return None  # Strictly forbidden
+        if t_owner == owner:
+            return 1.0   # Domestic territory: lowest cost
+        if t_owner == goal_owner:
+            return 2.5   # Target foreign territory: allowed when target is foreign
+        return 5.0       # Current location foreign territory: allowed to escape
+
+    def run_astar(check_costs=True):
+        open_set = []
+        heapq.heappush(open_set, (0.0, 0, start_tile, [start_tile]))
+        g_scores = {start_tile: 0.0}
+        counter = 0
+
+        while open_set:
+            f, _, current, path = heapq.heappop(open_set)
+
+            if current == goal_tile:
+                return path
+
+            if g_scores.get(current, float('inf')) < f - heuristic(current, goal_tile):
+                continue
+
+            for neighbor in TILE_ADJACENCY.get(current, []):
+                if check_costs:
+                    cost = get_tile_cost(neighbor)
+                    if cost is None:
+                        continue
+                else:
+                    cost = 1.0
+
+                step_dist = 1.414 if (neighbor[0] != current[0] and neighbor[1] != current[1]) else 1.0
+                tentative_g = g_scores[current] + (cost * step_dist)
+
+                if tentative_g < g_scores.get(neighbor, float('inf')):
+                    g_scores[neighbor] = tentative_g
+                    h = heuristic(neighbor, goal_tile)
+                    counter += 1
+                    heapq.heappush(open_set, (tentative_g + h, counter, neighbor, path + [neighbor]))
+        return None
+
+    path = run_astar(check_costs=True)
+    if not path:
+        # Fallback to unrestricted only if terrain connectivity demands it
+        path = run_astar(check_costs=False)
+
+    return path

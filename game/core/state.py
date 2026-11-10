@@ -947,7 +947,7 @@ class GameState:
                 host.is_demobilizing = True
                 host.is_sieging = False
                 host.is_mustering = False
-                tile_route = find_shortest_tile_path(host.tile, home_cap_tile)
+                tile_route = find_shortest_tile_path(host.tile, home_cap_tile, owner=host.owner)
                 if tile_route and len(tile_route) > 1:
                     host.tile_path = tile_route[1:]
                     host.move_progress = 0.0
@@ -1081,7 +1081,7 @@ class GameState:
         if getattr(army, "tile", None) == target_tile:
             return
         
-        path = find_shortest_tile_path(army.tile, target_tile)
+        path = find_shortest_tile_path(army.tile, target_tile, owner=army.owner)
         if path and len(path) > 1:
             army.tile_path = path[1:] # steps to traverse
             army.move_progress = 0.0
@@ -1439,12 +1439,12 @@ class GameState:
                     if new_prov != a.province:
                         a.province = new_prov
                         prov_owner = PROVINCES.get(new_prov, {}).get("owner")
-                        if prov_owner and prov_owner != a.owner and getattr(self, "war_status", "war") == "peace":
+                        if prov_owner and prov_owner != a.owner and getattr(self, "war_status", "war") == "peace" and not getattr(a, "is_demobilizing", False):
                             self.declare_war(a.owner, prov_owner, reason="Border Incursion")
                     a.move_progress = 0.0
 
                     # Check peace-break if stepping onto a foreign army's tile
-                    if getattr(self, "war_status", "war") == "peace":
+                    if getattr(self, "war_status", "war") == "peace" and not getattr(a, "is_demobilizing", False):
                         other_armies = [e for e in self.armies if getattr(e, "tile", None) == a.tile and e.owner != a.owner and e.troops > 0]
                         if other_armies:
                             self.declare_war(a.owner, other_armies[0].owner, reason="Troop Clash")

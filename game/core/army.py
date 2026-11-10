@@ -83,7 +83,7 @@ class Army:
         elif isinstance(new_val, list) and new_val and isinstance(new_val[0], str):
             target_prov = new_val[-1]
             target_tile = get_province_capital_tile(target_prov)
-            route = find_shortest_tile_path(self.tile, target_tile)
+            route = find_shortest_tile_path(self.tile, target_tile, owner=self.owner)
             if route and len(route) > 1:
                 self.tile_path = route[1:]
             else:
