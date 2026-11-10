@@ -156,7 +156,8 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
         b_c_hov = cls_btn.collidepoint(mouse_pos)
         pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_c_hov else COLOR_BUTTON_NORMAL, cls_btn, border_radius=6)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, cls_btn, 1, border_radius=6)
-        screen.blit(font_sm.render("← Back to Province View", True, COLOR_TEXT_WHITE), (940, cls_y + 8))
+        b_lbl = font_sm.render("← Back to Province View", True, COLOR_TEXT_WHITE)
+        screen.blit(b_lbl, (cls_btn.x + (cls_btn.w - b_lbl.get_width()) // 2, cls_y + 8))
         if mouse_clicked and b_c_hov:
             state.selected_settlement = None
             state.selected_vassal_idx = None
@@ -214,7 +215,8 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
             b_m_hover = merge_btn.collidepoint(mouse_pos)
             pygame.draw.rect(screen, (40, 90, 140) if b_m_hover else (30, 65, 105), merge_btn, border_radius=6)
             pygame.draw.rect(screen, (80, 160, 240), merge_btn, 1, border_radius=6)
-            screen.blit(font_md.render("MERGE WITH OTHER HOSTS", True, COLOR_TEXT_WHITE), (910, 394))
+            m_lbl = font_md.render("MERGE WITH OTHER HOSTS", True, COLOR_TEXT_WHITE)
+            screen.blit(m_lbl, (merge_btn.x + (merge_btn.w - m_lbl.get_width()) // 2, 394))
             if mouse_clicked and b_m_hover:
                 state.merge_armies_in_province(sel_army.province, state.player_id)
     
@@ -226,7 +228,7 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
             pygame.draw.rect(screen, (240, 90, 90), dis_btn, 1, border_radius=6)
             btn_txt = "CANCEL SUMMONS (Recall Courier)" if sel_army.courier_en_route else "CANCEL MUSTER (Refund Men)"
             b_lbl = font_md.render(btn_txt, True, (255, 220, 220))
-            screen.blit(b_lbl, (content_x + (content_w - b_lbl.get_width()) // 2, 444))
+            screen.blit(b_lbl, (dis_btn.x + (dis_btn.w - b_lbl.get_width()) // 2, 444))
             if mouse_clicked and b_d_hover:
                 state.disband_army(sel_army)
         elif sel_army.is_demobilizing:
@@ -234,7 +236,8 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
             b_d_hover = dis_btn.collidepoint(mouse_pos)
             pygame.draw.rect(screen, (40, 90, 140) if b_d_hover else (30, 65, 105), dis_btn, border_radius=6)
             pygame.draw.rect(screen, (80, 160, 240), dis_btn, 1, border_radius=6)
-            screen.blit(font_md.render("CANCEL DISBAND (Resume War)", True, COLOR_TEXT_WHITE), (905, 444))
+            c_lbl = font_md.render("CANCEL DISBAND (Resume War)", True, COLOR_TEXT_WHITE)
+            screen.blit(c_lbl, (dis_btn.x + (dis_btn.w - c_lbl.get_width()) // 2, 444))
             if mouse_clicked and b_d_hover:
                 sel_army.is_demobilizing = False
                 sel_army.path = []
@@ -244,7 +247,8 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
             b_d_hover = dis_btn.collidepoint(mouse_pos)
             pygame.draw.rect(screen, (80, 35, 35) if b_d_hover else (60, 28, 28), dis_btn, border_radius=6)
             pygame.draw.rect(screen, COLOR_TEXT_RED, dis_btn, 1, border_radius=6)
-            screen.blit(font_md.render("ORDER DISBAND (Return Home)", True, (255, 220, 220)), (905, 444))
+            d_lbl = font_md.render("ORDER DISBAND (Return Home)", True, (255, 220, 220))
+            screen.blit(d_lbl, (dis_btn.x + (dis_btn.w - d_lbl.get_width()) // 2, 444))
             if mouse_clicked and b_d_hover:
                 state.disband_army(sel_army)
     
@@ -253,7 +257,8 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
         b_ds_hover = desel_btn.collidepoint(mouse_pos)
         pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_ds_hover else COLOR_BUTTON_NORMAL, desel_btn, border_radius=6)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, desel_btn, 1, border_radius=6)
-        screen.blit(font_sm.render("Deselect Army (View Province)", True, COLOR_TEXT_MUTED), (925, 493))
+        ds_lbl = font_sm.render("Deselect Army (View Province)", True, COLOR_TEXT_MUTED)
+        screen.blit(ds_lbl, (desel_btn.x + (desel_btn.w - ds_lbl.get_width()) // 2, 493))
         if mouse_clicked and b_ds_hover:
             state.selected_army_id = None
     
@@ -357,9 +362,18 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                 screen.blit(font_md.render("Military Orders", True, COLOR_GOLD), (content_x, 320))
                 p_cd = sel_prov.get("raise_cooldown_days", 0)
                 is_p_cd = (p_cd > 0)
+                is_in_field = state.is_province_levy_in_field(state.selected_province, sel_prov["owner"])
+                
                 raise_btn = pygame.Rect(content_x, 345, content_w, 40)
-                b_r_hov = raise_btn.collidepoint(mouse_pos) and not is_p_cd
-                if is_p_cd:
+                b_r_hov = raise_btn.collidepoint(mouse_pos) and not is_p_cd and not is_in_field
+                
+                if is_in_field:
+                    pygame.draw.rect(screen, (38, 42, 50), raise_btn, border_radius=6)
+                    pygame.draw.rect(screen, (60, 65, 78), raise_btn, 1, border_radius=6)
+                    p_short = sel_prov["name"].split()[0]
+                    f_lbl = font_sm.render(f"LEVIES IN FIELD ({p_short} Deployed)", True, (160, 170, 185))
+                    screen.blit(f_lbl, (raise_btn.x + (raise_btn.w - f_lbl.get_width()) // 2, 356))
+                elif is_p_cd:
                     m_left = (p_cd + 29) // 30
                     pygame.draw.rect(screen, (38, 42, 50), raise_btn, border_radius=6)
                     pygame.draw.rect(screen, (60, 65, 78), raise_btn, 1, border_radius=6)
@@ -369,7 +383,8 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                 else:
                     pygame.draw.rect(screen, (35, 95, 50) if b_r_hov else (25, 70, 38), raise_btn, border_radius=6)
                     pygame.draw.rect(screen, COLOR_TEXT_GREEN, raise_btn, 1, border_radius=6)
-                    screen.blit(font_md.render(f"RAISE LOCAL LEVY ({sel_prov['levies_current']} Men)", True, COLOR_TEXT_WHITE), (905, 354))
+                    r_lbl = font_md.render(f"RAISE LOCAL LEVY ({sel_prov['levies_current']} Men)", True, COLOR_TEXT_WHITE)
+                    screen.blit(r_lbl, (raise_btn.x + (raise_btn.w - r_lbl.get_width()) // 2, 354))
                     if mouse_clicked and b_r_hov:
                         state.raise_province_levy(state.selected_province)
     
@@ -377,7 +392,8 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                 b_rl_hov = rally_btn.collidepoint(mouse_pos)
                 pygame.draw.rect(screen, (35, 65, 110) if b_rl_hov else (25, 48, 85), rally_btn, border_radius=6)
                 pygame.draw.rect(screen, (70, 130, 220), rally_btn, 1, border_radius=6)
-                screen.blit(font_md.render("RALLY ALL ARMIES HERE (M)", True, COLOR_TEXT_WHITE), (895, 404))
+                rl_lbl = font_md.render("RALLY ALL ARMIES HERE (M)", True, COLOR_TEXT_WHITE)
+                screen.blit(rl_lbl, (rally_btn.x + (rally_btn.w - rl_lbl.get_width()) // 2, 404))
                 if mouse_clicked and b_rl_hov:
                     state.rally_all_armies_to(state.selected_province)
             else:

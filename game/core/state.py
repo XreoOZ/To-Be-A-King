@@ -290,11 +290,30 @@ class GameState:
     # ---------------------------------------------------------
     # Army Operations
     # ---------------------------------------------------------
+    def is_province_levy_in_field(self, province_id, owner_id=None):
+        """Checks if a province's levies are currently deployed in the field (active host or sub-flag)."""
+        if owner_id is None:
+            prov = PROVINCES.get(province_id)
+            if not prov:
+                return False
+            owner_id = prov.get("owner")
+        for a in self.armies:
+            if a.owner == owner_id and a.troops > 0:
+                if a.flag_origin == province_id or (getattr(a, "sub_flags", None) and province_id in a.sub_flags):
+                    return True
+        return False
+
     def raise_province_levy(self, province_id):
         prov = PROVINCES.get(province_id)
         if not prov or prov["owner"] != self.player_id:
             return
         
+        # Anti-exploit: Feudal vassal levies cannot be re-raised while already active in the field!
+        if self.is_province_levy_in_field(province_id, prov["owner"]):
+            p_short = prov["name"].split()[0]
+            self.logs.append(f"Cannot muster {p_short}! Levies already deployed in the field. Disband active host first.")
+            return
+
         # 3-Month Cooldown Check
         cd = prov.get("raise_cooldown_days", 0)
         if cd > 0:
@@ -372,6 +391,8 @@ class GameState:
         courier_count = 0
         for pid, prov in PROVINCES.items():
             if prov["owner"] == self.player_id and prov["levies_current"] > 0 and prov.get("raise_cooldown_days", 0) <= 0:
+                if self.is_province_levy_in_field(pid, self.player_id):
+                    continue
                 available = prov["levies_current"]
                 army_id = f"army_{self.army_id_counter}"
                 self.army_id_counter += 1
@@ -428,7 +449,11 @@ class GameState:
             else:
                 self.logs.append(f"Mobilized royal capital levies: {total_men:,} men! (Mustering for 30 days)")
         else:
-            self.logs.append("All available levies are already raised or recovering.")
+            in_field = any(self.is_province_levy_in_field(pid, self.player_id) for pid, p in PROVINCES.items() if p["owner"] == self.player_id)
+            if in_field:
+                self.logs.append("All provincial levies are already deployed in the field! Disband active armies first.")
+            else:
+                self.logs.append("All available levies are already raised or recovering.")
 
     def raise_all_enemy_levies(self, is_emergency=False):
         """Mobilizes ALL available levies across 100% of Danelaw provinces (All-In with war couriers)."""
@@ -445,6 +470,8 @@ class GameState:
         for pid in danelaw_provs:
             prov = PROVINCES[pid]
             if prov.get("raise_cooldown_days", 0) > 0:
+                continue
+            if self.is_province_levy_in_field(pid, self.enemy_id):
                 continue
             available = prov.get("levies_current", 0)
             if available >= min_to_raise:

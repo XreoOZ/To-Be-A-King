@@ -69,7 +69,7 @@ def run_viking_ai(state):
 
     total_viking_field = sum(a.troops for a in danelaw_armies)
     total_threat_troops = sum(pa.troops for pa in all_threat_armies)
-    unraised_enemy_levies = sum(PROVINCES[pid].get("levies_current", 0) for pid in danelaw_provs)
+    unraised_enemy_levies = sum(PROVINCES[pid].get("levies_current", 0) for pid in danelaw_provs if not state.is_province_levy_in_field(pid, state.enemy_id))
     has_invasion = len(invading_threats) > 0
     has_border_threat = len(threatened_borders) > 0
 
