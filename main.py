@@ -512,6 +512,57 @@ def get_barrack_stats(level):
     upkeep = 1 + lvl
     return {"level": lvl, "garrison": garrison, "recruits": recruits, "upkeep": upkeep}
 
+def sync_province_holdings_stats(state, pid=None, is_init=False):
+    """
+    Synchronizes province tax revenue and maximum garrison/levies strictly with its physical holdings:
+    - City (1 Tile): +3 Gold/month, +100 Garrison
+    - Fort (2 Tiles): +1 Gold/month, +300 Garrison
+    - Barracks (1 Tile): +100 Garrison slot (+100 per upgrade level, up to 500)
+    """
+    target_pids = [pid] if pid else list(PROVINCES.keys())
+    for p_key in target_pids:
+        prov = PROVINCES.get(p_key)
+        if not prov:
+            continue
+
+        p_holdings = {}
+        for coord, sdata in state.settlements.items():
+            if sdata.get("province") == p_key:
+                hid = sdata.get("id") or coord
+                if hid not in p_holdings:
+                    p_holdings[hid] = sdata
+
+        total_tax = 0
+        total_garrison = 0
+        for s in p_holdings.values():
+            stype = s.get("type", "city")
+            if stype in ("city", "town"):
+                total_tax += 3
+                total_garrison += 100
+            elif stype == "fort":
+                total_tax += 1
+                total_garrison += 300
+            elif stype == "barrack":
+                lvl = s.get("level", 0)
+                bstats = get_barrack_stats(lvl)
+                total_garrison += bstats["garrison"]
+
+        if not p_holdings:
+            total_tax = 0
+            total_garrison = 50  # Rural baseline if zero constructed holdings
+
+        prev_max = prov.get("levies_max", 0)
+        prov["tax"] = total_tax
+        prov["levies_max"] = total_garrison
+        if is_init or "levies_current" not in prov:
+            prov["levies_current"] = total_garrison
+        else:
+            diff = total_garrison - prev_max
+            if diff > 0:
+                prov["levies_current"] = min(prov["levies_max"], prov.get("levies_current", 0) + diff)
+            else:
+                prov["levies_current"] = min(prov["levies_max"], max(0, prov.get("levies_current", total_garrison)))
+
 def get_vassal_landed_status(state, v_dict, prov_id=None):
     """
     Returns detailed landed status, held fiefs, held settlements,
@@ -1731,6 +1782,9 @@ def run_game():
         # Synchronize target_state's counter so newly carved fiefs never collide with starter fiefs!
         target_state.fief_id_counter = max(target_state.fief_id_counter, fief_counter + 10)
         target_state.settlement_id_counter = max(target_state.settlement_id_counter, settlement_counter + 10)
+
+        # Synchronize province garrison and tax strictly to physical holdings on map!
+        sync_province_holdings_stats(target_state, is_init=True)
 
         # Synchronize all vassals' initial levy and tax contributions strictly according to landed status
         for pid in PROVINCES:
@@ -3201,18 +3255,10 @@ def run_game():
                     state.player["gold"] -= b_cost
                     p_short = prov_obj['name'].split()[0]
                     if state.build_type == "city":
-                        prov_obj["tax"] += 3
-                        prov_obj["levies_max"] += 100
-                        prov_obj["levies_current"] += 100
                         city_name = f"{p_short} City"
                     elif state.build_type == "fort":
-                        prov_obj["tax"] += 1
-                        prov_obj["levies_max"] += 300
-                        prov_obj["levies_current"] += 300
                         city_name = f"{p_short} Citadel"
                     else:
-                        prov_obj["levies_max"] += 100
-                        prov_obj["levies_current"] += 100
                         city_name = f"{p_short} Barracks"
 
                     state.settlement_id_counter += 1
@@ -3242,6 +3288,7 @@ def run_game():
                             "vassal_id": None,
                             "is_crown_demesne": True
                         }
+                    sync_province_holdings_stats(state, state.selected_province)
                     state.logs.append(f"Constructed Crown {b_spec['name']} in {prov_obj['name']} (-{b_cost}g)!")
                     state.build_mode = False
 
@@ -3616,7 +3663,7 @@ def run_game():
                             new_lvl = lvl + 1
                             for tc in h_matching_tiles:
                                 state.settlements[tc]["level"] = new_lvl
-                            p_parent["levies_max"] = min(2500, p_parent.get("levies_max", 1000) + 100)
+                            sync_province_holdings_stats(state, s_data["province"])
                             state.logs.append(f"Upgraded {s_data['name']} to Level {new_lvl} (-{up_cost}g)! Now generates +{10 + new_lvl * 5} recruits/mo.")
                         cur_y += 38
 
@@ -3632,6 +3679,7 @@ def run_game():
                             new_lvl = lvl - 1
                             for tc in h_matching_tiles:
                                 state.settlements[tc]["level"] = new_lvl
+                            sync_province_holdings_stats(state, s_data["province"])
                             state.logs.append(f"Downgraded {s_data['name']} to Level {new_lvl}. Saved 1 Gold/month upkeep.")
                         cur_y += 36
             
@@ -4314,14 +4362,8 @@ def run_game():
                 p_obj = PROVINCES.get(pid)
                 if p_obj:
                     if req_type == "city":
-                        p_obj["tax"] += 3
-                        p_obj["levies_max"] += 100
-                        p_obj["levies_current"] += 100
                         city_title = f"{req['vassal'].split()[1]}'s {random.choice(['Borough', 'Burgh', 'Town', 'Market'])}"
                     else:
-                        p_obj["tax"] += 1
-                        p_obj["levies_max"] += 300
-                        p_obj["levies_current"] += 300
                         city_title = f"{req['vassal'].split()[1]}'s {random.choice(['Keep', 'Castle', 'Fortress'])}"
 
                     req["vassal_ref"]["gold"] = max(0, req["vassal_ref"]["gold"] - req_cost)
@@ -4349,6 +4391,11 @@ def run_game():
 
                     if not req["vassal_ref"].get("city_name"):
                         req["vassal_ref"]["city_name"] = city_title
+
+                    sync_province_holdings_stats(state, pid)
+                    st = get_vassal_landed_status(state, req["vassal_ref"], pid)
+                    req["vassal_ref"]["tax_contribution"] = st["tax_paid"]
+                    req["vassal_ref"]["levy_contribution"] = st["levy_contribution"]
 
                     state.logs.append(f"Granted charter! {req['vassal']} established {city_title} ({req_name}) inside {fief_label}.")
                 state.vassal_build_requests.pop(0)
@@ -4929,20 +4976,6 @@ def run_game():
 
             if modal_mouse_clicked and c_hov:
                 state.player["gold"] -= b_cost
-                p_obj = PROVINCES.get(conf["province_id"])
-                if p_obj:
-                    if b_type == "city":
-                        p_obj["tax"] += 3
-                        p_obj["levies_max"] += 100
-                        p_obj["levies_current"] += 100
-                    elif b_type == "fort":
-                        p_obj["tax"] += 1
-                        p_obj["levies_max"] += 300
-                        p_obj["levies_current"] += 300
-                    else:
-                        p_obj["levies_max"] += 100
-                        p_obj["levies_current"] += 100
-
                 v_obj = None
                 for v in state.vassals.get(conf["province_id"], []):
                     if v.get("id") == conf.get("vassal_id") or v.get("name") == conf.get("vassal_name"):
@@ -4982,6 +5015,12 @@ def run_game():
                     if not v_obj.get("city_name"):
                         v_obj["city_name"] = city_name
                     v_obj["gold"] = v_obj.get("gold", 150) + 100
+
+                sync_province_holdings_stats(state, conf["province_id"])
+                if v_obj:
+                    st = get_vassal_landed_status(state, v_obj, conf["province_id"])
+                    v_obj["tax_contribution"] = st["tax_paid"]
+                    v_obj["levy_contribution"] = st["levy_contribution"]
 
                 state.logs.append(f"Invested {b_cost:,}g in {f_name}! Constructed {city_name} owned by {v_name}.")
                 state.vassal_build_confirm = None
