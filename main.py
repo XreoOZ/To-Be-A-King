@@ -476,9 +476,19 @@ class GameState:
         self.granting_fief_id = None     # Fief currently being granted via modal
         self.grant_page = 0              # Pagination index for grant modal
         
-        # Left Panel Sub-Tab System ('armies' or 'vassals')
+        # Left Panel Sub-Tab System ('armies', 'vassals', or 'demesne')
         self.left_tab = "armies"
         self.vassal_page = 0
+        
+        # Camera & Map Viewport Zoom / Pan State
+        self.zoom = 0.85                 # default initial zoom factor (0.85 frames whole Britain, 1.0 = standard, up to 2.4 = zoomed in)
+        self.min_zoom = 0.65
+        self.max_zoom = 2.40
+        self.cam_pan_x = 0
+        self.cam_pan_y = 0
+        self.is_panning = False
+        self.pan_start_mouse = (0, 0)
+        self.pan_start_cam = (0, 0)
         
         # Calendar: Start 1 January 867 AD
         self.year = 867
@@ -1078,12 +1088,13 @@ def run_game():
     reset_global_world_data()
     state = GameState()
 
-    # Map Rendering Setup
+    # Map Viewport & Base Tile Setup
     raw_grid = MAP_DATA["raw_grid"]
-    map_origin_x = 320
-    map_origin_y = 65
-    tile_w = 26
-    tile_h = 24
+    BASE_TILE_W = 34
+    BASE_TILE_H = 32
+    VIEWPORT_CENTER_X = 575
+    VIEWPORT_CENTER_Y = 385
+    map_viewport = pygame.Rect(290, 53, 570, WINDOW_HEIGHT - 53)
 
     # Pre-map coordinate to 12 provinces
     cell_to_prov = {}
@@ -1107,20 +1118,36 @@ def run_game():
             else: prov_id = "wessex"
             cell_to_prov[(c, r)] = prov_id
 
-    # Compute TRUE province centroids from tile grid (guaranteed on land)
-    prov_tile_sum = {}   # pid -> [sum_x, sum_y, count]
+    # Compute TRUE province centroids in GRID units (scale & pan independent)
+    prov_grid_sum = {}   # pid -> [sum_c, sum_r, count]
     for (c, r), pid in cell_to_prov.items():
-        cx = map_origin_x + c * tile_w + tile_w // 2
-        cy = map_origin_y + 45 + r * tile_h + tile_h // 2
-        if pid not in prov_tile_sum:
-            prov_tile_sum[pid] = [0, 0, 0]
-        prov_tile_sum[pid][0] += cx
-        prov_tile_sum[pid][1] += cy
-        prov_tile_sum[pid][2] += 1
+        if pid not in prov_grid_sum:
+            prov_grid_sum[pid] = [0, 0, 0]
+        prov_grid_sum[pid][0] += c
+        prov_grid_sum[pid][1] += r
+        prov_grid_sum[pid][2] += 1
 
-    province_anchors = {}
-    for pid, (sx, sy, count) in prov_tile_sum.items():
-        province_anchors[pid] = (sx // count, sy // count)
+    prov_grid_centroids = {}
+    for pid, (sc, sr, count) in prov_grid_sum.items():
+        prov_grid_centroids[pid] = (sc / count, sr / count)
+
+    # Precompute border grid midpoints between touching provinces
+    border_grid_sums = {}
+    dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    for (c, r), pid_a in cell_to_prov.items():
+        for dc, dr in dirs:
+            pid_b = cell_to_prov.get((c + dc, r + dr))
+            if pid_b and pid_b != pid_a:
+                pair_key = (pid_a, pid_b)
+                if pair_key not in border_grid_sums:
+                    border_grid_sums[pair_key] = [0, 0, 0]
+                border_grid_sums[pair_key][0] += c
+                border_grid_sums[pair_key][1] += r
+                border_grid_sums[pair_key][2] += 1
+
+    border_grid_centroids = {}
+    for pair_key, (sc, sr, count) in border_grid_sums.items():
+        border_grid_centroids[pair_key] = (sc / count, sr / count)
 
     # Initialize 1:1 STARTER FIEFS AND CITIES FOR EVERY VASSAL IN THE PROVINCE!
     prov_tile_list = {}
@@ -1338,24 +1365,92 @@ def run_game():
         mouse_clicked = False
         right_clicked = False
 
+        # Compute dynamic frame camera transform
+        curr_tile_w = max(18, int(BASE_TILE_W * state.zoom))
+        curr_tile_h = max(16, int(BASE_TILE_H * state.zoom))
+        default_ox = VIEWPORT_CENTER_X - int(10 * curr_tile_w)
+        default_oy = VIEWPORT_CENTER_Y - int(13 * curr_tile_h)
+        origin_x = default_ox + state.cam_pan_x
+        origin_y = default_oy + state.cam_pan_y
+
+        def get_prov_anchor(pid):
+            if pid not in prov_grid_centroids:
+                return (0, 0)
+            gc, gr = prov_grid_centroids[pid]
+            return (int(origin_x + gc * curr_tile_w + curr_tile_w / 2),
+                    int(origin_y + gr * curr_tile_h + curr_tile_h / 2))
+
+        def get_border_midpoint(pid_a, pid_b):
+            pair_key = (pid_a, pid_b)
+            if pair_key in border_grid_centroids:
+                gc, gr = border_grid_centroids[pair_key]
+                return (int(origin_x + gc * curr_tile_w + curr_tile_w / 2),
+                        int(origin_y + gr * curr_tile_h + curr_tile_h / 2))
+            pair_rev = (pid_b, pid_a)
+            if pair_rev in border_grid_centroids:
+                gc, gr = border_grid_centroids[pair_rev]
+                return (int(origin_x + gc * curr_tile_w + curr_tile_w / 2),
+                        int(origin_y + gr * curr_tile_h + curr_tile_h / 2))
+            return None
+
+        province_anchors = {pid: get_prov_anchor(pid) for pid in prov_grid_centroids}
+
         # Event handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
+            elif event.type == pygame.MOUSEWHEEL:
+                if map_viewport.collidepoint(mouse_pos):
+                    old_zoom = state.zoom
+                    zoom_delta = 0.12 * event.y
+                    new_zoom = max(state.min_zoom, min(state.max_zoom, round(state.zoom + zoom_delta, 2)))
+                    if new_zoom != old_zoom:
+                        old_tw = max(18, int(BASE_TILE_W * old_zoom))
+                        old_th = max(16, int(BASE_TILE_H * old_zoom))
+                        old_ox = (VIEWPORT_CENTER_X - int(10 * old_tw)) + state.cam_pan_x
+                        old_oy = (VIEWPORT_CENTER_Y - int(13 * old_th)) + state.cam_pan_y
+                        
+                        mx, my = mouse_pos
+                        gc = (mx - old_ox) / old_tw
+                        gr = (my - old_oy) / old_th
+                        
+                        new_tw = max(18, int(BASE_TILE_W * new_zoom))
+                        new_th = max(16, int(BASE_TILE_H * new_zoom))
+                        new_def_x = VIEWPORT_CENTER_X - int(10 * new_tw)
+                        new_def_y = VIEWPORT_CENTER_Y - int(13 * new_th)
+                        
+                        new_ox = mx - gc * new_tw
+                        new_oy = my - gr * new_th
+                        state.cam_pan_x = int(new_ox - new_def_x)
+                        state.cam_pan_y = int(new_oy - new_def_y)
+                        state.zoom = new_zoom
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     mouse_clicked = True
                     box_start = event.pos
                     box_end   = event.pos
+                elif event.button == 2:
+                    # Middle-click drag to pan camera
+                    state.is_panning = True
+                    state.pan_start_mouse = event.pos
+                    state.pan_start_cam = (state.cam_pan_x, state.cam_pan_y)
                 elif event.button == 3:
                     right_clicked = True
 
             elif event.type == pygame.MOUSEMOTION:
                 if box_start:
                     box_end = event.pos
+                if state.is_panning:
+                    dx = event.pos[0] - state.pan_start_mouse[0]
+                    dy = event.pos[1] - state.pan_start_mouse[1]
+                    state.cam_pan_x = state.pan_start_cam[0] + dx
+                    state.cam_pan_y = state.pan_start_cam[1] + dy
 
             elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 2:
+                    state.is_panning = False
                 if event.button == 1 and box_start:
                     # Build selection rect
                     x1, y1 = box_start
@@ -1413,6 +1508,18 @@ def run_game():
                         state.selected_army_ids = []
                         state.selected_army_id  = None
 
+        # Smooth keyboard pan navigation (Arrows / WASD)
+        keys = pygame.key.get_pressed()
+        pan_step = int(12 / max(0.5, state.zoom))
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            state.cam_pan_x += pan_step
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            state.cam_pan_x -= pan_step
+        if keys[pygame.K_UP] or keys[pygame.K_w]:
+            state.cam_pan_y += pan_step
+        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+            state.cam_pan_y -= pan_step
+
         # Right-click march orders for selected armies (box-select or single selected army)
         if right_clicked:
             armies_to_order = []
@@ -1426,8 +1533,8 @@ def run_game():
             if armies_to_order:
                 # Accurate province detection: reverse-lookup tile under cursor
                 mx, my = mouse_pos
-                col_idx = (mx - map_origin_x) // tile_w
-                row_idx = (my - (map_origin_y + 45)) // tile_h
+                col_idx = int((mx - origin_x) // curr_tile_w)
+                row_idx = int((my - origin_y) // curr_tile_h)
                 target_province = cell_to_prov.get((col_idx, row_idx))
                 if target_province:
                     for army_obj in armies_to_order:
@@ -1770,7 +1877,7 @@ def run_game():
         # ---------------------------------------------------------
         # 3. CENTER: TERRITORY BALANCE & MAP
         # ---------------------------------------------------------
-        map_bg_rect = pygame.Rect(310, 62, 540, WINDOW_HEIGHT - 72)
+        map_bg_rect = pygame.Rect(292, 54, 566, WINDOW_HEIGHT - 60)
         pygame.draw.rect(screen, COLOR_OCEAN, map_bg_rect, border_radius=6)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, map_bg_rect, 2, border_radius=6)
 
@@ -1779,9 +1886,9 @@ def run_game():
         danelaw_count = state.get_provinces_count(state.enemy_id)
         total_provs = 12
 
-        bar_x = 330
-        bar_y = 75
-        bar_w = 500
+        bar_x = 310
+        bar_y = 66
+        bar_w = 490
         bar_h = 24
         
         pygame.draw.rect(screen, (25, 30, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
@@ -1795,6 +1902,12 @@ def run_game():
         screen.blit(w_lbl, (bar_x + 10, bar_y + 3))
         screen.blit(d_lbl, (bar_x + bar_w - d_lbl.get_width() - 10, bar_y + 3))
 
+        # Floating Zoom HUD rect anchor
+        hud_rect = pygame.Rect(816, 62, 34, 118)
+
+        # Clip all map rendering inside the map viewport
+        screen.set_clip(map_bg_rect)
+
         state.hovered_province = None
 
         # -----------------------------------------------------------
@@ -1802,9 +1915,9 @@ def run_game():
         # -----------------------------------------------------------
         for r, row in enumerate(raw_grid):
             for c, ch in enumerate(row):
-                cell_x = map_origin_x + (c * tile_w)
-                cell_y = map_origin_y + 45 + (r * tile_h)
-                cell_rect = pygame.Rect(cell_x, cell_y, tile_w, tile_h)
+                cell_x = origin_x + (c * curr_tile_w)
+                cell_y = origin_y + (r * curr_tile_h)
+                cell_rect = pygame.Rect(cell_x, cell_y, curr_tile_w, curr_tile_h)
 
                 if ch == ".":
                     # Ocean dashes
@@ -1817,7 +1930,7 @@ def run_game():
                 prov_info = PROVINCES.get(prov_id)
                 col = tuple(prov_info["color"]) if prov_info else (150, 150, 150)
 
-                is_hovered  = cell_rect.collidepoint(mouse_pos)
+                is_hovered  = cell_rect.collidepoint(mouse_pos) and map_bg_rect.collidepoint(mouse_pos) and not hud_rect.collidepoint(mouse_pos)
                 is_selected = (prov_id == state.selected_province)
 
                 if is_hovered:
@@ -1825,24 +1938,24 @@ def run_game():
                     col = (min(255, col[0] + 45), min(255, col[1] + 45), min(255, col[2] + 45))
 
                 # Draw full tile (no 1-px gap → seamless within province)
-                pygame.draw.rect(screen, col, (cell_x, cell_y, tile_w, tile_h))
+                pygame.draw.rect(screen, col, (cell_x, cell_y, curr_tile_w, curr_tile_h))
 
                 # Contested Province Hatching (Diagonal Striped Hazard Pattern ala CK2)
                 is_contested, occupier = is_province_contested(state, prov_id)
                 if is_contested:
                     stripe_col = (220, 50, 50) if occupier == state.player_id else (45, 65, 95)
-                    stripe_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
-                    for off in range(-tile_h, tile_w + tile_h, 8):
-                        pygame.draw.line(stripe_surf, (*stripe_col, 140), (off, 0), (off + tile_h, tile_h), 2)
+                    stripe_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
+                    for off in range(-curr_tile_h, curr_tile_w + curr_tile_h, 8):
+                        pygame.draw.line(stripe_surf, (*stripe_col, 140), (off, 0), (off + curr_tile_h, curr_tile_h), 2)
                     screen.blit(stripe_surf, (cell_x, cell_y))
 
                 # Subtle inner highlight (top/left edges only within same province)
                 pygame.draw.line(screen,
                     (min(255, col[0]+18), min(255, col[1]+18), min(255, col[2]+18)),
-                    (cell_x, cell_y), (cell_x + tile_w - 1, cell_y))
+                    (cell_x, cell_y), (cell_x + curr_tile_w - 1, cell_y))
                 pygame.draw.line(screen,
                     (min(255, col[0]+18), min(255, col[1]+18), min(255, col[2]+18)),
-                    (cell_x, cell_y), (cell_x, cell_y + tile_h - 1))
+                    (cell_x, cell_y), (cell_x, cell_y + curr_tile_h - 1))
 
                 # Visual Hover Feedback while Editing Fief Boundaries
                 if state.editing_fief_id and prov_id == state.selected_province and is_hovered:
@@ -1853,16 +1966,16 @@ def run_game():
                                            if other_fid != state.editing_fief_id and other_f.get("province") == prov_id and t_coord in other_f.get("tiles", [])), None)
                         if occupied_f:
                             # Occupied by another fief: red locked warning tint
-                            warn_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
+                            warn_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
                             warn_surf.fill((220, 50, 50, 110))
                             screen.blit(warn_surf, (cell_x, cell_y))
-                            pygame.draw.rect(screen, (255, 80, 80), (cell_x, cell_y, tile_w, tile_h), 2)
+                            pygame.draw.rect(screen, (255, 80, 80), (cell_x, cell_y, curr_tile_w, curr_tile_h), 2)
                         else:
                             # Unclaimed: green claimable preview tint
-                            free_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
+                            free_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
                             free_surf.fill((60, 220, 100, 110))
                             screen.blit(free_surf, (cell_x, cell_y))
-                            pygame.draw.rect(screen, (100, 255, 120), (cell_x, cell_y, tile_w, tile_h), 2)
+                            pygame.draw.rect(screen, (100, 255, 120), (cell_x, cell_y, curr_tile_w, curr_tile_h), 2)
 
                 if mouse_clicked and is_hovered:
                     if state.editing_fief_id and prov_id == state.selected_province:
@@ -1911,35 +2024,35 @@ def run_game():
             for c, ch in enumerate(row):
                 if ch == ".":
                     continue
-                cell_x = map_origin_x + (c * tile_w)
-                cell_y = map_origin_y + 45 + (r * tile_h)
+                cell_x = origin_x + (c * curr_tile_w)
+                cell_y = origin_y + (r * curr_tile_h)
                 prov_id    = get_prov(c, r)
                 is_selected = (prov_id == state.selected_province)
                 border_col = COLOR_GOLD if is_selected else BORDER_COL
 
                 # Right edge — draw if neighbor is different province (or ocean)
                 if get_prov(c + 1, r) != prov_id:
-                    ex = cell_x + tile_w - 1
+                    ex = cell_x + curr_tile_w - 1
                     pygame.draw.line(screen, border_col,
-                                     (ex, cell_y), (ex, cell_y + tile_h - 1), BORDER_W)
+                                     (ex, cell_y), (ex, cell_y + curr_tile_h - 1), BORDER_W)
                 # Bottom edge
                 if get_prov(c, r + 1) != prov_id:
-                    ey = cell_y + tile_h - 1
+                    ey = cell_y + curr_tile_h - 1
                     pygame.draw.line(screen, border_col,
-                                     (cell_x, ey), (cell_x + tile_w - 1, ey), BORDER_W)
+                                     (cell_x, ey), (cell_x + curr_tile_w - 1, ey), BORDER_W)
                 # Left edge
                 if get_prov(c - 1, r) != prov_id:
                     pygame.draw.line(screen, border_col,
-                                     (cell_x, cell_y), (cell_x, cell_y + tile_h - 1), BORDER_W)
+                                     (cell_x, cell_y), (cell_x, cell_y + curr_tile_h - 1), BORDER_W)
                 # Top edge
                 if get_prov(c, r - 1) != prov_id:
                     pygame.draw.line(screen, border_col,
-                                     (cell_x, cell_y), (cell_x + tile_w - 1, cell_y), BORDER_W)
+                                     (cell_x, cell_y), (cell_x + curr_tile_w - 1, cell_y), BORDER_W)
 
                 # Golden highlight on selected province (reinforcing border)
                 if is_selected:
                     pygame.draw.rect(screen, COLOR_GOLD,
-                                     (cell_x, cell_y, tile_w, tile_h), 1)
+                                     (cell_x, cell_y, curr_tile_w, curr_tile_h), 1)
 
         # -----------------------------------------------------------
         # PASS 2.5: Draw Fiefdom Sub-divisions & Borders
@@ -1952,16 +2065,16 @@ def run_game():
             f_tiles_set = set(fdata["tiles"])
             
             for (fc, fr) in fdata["tiles"]:
-                fx = map_origin_x + (fc * tile_w)
-                fy = map_origin_y + 45 + (fr * tile_h)
+                fx = origin_x + (fc * curr_tile_w)
+                fy = origin_y + (fr * curr_tile_h)
                 
                 # Fief fill tint if editing or selected
                 if is_f_edit:
-                    f_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
+                    f_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
                     f_surf.fill((240, 205, 50, 90))
                     screen.blit(f_surf, (fx, fy))
                 elif is_f_sel:
-                    f_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
+                    f_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
                     f_surf.fill((100, 255, 120, 75))
                     screen.blit(f_surf, (fx, fy))
                 
@@ -1971,16 +2084,16 @@ def run_game():
                 
                 # Right edge
                 if (fc + 1, fr) not in f_tiles_set:
-                    pygame.draw.line(screen, edge_col, (fx + tile_w - 1, fy), (fx + tile_w - 1, fy + tile_h - 1), edge_w)
+                    pygame.draw.line(screen, edge_col, (fx + curr_tile_w - 1, fy), (fx + curr_tile_w - 1, fy + curr_tile_h - 1), edge_w)
                 # Left edge
                 if (fc - 1, fr) not in f_tiles_set:
-                    pygame.draw.line(screen, edge_col, (fx, fy), (fx, fy + tile_h - 1), edge_w)
+                    pygame.draw.line(screen, edge_col, (fx, fy), (fx, fy + curr_tile_h - 1), edge_w)
                 # Bottom edge
                 if (fc, fr + 1) not in f_tiles_set:
-                    pygame.draw.line(screen, edge_col, (fx, fy + tile_h - 1), (fx + tile_w - 1, fy + tile_h - 1), edge_w)
+                    pygame.draw.line(screen, edge_col, (fx, fy + curr_tile_h - 1), (fx + curr_tile_w - 1, fy + curr_tile_h - 1), edge_w)
                 # Top edge
                 if (fc, fr - 1) not in f_tiles_set:
-                    pygame.draw.line(screen, edge_col, (fx, fy), (fx + tile_w - 1, fy), edge_w)
+                    pygame.draw.line(screen, edge_col, (fx, fy), (fx + curr_tile_w - 1, fy), edge_w)
 
         # -----------------------------------------------------------
         # PASS 3: Draw Built Settlements / Cities (Unified Holdings)
@@ -1993,69 +2106,110 @@ def run_game():
             h_tiles = h["tiles"]
             sdata = h["data"]
 
-            sx = map_origin_x + (min_c * tile_w)
-            sy = map_origin_y + 45 + (min_r * tile_h)
-            total_w = (max_c - min_c + 1) * tile_w
-            total_h = (max_r - min_r + 1) * tile_h
+            sx = origin_x + (min_c * curr_tile_w)
+            sy = origin_y + (min_r * curr_tile_h)
+            total_w = (max_c - min_c + 1) * curr_tile_w
+            total_h = (max_r - min_r + 1) * curr_tile_h
 
-            base_rect = pygame.Rect(sx + 2, sy + 2, total_w - 4, total_h - 4)
-            is_city_hover = base_rect.collidepoint(mouse_pos)
+            is_city_hover = pygame.Rect(sx, sy, total_w, total_h).collidepoint(mouse_pos) and map_bg_rect.collidepoint(mouse_pos) and not hud_rect.collidepoint(mouse_pos)
             is_city_sel = (state.selected_settlement in h_tiles)
 
-            # Unified City Foundation Block with Stone Ramparts
-            pygame.draw.rect(screen, (55, 60, 75) if is_city_hover else (38, 42, 54), base_rect, border_radius=4)
-            border_city_col = (100, 255, 120) if is_city_sel else COLOR_GOLD
-            pygame.draw.rect(screen, border_city_col, base_rect, 2 if is_city_sel else 1, border_radius=4)
+            # Center the city castle inside the holding with comfortable padding
+            # so the terrain color, grid lines, and fief borders are clearly visible around it!
+            if orient == "H":
+                pad_x = max(5, int(total_w * 0.14))
+                pad_y = max(3, int(total_h * 0.16))
+            elif orient == "V":
+                pad_x = max(3, int(total_w * 0.16))
+                pad_y = max(5, int(total_h * 0.14))
+            else:
+                pad_x = max(4, int(total_w * 0.16))
+                pad_y = max(4, int(total_h * 0.16))
 
-            tw, th = total_w - 8, total_h - 8
-            tx, ty = sx + 4, sy + 4
+            cw = total_w - 2 * pad_x
+            ch = total_h - 2 * pad_y
+            cx = sx + pad_x
+            cy = sy + pad_y
+
+            base_rect = pygame.Rect(cx, cy, cw, ch)
+
+            # Drop shadow on terrain
+            shadow_surf = pygame.Surface((cw, ch), pygame.SRCALPHA)
+            shadow_surf.fill((0, 0, 0, 80))
+            screen.blit(shadow_surf, (cx + 2, cy + 2))
+
+            # City Foundation Block with Stone Ramparts
+            city_bg = (60, 68, 86) if is_city_hover else (42, 48, 62)
+            pygame.draw.rect(screen, city_bg, base_rect, border_radius=3)
+            
+            # Border trim (Gold for Crown Demesne, Green for Selected, Slate/Silver for Vassals)
+            if is_city_sel:
+                border_city_col = (100, 255, 120)
+            elif sdata.get("is_crown_demesne"):
+                border_city_col = COLOR_GOLD
+            else:
+                border_city_col = (175, 190, 210)
+            pygame.draw.rect(screen, border_city_col, base_rect, 2 if is_city_sel else 1, border_radius=3)
+
+            tw, th = cw - 4, ch - 4
+            tx, ty = cx + 2, cy + 2
 
             if orient == "H":
                 # Grand Castle / Fortified Burgh spanning across 2 horizontal tiles
-                # Continuous stone curtain wall
-                pygame.draw.rect(screen, (75, 85, 105), (tx + 2, ty + 5, tw - 4, th - 5))
+                curtain_h = max(4, int(th * 0.65))
+                pygame.draw.rect(screen, (75, 85, 105), (tx + 1, ty + th - curtain_h, tw - 2, curtain_h))
+                
                 # Left defensive tower
-                pygame.draw.rect(screen, (85, 95, 115), (tx + 2, ty + 2, 8, th - 2))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty, 10, 4))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + 5, ty + 6, 2, 4))
+                tow_w = max(4, int(tw * 0.18))
+                pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + 1, tow_w, th - 1))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx, ty - 1, tow_w + 2, 3))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tow_w // 2 - 1, ty + 4, 2, 4))
+                
                 # Right defensive tower
-                pygame.draw.rect(screen, (85, 95, 115), (tx + tw - 10, ty + 2, 8, th - 2))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 11, ty, 10, 4))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tw - 7, ty + 6, 2, 4))
-                # Mid curtain wall crenellations
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + 12, ty + 3, 4, 3))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 16, ty + 3, 4, 3))
+                pygame.draw.rect(screen, (85, 95, 115), (tx + tw - tow_w - 1, ty + 1, tow_w, th - 1))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - tow_w - 1, ty - 1, tow_w + 2, 3))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tw - tow_w // 2 - 1, ty + 4, 2, 4))
+                
                 # Central Great Keep (stands high and proud in center)
-                pygame.draw.rect(screen, (100, 112, 134), (tx + tw // 2 - 8, ty + 1, 16, th - 1))
+                keep_w = max(6, int(tw * 0.32))
+                keep_x = tx + (tw - keep_w) // 2
+                pygame.draw.rect(screen, (100, 112, 134), (keep_x, ty, keep_w, th))
                 # Central Grand Crown Battlements
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 8, ty - 2, 4, 4))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty - 3, 4, 5))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 + 4, ty - 2, 4, 4))
+                pygame.draw.rect(screen, COLOR_GOLD, (keep_x, ty - 2, 3, 3))
+                pygame.draw.rect(screen, COLOR_GOLD, (keep_x + keep_w // 2 - 2, ty - 3, 4, 4))
+                pygame.draw.rect(screen, COLOR_GOLD, (keep_x + keep_w - 3, ty - 2, 3, 3))
+                
                 # Grand Arch Gatehouse
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 4, ty + th - 6, 8, 6))
-                pygame.draw.line(screen, (60, 68, 80), (tx + tw // 2, ty + th - 6), (tx + tw // 2, ty + th - 1))
+                gate_w = max(4, int(keep_w * 0.45))
+                gate_h = max(4, int(th * 0.42))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
 
             elif orient == "V":
                 # High Citadel Tower spanning across 2 vertical tiles
-                # Upper High Keep
-                pygame.draw.rect(screen, (100, 112, 134), (tx + 2, ty + 2, tw - 4, 18))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty, 4, 5))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 5, ty, 4, 5))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty + 1, 4, 3))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 1, ty + 8, 3, 4))
+                tow_w = tw
+                up_h = max(6, int(th * 0.45))
+                pygame.draw.rect(screen, (100, 112, 134), (tx + 1, ty + 1, tow_w - 2, up_h))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx, ty - 1, 4, 3))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tow_w - 4, ty - 1, 4, 3))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tow_w // 2 - 2, ty - 2, 4, 3))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tow_w // 2 - 1, ty + 5, 3, 4))
                 # Mid battlements
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty + 20, tw - 2, 2))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx, ty + up_h, tow_w, 2))
                 # Lower Bailey & Gatehouse
-                pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + 22, tw - 2, th - 22))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 3, ty + th - 7, 6, 7))
+                pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + up_h + 2, tow_w - 2, th - up_h - 2))
+                gate_w = max(4, int(tow_w * 0.35))
+                gate_h = max(4, int(th * 0.25))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tow_w // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
 
             else:
                 # Compact single tile keep
-                pygame.draw.rect(screen, (85, 95, 115), (tx + 2, ty + 4, tw - 4, th - 4))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty + 1, 4, 6))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 5, ty + 1, 4, 6))
-                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty + 2, 4, 3))
-                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 2, ty + th - 5, 4, 5))
+                pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + 2, tw - 2, th - 2))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx, ty, 3, 4))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 3, ty, 3, 4))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty - 1, 4, 3))
+                gate_w = max(4, int(tw * 0.3))
+                gate_h = max(4, int(th * 0.35))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - gate_w // 2, ty + th - gate_h, gate_w, gate_h))
 
             # If holding is occupied by enemy, display conqueror's miniature banner on keep turret!
             if h.get("occupied_by"):
@@ -2064,7 +2218,7 @@ def run_game():
                 occ_flag = prov_flag_cache.get(occ_key)
                 if occ_flag:
                     mini_f = pygame.transform.smoothscale(occ_flag, (12, 14))
-                    screen.blit(mini_f, (sx + total_w - 14, sy - 8))
+                    screen.blit(mini_f, (cx + cw - 12, cy - 8))
 
             # Click city to inspect settlement details!
             if mouse_clicked and is_city_hover and not state.build_mode:
@@ -2078,8 +2232,8 @@ def run_game():
         if state.build_mode and state.selected_province:
             # Determine tile hovered
             mx, my = mouse_pos
-            hc = (mx - map_origin_x) // tile_w
-            hr = (my - (map_origin_y + 45)) // tile_h
+            hc = int((mx - origin_x) // curr_tile_w)
+            hr = int((my - origin_y) // curr_tile_h)
 
             target_tiles = []
             if state.build_orientation == "H":
@@ -2110,15 +2264,23 @@ def run_game():
             max_gc = max(tc for tc, tr in target_tiles)
             min_gr = min(tr for tc, tr in target_tiles)
             max_gr = max(tr for tc, tr in target_tiles)
-            gx = map_origin_x + (min_gc * tile_w)
-            gy = map_origin_y + 45 + (min_gr * tile_h)
-            gw = (max_gc - min_gc + 1) * tile_w
-            gh = (max_gr - min_gr + 1) * tile_h
+            gx = origin_x + (min_gc * curr_tile_w)
+            gy = origin_y + (min_gr * curr_tile_h)
+            gw = (max_gc - min_gc + 1) * curr_tile_w
+            gh = (max_gr - min_gr + 1) * curr_tile_h
             
-            gsurf = pygame.Surface((gw, gh), pygame.SRCALPHA)
+            # Preview centered ghost
+            pad_x = max(5, int(gw * 0.14))
+            pad_y = max(3, int(gh * 0.16))
+            cw = gw - 2 * pad_x
+            ch = gh - 2 * pad_y
+            cx = gx + pad_x
+            cy = gy + pad_y
+
+            gsurf = pygame.Surface((cw, ch), pygame.SRCALPHA)
             gsurf.fill(ghost_col)
-            screen.blit(gsurf, (gx, gy))
-            pygame.draw.rect(screen, border_c, (gx, gy, gw, gh), 2, border_radius=4)
+            screen.blit(gsurf, (cx, cy))
+            pygame.draw.rect(screen, border_c, (cx, cy, cw, ch), 2, border_radius=3)
 
             # Left click to place
             if mouse_clicked and is_valid:
@@ -2130,12 +2292,12 @@ def run_game():
                     state.settlements[(tc, tr)] = {
                         "province": state.selected_province,
                         "type": "town",
-                        "name": f"{prov_obj['name'].split()[0]} Burgh"
+                        "name": f"{prov_obj['name'].split()[0]} Burgh",
+                        "lord": f"{state.player['name']} (Crown Demesne)",
+                        "is_crown_demesne": True
                     }
                 state.logs.append(f"Founded Grand City in {prov_obj['name']} (-1000g, +10 Tax, +500 Levies)!")
                 state.build_mode = False
-
-
 
         # Province Name Labels
         for pid, (lx, ly) in province_anchors.items():
@@ -2144,8 +2306,8 @@ def run_game():
                 short_name = p_data["name"].split()[0]
                 lbl_surf = font_sm.render(short_name, True, (245, 245, 245))
                 sh_surf = font_sm.render(short_name, True, (10, 15, 25))
-                screen.blit(sh_surf, (lx + 1, ly + 1))
-                screen.blit(lbl_surf, (lx, ly))
+                screen.blit(sh_surf, (lx - lbl_surf.get_width() // 2 + 1, ly + 1))
+                screen.blit(lbl_surf, (lx - lbl_surf.get_width() // 2, ly))
 
         # ---------------------------------------------------------
         # DRAW MOVEMENT ARROWS (before armies, so badges render on top)
@@ -2165,26 +2327,8 @@ def run_game():
                      int(end[1] - head_size * _math.sin(angle + _math.pi/6)))
             pygame.draw.polygon(surface, color, [end, left, right])
 
-        # Find the pixel centroid of tiles that border between two adjacent provinces
         def border_midpoint(pid_a, pid_b):
-            """Return pixel midpoint of tiles where pid_a and pid_b touch."""
-            border_pixels = []
-            dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)]
-            for (c, r), pid in cell_to_prov.items():
-                if pid != pid_a:
-                    continue
-                for dc, dr in dirs:
-                    if cell_to_prov.get((c + dc, r + dr)) == pid_b:
-                        # This tile is on the border
-                        cx = map_origin_x + c * tile_w + tile_w // 2
-                        cy = map_origin_y + 45 + r * tile_h + tile_h // 2
-                        border_pixels.append((cx, cy))
-                        break
-            if not border_pixels:
-                return None
-            bx = sum(p[0] for p in border_pixels) // len(border_pixels)
-            by = sum(p[1] for p in border_pixels) // len(border_pixels)
-            return (bx, by)
+            return get_border_midpoint(pid_a, pid_b)
 
         for army in state.armies:
             if not army.is_moving:
@@ -2346,6 +2490,53 @@ def run_game():
             db_sub = font_md.render("Wessex has fallen to the Viking conquerors.", True, COLOR_TEXT_WHITE)
             screen.blit(db_title, (def_rect.x + (def_rect.w - db_title.get_width()) // 2, def_rect.y + 18))
             screen.blit(db_sub, (def_rect.x + (def_rect.w - db_sub.get_width()) // 2, def_rect.y + 65))
+
+        # ---------------------------------------------------------
+        # FLOATING MAP ZOOM & CAMERA CONTROLS HUD
+        # ---------------------------------------------------------
+        hud_w, hud_h = 36, 118
+        hud_x, hud_y = 816, 62
+        hud_rect = pygame.Rect(hud_x, hud_y, hud_w, hud_h)
+        hud_surf = pygame.Surface((hud_w, hud_h), pygame.SRCALPHA)
+        hud_surf.fill((22, 28, 40, 220))
+        screen.blit(hud_surf, (hud_x, hud_y))
+        pygame.draw.rect(screen, COLOR_GOLD, hud_rect, 1, border_radius=4)
+
+        # Zoom In (+)
+        zin_rect = pygame.Rect(hud_x + 3, hud_y + 4, 30, 26)
+        zin_hov = zin_rect.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (50, 62, 85) if zin_hov else (32, 38, 52), zin_rect, border_radius=3)
+        zin_txt = font_md.render("+", True, COLOR_GOLD if zin_hov else COLOR_TEXT_WHITE)
+        screen.blit(zin_txt, (zin_rect.x + (zin_rect.w - zin_txt.get_width()) // 2, zin_rect.y + 1))
+        if mouse_clicked and zin_hov:
+            state.zoom = min(state.max_zoom, round(state.zoom + 0.15, 2))
+
+        # Current Zoom percentage label
+        pct_lbl = font_xs.render(f"{int(state.zoom * 100)}%", True, COLOR_GOLD)
+        screen.blit(pct_lbl, (hud_x + (hud_w - pct_lbl.get_width()) // 2, hud_y + 35))
+
+        # Zoom Out (-)
+        zout_rect = pygame.Rect(hud_x + 3, hud_y + 54, 30, 26)
+        zout_hov = zout_rect.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (50, 62, 85) if zout_hov else (32, 38, 52), zout_rect, border_radius=3)
+        zout_txt = font_md.render("–", True, COLOR_GOLD if zout_hov else COLOR_TEXT_WHITE)
+        screen.blit(zout_txt, (zout_rect.x + (zout_rect.w - zout_txt.get_width()) // 2, zout_rect.y + 1))
+        if mouse_clicked and zout_hov:
+            state.zoom = max(state.min_zoom, round(state.zoom - 0.15, 2))
+
+        # Reset Camera & Zoom (⟲)
+        zres_rect = pygame.Rect(hud_x + 3, hud_y + 86, 30, 26)
+        zres_hov = zres_rect.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (50, 62, 85) if zres_hov else (32, 38, 52), zres_rect, border_radius=3)
+        zres_txt = font_sm.render("⟲", True, (140, 200, 255) if zres_hov else COLOR_TEXT_MUTED)
+        screen.blit(zres_txt, (zres_rect.x + (zres_rect.w - zres_txt.get_width()) // 2, zres_rect.y + 4))
+        if mouse_clicked and zres_hov:
+            state.zoom = 0.85
+            state.cam_pan_x = 0
+            state.cam_pan_y = 0
+
+        # Unclip screen so right panel and remaining UI render normally across the whole display
+        screen.set_clip(None)
 
         # ---------------------------------------------------------
         # 4. RIGHT PANEL: SELECTED PROVINCE & ARMY COMMANDS
