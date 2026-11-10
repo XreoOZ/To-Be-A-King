@@ -342,18 +342,51 @@ SUB_FLAG_OFFSETS = [
 # -------------------------------------------------------------
 ADJACENCY = {
     "cornwall": ["wessex"],
-    "wessex": ["cornwall", "mercia", "kent_essex", "wales"],
-    "kent_essex": ["wessex", "mercia", "east_anglia"],
-    "mercia": ["wessex", "kent_essex", "east_anglia", "wales", "deira", "jorvik"],
-    "wales": ["wessex", "mercia", "deira"],
-    "east_anglia": ["kent_essex", "mercia", "jorvik"],
-    "jorvik": ["mercia", "east_anglia", "deira", "bernicia"],
-    "deira": ["mercia", "wales", "jorvik", "bernicia"],
-    "bernicia": ["deira", "jorvik", "strathclyde", "lothian"],
-    "strathclyde": ["bernicia", "lothian", "highlands"],
-    "lothian": ["bernicia", "strathclyde", "highlands"],
-    "highlands": ["strathclyde", "lothian"]
+    "wessex": ["cornwall", "kent_essex", "mercia", "wales"],
+    "kent_essex": ["east_anglia", "mercia", "wessex"],
+    "mercia": ["deira", "east_anglia", "jorvik", "kent_essex", "wales", "wessex"],
+    "wales": ["mercia", "wessex"],
+    "east_anglia": ["kent_essex", "mercia"],
+    "jorvik": ["bernicia", "deira", "mercia"],
+    "deira": ["bernicia", "jorvik", "mercia"],
+    "bernicia": ["deira", "jorvik", "lothian"],
+    "strathclyde": ["highlands", "lothian"],
+    "lothian": ["bernicia", "highlands", "strathclyde"],
+    "highlands": ["lothian", "strathclyde"]
 }
+
+def build_dynamic_province_adjacency(cell_to_prov, max_reach=2, extra_connections=None):
+    """
+    Dynamically generates the adjacency graph of provinces from the tile map grid.
+    Uses Chebyshev/Manhattan distance <= max_reach between cells so narrow rivers, 
+    straits, or diagonal borders between provinces are automatically detected as neighbors.
+    
+    This ensures any custom or newly imported map grid will automatically produce
+    topologically valid, seamless pathfinding without manual hardcoding or teleport bugs.
+    """
+    adj = {pid: set() for pid in set(cell_to_prov.values()) if pid}
+    
+    for (c, r), p_a in cell_to_prov.items():
+        if not p_a:
+            continue
+        for dc in range(-max_reach, max_reach + 1):
+            for dr in range(-max_reach, max_reach + 1):
+                if dc == 0 and dr == 0:
+                    continue
+                if abs(dc) + abs(dr) > max_reach:
+                    continue
+                p_b = cell_to_prov.get((c + dc, r + dr))
+                if p_b and p_b != p_a:
+                    adj[p_a].add(p_b)
+                    adj[p_b].add(p_a)
+                    
+    if extra_connections:
+        for p1, p2 in extra_connections:
+            if p1 in adj and p2 in adj:
+                adj[p1].add(p2)
+                adj[p2].add(p1)
+                
+    return {p: sorted(list(neighbors)) for p, neighbors in adj.items()}
 
 def find_shortest_path(start, goal):
     if start == goal:
@@ -1281,19 +1314,26 @@ def run_game():
     for pid, (sc, sr, count) in prov_grid_sum.items():
         prov_grid_centroids[pid] = (sc / count, sr / count)
 
-    # Precompute border grid midpoints between touching provinces
+    # Dynamically update ADJACENCY from map tile grid for 100% map-agnostic pathfinding
+    dyn_adj = build_dynamic_province_adjacency(cell_to_prov)
+    ADJACENCY.clear()
+    ADJACENCY.update(dyn_adj)
+
+    # Precompute border grid midpoints between touching/neighboring provinces
     border_grid_sums = {}
-    dirs = [(0, 1), (0, -1), (1, 0), (-1, 0)]
     for (c, r), pid_a in cell_to_prov.items():
-        for dc, dr in dirs:
-            pid_b = cell_to_prov.get((c + dc, r + dr))
-            if pid_b and pid_b != pid_a:
-                pair_key = (pid_a, pid_b)
-                if pair_key not in border_grid_sums:
-                    border_grid_sums[pair_key] = [0, 0, 0]
-                border_grid_sums[pair_key][0] += c
-                border_grid_sums[pair_key][1] += r
-                border_grid_sums[pair_key][2] += 1
+        for dc in range(-2, 3):
+            for dr in range(-2, 3):
+                if (dc == 0 and dr == 0) or (abs(dc) + abs(dr) > 2):
+                    continue
+                pid_b = cell_to_prov.get((c + dc, r + dr))
+                if pid_b and pid_b != pid_a and pid_b in ADJACENCY.get(pid_a, []):
+                    pair_key = (pid_a, pid_b)
+                    if pair_key not in border_grid_sums:
+                        border_grid_sums[pair_key] = [0.0, 0.0, 0]
+                    border_grid_sums[pair_key][0] += (c + (c + dc)) / 2.0
+                    border_grid_sums[pair_key][1] += (r + (r + dr)) / 2.0
+                    border_grid_sums[pair_key][2] += 1
 
     border_grid_centroids = {}
     for pair_key, (sc, sr, count) in border_grid_sums.items():
