@@ -16,12 +16,13 @@ def get_siegeable_holdings(state, province_id, army_owner):
         t0 = tiles[0]
         s_data = state.settlements[t0]
         occ = s_data.get("occupied_by")
+        display_name = s_data.get("name") or h_name
         if is_enemy_prov:
             if occ != army_owner:
-                siegeable.append((h_name, tiles))
+                siegeable.append((display_name, tiles))
         else:
             if occ is not None and occ != army_owner:
-                siegeable.append((h_name, tiles))
+                siegeable.append((display_name, tiles))
     return siegeable
 
 def is_province_contested(state, pid):

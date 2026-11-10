@@ -5,7 +5,7 @@ import random
 import math
 import copy
 
-from game.config import DAYS_PER_TILE, DAYS_PER_KOTAK, LEVY_RAISE_COOLDOWN_DAYS
+from game.config import DAYS_PER_TILE, DAYS_PER_KOTAK, LEVY_RAISE_COOLDOWN_DAYS, COLOR_WESSEX, COLOR_DANELAW
 from game.data.characters import CHARACTERS, INITIAL_CHARACTERS
 from game.data.provinces import PROVINCES, INITIAL_PROVINCES, PROVINCE_FACTION_COLORS, ADJACENCY, find_shortest_path
 from game.data.buildings import BUILDING_SPECS, get_barrack_stats
@@ -991,95 +991,137 @@ class GameState:
             if a.is_moving or a.in_battle or a.is_mustering or a.courier_en_route or a.is_demobilizing:
                 continue
 
-            prov = PROVINCES[a.province]
+            prov = PROVINCES.get(a.province)
+            if not prov:
+                a.is_sieging = False
+                a.siege_progress = 0
+                continue
+
             defenders = [enemy for enemy in self.armies if getattr(enemy, "tile", None) == a.tile and enemy.owner != a.owner]
             if defenders:
                 a.is_sieging = False
                 continue
 
-            siegeable = get_siegeable_holdings(self, a.province, a.owner)
             is_enemy_prov = (prov["owner"] != a.owner)
 
-            if siegeable:
-                # Find current target or set to first available holding
-                h_target_name, h_tiles = siegeable[0]
-                a.is_sieging = True
-                a.siege_target_name = h_target_name
-                a.target_city = h_tiles[0]
+            # Strict Tile-Based Siege: Army must stand directly on the settlement tile
+            cur_settlement = self.settlements.get(a.tile)
 
-                # Siege rate scaled by troops
-                rate = max(4, int(a.troops / 250))
-                a.siege_progress += rate
+            if cur_settlement:
+                s_id = cur_settlement.get("id")
+                # Group all tiles of this holding (e.g. 2-tile fort)
+                h_tiles = [coord for coord, s in self.settlements.items() if (s.get("id") and s.get("id") == s_id) or coord == a.tile]
+                h_name = cur_settlement.get("name", "Holding")
+                occ = cur_settlement.get("occupied_by")
 
-                if a.siege_progress >= 100:
-                    a.siege_progress = 0
-                    if is_enemy_prov:
-                        # Occupy this holding!
-                        for t in h_tiles:
-                            self.settlements[t]["occupied_by"] = a.owner
-                        
-                        remaining = get_siegeable_holdings(self, a.province, a.owner)
-                        if remaining:
-                            self.logs.append(f"Holding Fallen! {a.name} captured {h_target_name}. {prov['name']} is now contested!")
-                            a.target_city = remaining[0][1][0]
-                            a.siege_target_name = remaining[0][0]
+                needs_siege = False
+                is_liberation = False
+
+                if is_enemy_prov:
+                    # Enemy province: need to siege if not yet occupied by a.owner
+                    if occ != a.owner:
+                        needs_siege = True
+                        is_liberation = False
+                else:
+                    # Friendly province: need to liberate if occupied by enemy
+                    if occ is not None and occ != a.owner:
+                        needs_siege = True
+                        is_liberation = True
+
+                if needs_siege:
+                    a.is_sieging = True
+                    a.siege_target_name = h_name
+                    a.target_city = a.tile
+
+                    # Siege rate scaled by troops
+                    rate = max(4, int(a.troops / 250))
+                    a.siege_progress += rate
+
+                    if a.siege_progress >= 100:
+                        a.siege_progress = 0
+                        a.is_sieging = False
+                        a.target_city = None
+                        a.siege_target_name = None
+
+                        if not is_liberation:
+                            # Occupy this holding!
+                            for t in h_tiles:
+                                self.settlements[t]["occupied_by"] = a.owner
+
+                            remaining = get_siegeable_holdings(self, a.province, a.owner)
+                            if remaining:
+                                self.logs.append(f"Holding Fallen! {a.name} captured {h_name}. {prov['name']} is now contested ({len(remaining)} holding(s) remain)!")
+                            else:
+                                # ALL holdings captured! Whole province flips!
+                                prov["owner"] = a.owner
+                                prov["color"] = list(PROVINCE_FACTION_COLORS.get(a.owner, {}).get(a.province, COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW))
+                                for t in [coord for coord, s in self.settlements.items() if s.get("province") == a.province]:
+                                    self.settlements[t]["occupied_by"] = None
+
+                                if a.owner == self.player_id:
+                                    self.player["prestige"] += 100
+                                    self.logs.append(f"TOTAL VICTORY! All boroughs in {prov['name']} have fallen! Province conquered by Wessex!")
+                                else:
+                                    self.enemy["prestige"] += 100
+                                    self.logs.append(f"DISASTER! All boroughs in {prov['name']} have fallen to the Danelaw!")
+
+                                # Automatically relocate or restore capitals if needed
+                                self.get_realm_capital(self.player_id)
+                                self.get_realm_capital(self.enemy_id)
                         else:
-                            # ALL holdings captured! Whole province flips!
+                            # Friendly liberation of occupied holding!
+                            for t in h_tiles:
+                                self.settlements[t]["occupied_by"] = None
+                            self.logs.append(f"Liberated! {a.name} reclaimed {h_name} for {prov['name']}!")
+
+                            remaining = get_siegeable_holdings(self, a.province, a.owner)
+                            if not remaining:
+                                self.logs.append(f"Order Restored! {prov['name']} is fully liberated and no longer contested.")
+                else:
+                    # Settlement already friendly or already occupied by this army's owner: no siege
+                    a.is_sieging = False
+                    a.siege_progress = 0
+                    a.target_city = None
+                    a.siege_target_name = None
+
+            else:
+                # Army is standing on an EMPTY tile: CANNOT SIEGE ANY HOLDINGS!
+                # Only if the province has literally 0 settlements total (empty wilderness) can it cap on capital tile
+                prov_has_settlements = any(s.get("province") == a.province for s in self.settlements.values())
+                if not prov_has_settlements and is_enemy_prov:
+                    cap_tile = get_province_capital_tile(a.province)
+                    if getattr(a, "tile", None) == cap_tile:
+                        a.is_sieging = True
+                        a.siege_target_name = f"Wilds of {prov['name']}"
+                        a.target_city = a.tile
+                        rate = max(4, int(a.troops / 250))
+                        a.siege_progress += rate
+                        if a.siege_progress >= 100:
                             prov["owner"] = a.owner
                             prov["color"] = list(PROVINCE_FACTION_COLORS.get(a.owner, {}).get(a.province, COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW))
                             a.is_sieging = False
+                            a.siege_progress = 0
                             a.target_city = None
                             a.siege_target_name = None
-                            for t in [coord for coord, s in self.settlements.items() if s.get("province") == a.province]:
-                                self.settlements[t]["occupied_by"] = None
-                            
                             if a.owner == self.player_id:
                                 self.player["prestige"] += 100
-                                self.logs.append(f"TOTAL VICTORY! All boroughs in {prov['name']} have fallen! Province conquered by Wessex!")
+                                self.logs.append(f"Victory! {prov['name']} has been conquered by Wessex!")
                             else:
                                 self.enemy["prestige"] += 100
-                                self.logs.append(f"DISASTER! All boroughs in {prov['name']} have fallen to the Danelaw!")
-                            
-                            # Automatically relocate or restore capitals if needed
+                                self.logs.append(f"Disaster! {prov['name']} has fallen to the Danelaw!")
                             self.get_realm_capital(self.player_id)
                             self.get_realm_capital(self.enemy_id)
                     else:
-                        # Friendly liberation of occupied holding!
-                        for t in h_tiles:
-                            self.settlements[t]["occupied_by"] = None
-                        self.logs.append(f"Liberated! {a.name} reclaimed {h_target_name} for {prov['name']}!")
-                        remaining = get_siegeable_holdings(self, a.province, a.owner)
-                        if remaining:
-                            a.target_city = remaining[0][1][0]
-                            a.siege_target_name = remaining[0][0]
-                        else:
-                            a.is_sieging = False
-                            a.target_city = None
-                            a.siege_target_name = None
-                            self.logs.append(f"Order Restored! {prov['name']} is fully liberated and no longer contested.")
-            elif is_enemy_prov:
-                # Enemy province with NO settlements: direct capture
-                a.is_sieging = True
-                rate = max(4, int(a.troops / 250))
-                a.siege_progress += rate
-                if a.siege_progress >= 100:
-                    prov["owner"] = a.owner
-                    prov["color"] = list(PROVINCE_FACTION_COLORS.get(a.owner, {}).get(a.province, COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW))
+                        a.is_sieging = False
+                        a.siege_progress = 0
+                        a.target_city = None
+                        a.siege_target_name = None
+                else:
+                    # Regular empty tile: no siege
                     a.is_sieging = False
                     a.siege_progress = 0
-                    if a.owner == self.player_id:
-                        self.player["prestige"] += 100
-                        self.logs.append(f"Victory! {prov['name']} has been conquered by Wessex!")
-                    else:
-                        self.enemy["prestige"] += 100
-                        self.logs.append(f"Disaster! {prov['name']} has fallen to the Danelaw!")
-                    
-                    # Automatically relocate or restore capitals if needed
-                    self.get_realm_capital(self.player_id)
-                    self.get_realm_capital(self.enemy_id)
-            else:
-                a.is_sieging = False
-                a.siege_progress = 0
+                    a.target_city = None
+                    a.siege_target_name = None
 
     # ---------------------------------------------------------
     # AI (Halfdan Ragnarsson) - Intelligent Border Awareness, Mobilization & Retaliation
@@ -1234,7 +1276,11 @@ class GameState:
                     if player_provs:
                         border_targets = [p for p in player_provs if any(p in ADJACENCY.get(dp, []) for dp in danelaw_provs)]
                         target = random.choice(border_targets) if border_targets else random.choice(player_provs)
-                        target_tile = get_province_capital_tile(target)
+                        remaining_targets = get_siegeable_holdings(self, target, self.enemy_id)
+                        if remaining_targets:
+                            target_tile = remaining_targets[0][1][0]
+                        else:
+                            target_tile = get_province_capital_tile(target)
                         self.order_army_march_to_tile(main_host, target_tile)
                         self.logs.append(f"⚔ The Great Viking Army! Halfdan marches south into {PROVINCES[target]['name']} ({main_host.troops:,} warriors)!")
 

@@ -902,7 +902,13 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
             p_bg = (30, 48, 70)
             p_border = (120, 180, 240)
         elif army.is_sieging:
-            t_str = army.siege_target_name.split()[0] if army.siege_target_name else "City"
+            if army.siege_target_name:
+                clean_name = army.siege_target_name
+                for pfx in ["Royal City of ", "Royal Citadel of ", "Royal Castle of ", "Royal Borough of ", "Royal "]:
+                    clean_name = clean_name.replace(pfx, "")
+                t_str = clean_name[:12]
+            else:
+                t_str = "City"
             txt_badge = f"⚑ {army.siege_progress}% {t_str}"
             p_bg = (155, 85, 25)
             p_border = COLOR_GOLD
