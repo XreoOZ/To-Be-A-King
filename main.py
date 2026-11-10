@@ -473,7 +473,7 @@ BUILDING_SPECS = {
         "upkeep": 0,
         "garrison": 100,
         "recruits": 0,
-        "icon": "🏙"
+        "icon": "[City]"
     },
     "fort": {
         "name": "Fort",
@@ -484,7 +484,7 @@ BUILDING_SPECS = {
         "upkeep": 0,
         "garrison": 300,
         "recruits": 0,
-        "icon": "🏰"
+        "icon": "[Fort]"
     },
     "barrack": {
         "name": "Barracks",
@@ -1328,7 +1328,7 @@ class GameState:
                 a.muster_days -= 1
                 if a.muster_days <= 0:
                     a.is_mustering = False
-                    self.logs.append(f"🎺 {a.name} is fully assembled and battle-ready!")
+                    self.logs.append(f"⚔ {a.name} is fully assembled and battle-ready!")
 
         # Update Army Movements & Combat
         self.update_armies()
@@ -1717,7 +1717,7 @@ class GameState:
             if count > 0:
                 if has_border_threat:
                     t_names = ", ".join([PROVINCES[dp]['name'].split()[0] for dp in threatened_borders.keys()])
-                    self.logs.append(f"🦅 Raven Warning! Saxon armies massing near {t_names}! Danelaw sounds ALL-IN war horns (+{men:,} men in {count} hosts)!")
+                    self.logs.append(f"⚔ Raven Warning! Saxon armies massing near {t_names}! Danelaw sounds ALL-IN war horns (+{men:,} men in {count} hosts)!")
                 else:
                     self.logs.append(f"Ravens squawk! The Danelaw has summoned ALL realm warbands (+{men:,} men in {count} hosts)!")
                 return
@@ -1775,7 +1775,7 @@ class GameState:
                     if path and len(path) > 1:
                         main_host.path = path[1:]
                         main_host.move_progress = 0.0
-                        self.logs.append(f"🛡 Halfdan advances his Great Host ({main_host.troops:,} men) to {PROVINCES[target_border]['name']} to block Saxon invasion!")
+                        self.logs.append(f"⚔ Halfdan advances his Great Host ({main_host.troops:,} men) to {PROVINCES[target_border]['name']} to block Saxon invasion!")
 
                 elif (safe_rally == target_border or already_guarding):
                     # Host is AT the border! Check if superior in numbers to counter-attack!
@@ -2511,8 +2511,8 @@ def run_game():
                     state.disband_army(a)
 
         # ---------------------------------------------------------
-        # Left Panel Sub-Tabs: [ ⚔ Armies ]  [ 👥 Vassals ]  [ 👑 Demesne ]
-        #                      [ ⚖ Realm Laws ]     [ 💰 In/Expense ]
+        # Left Panel Sub-Tabs: [ ⚔ Armies ]  [ ♟ Vassals ]  [ ♚ Demesne ]
+        #                      [ ⚖ Realm Laws ]     [ ◆ In/Expense ]
         # ---------------------------------------------------------
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 233), (285, 233), 1)
         tab_y = 236
@@ -2542,7 +2542,7 @@ def run_game():
         
         pygame.draw.rect(screen, COLOR_BUTTON_ACTIVE if is_v_active else (COLOR_BUTTON_HOVER if is_hov_tv else COLOR_BUTTON_NORMAL), tab_vassals, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_v_active else COLOR_PANEL_BORDER, tab_vassals, 1, border_radius=4)
-        lbl_v = font_xs.render("👥 VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD)
+        lbl_v = font_xs.render("♟ VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD)
         screen.blit(lbl_v, (tab_vassals.x + (tab_vassals.w - lbl_v.get_width()) // 2, tab_y + 5))
 
         # Crown Demesne Tab Items Calculation
@@ -2583,7 +2583,7 @@ def run_game():
                     for t in h["tiles"]:
                         covered_holding_tiles.add(t)
 
-        d_title = f"👑 DEMESNE ({len(player_crown_items)})"
+        d_title = f"♚ DEMESNE ({len(player_crown_items)})"
         pygame.draw.rect(screen, (60, 48, 20) if is_d_active else (COLOR_BUTTON_HOVER if is_hov_td else (35, 40, 52)), tab_demesne, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_d_active else (90, 140, 210), tab_demesne, 1, border_radius=4)
         d_lbl = font_xs.render(d_title, True, COLOR_GOLD if is_d_active else (210, 230, 255))
@@ -2596,7 +2596,7 @@ def run_game():
         l_lbl = font_xs.render(l_title, True, COLOR_GOLD if is_l_active else (210, 230, 255))
         screen.blit(l_lbl, (tab_laws.x + (tab_laws.w - l_lbl.get_width()) // 2, tab_y + 34))
 
-        e_title = "💰 IN/EXPENSE"
+        e_title = "◆ IN/EXPENSE"
         pygame.draw.rect(screen, (60, 48, 20) if is_e_active else (COLOR_BUTTON_HOVER if is_hov_te else (35, 40, 52)), tab_economy, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_e_active else (90, 140, 210), tab_economy, 1, border_radius=4)
         e_lbl = font_xs.render(e_title, True, COLOR_GOLD if is_e_active else (210, 230, 255))
@@ -2644,8 +2644,8 @@ def run_game():
                     
                     status_str = "Idle"
                     if a.in_battle: status_str = "⚔ IN BATTLE!"
-                    elif a.is_mustering: status_str = f"⏳ Mustering ({a.muster_days}d)"
-                    elif a.is_demobilizing: status_str = f"🏠 Returning to {PROVINCES[a.flag_origin]['name'].split()[0]}"
+                    elif a.is_mustering: status_str = f" Mustering ({a.muster_days}d)"
+                    elif a.is_demobilizing: status_str = f"◆ Returning to {PROVINCES[a.flag_origin]['name'].split()[0]}"
                     elif a.is_sieging: status_str = f"Besieging {a.siege_target_name or 'Holding'} ({a.siege_progress}%)"
                     elif a.is_moving: status_str = f"Marching to {PROVINCES[a.next_province]['name'].split()[0]}"
                     else: status_str = f"Stationed in {PROVINCES[a.province]['name'].split()[0]}"
@@ -2721,7 +2721,7 @@ def run_game():
                     pygame.draw.rect(screen, bg_c, p_card, border_radius=4)
                     pygame.draw.rect(screen, border_c, p_card, 1, border_radius=4)
 
-                    screen.blit(font_sm.render(f"🏰 {p_name}", True, COLOR_GOLD), (34, fy + 4))
+                    screen.blit(font_sm.render(f"◆ {p_name}", True, COLOR_GOLD), (34, fy + 4))
                     screen.blit(font_xs.render(f"Crown Fiefs: {len(p_items)} Holdings • {p_tiles_cnt}t", True, (210, 230, 255)), (34, fy + 26))
 
                     arr_lbl = font_xs.render("View ›", True, COLOR_GOLD if is_p_hov else (160, 200, 240))
@@ -2779,7 +2779,7 @@ def run_game():
                 pygame.draw.rect(screen, COLOR_GOLD if is_back_hov else (80, 140, 220), back_btn, 1, border_radius=4)
                 screen.blit(font_xs.render("◄ ALL PROVS", True, COLOR_GOLD if is_back_hov else COLOR_TEXT_WHITE), (33, 303))
 
-                header_lbl = font_sm.render(f"🏰 {p_name} ({len(prov_fiefs)})", True, COLOR_GOLD)
+                header_lbl = font_sm.render(f"◆ {p_name} ({len(prov_fiefs)})", True, COLOR_GOLD)
                 screen.blit(header_lbl, (140, 302))
 
                 per_page = 5
@@ -2820,7 +2820,7 @@ def run_game():
                     if len(f_disp_name) > 22:
                         f_disp_name = f_disp_name[:20] + "..."
 
-                    screen.blit(font_sm.render(f"👑 {f_disp_name}", True, COLOR_GOLD), (34, fy + 4))
+                    screen.blit(font_sm.render(f"♚ {f_disp_name}", True, COLOR_GOLD), (34, fy + 4))
                     status_str = f"{len(f['tiles'])} Tile{'s' if len(f['tiles']) > 1 else ''} • {h_type_str}"
                     screen.blit(font_xs.render(status_str, True, (210, 230, 255)), (34, fy + 26))
 
@@ -2892,7 +2892,7 @@ def run_game():
                 pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
                 
                 prov_short = PROVINCES[v_pid]["name"].split()[0]
-                screen.blit(font_xs.render(f"👑 {v_data['name']}", True, COLOR_GOLD), (32, vy + 4))
+                screen.blit(font_xs.render(f"♟ {v_data['name']}", True, COLOR_GOLD), (32, vy + 4))
                 p_tag = font_xs.render(f"[{prov_short}]", True, (140, 200, 255))
                 screen.blit(p_tag, (280 - p_tag.get_width(), vy + 4))
                 
@@ -2954,7 +2954,7 @@ def run_game():
             # Draw Tax Sub-tab
             pygame.draw.rect(screen, (60, 48, 20) if is_tax_active else (COLOR_BUTTON_HOVER if is_hov_tax_law else (35, 40, 52)), tab_tax_law, border_radius=4)
             pygame.draw.rect(screen, COLOR_GOLD if is_tax_active else (80, 110, 150), tab_tax_law, 1, border_radius=4)
-            t_tax_lbl = font_xs.render("💰 TAX LAWS", True, COLOR_GOLD if is_tax_active else (200, 220, 245))
+            t_tax_lbl = font_xs.render("◆ TAX LAWS", True, COLOR_GOLD if is_tax_active else (200, 220, 245))
             screen.blit(t_tax_lbl, (tab_tax_law.x + (tab_tax_law.w - t_tax_lbl.get_width()) // 2, tab_tax_law.y + 4))
 
             # Draw Levy Sub-tab
@@ -3015,7 +3015,7 @@ def run_game():
                 pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
 
                 prov_short = PROVINCES[v_pid]["name"].split()[0]
-                screen.blit(font_xs.render(f"👑 {v_data['name']}", True, COLOR_GOLD), (32, vy + 3))
+                screen.blit(font_xs.render(f"♟ {v_data['name']}", True, COLOR_GOLD), (32, vy + 3))
                 p_tag = font_xs.render(f"[{prov_short}]", True, (140, 200, 255))
                 screen.blit(p_tag, (280 - p_tag.get_width(), vy + 3))
 
@@ -3175,7 +3175,7 @@ def run_game():
             pygame.draw.rect(screen, (34, 42, 56), sum_card, border_radius=6)
             pygame.draw.rect(screen, COLOR_GOLD, sum_card, 1, border_radius=6)
 
-            screen.blit(font_md.render("💰 Royal Treasury Ledger", True, COLOR_GOLD), (34, 303))
+            screen.blit(font_md.render("◆ Royal Treasury Ledger", True, COLOR_GOLD), (34, 303))
             screen.blit(font_xs.render(f"Treasury: {fin['treasury']:,} Gold", True, COLOR_GOLD), (34, 323))
 
             net_col = COLOR_TEXT_GREEN if fin['net_monthly'] >= 0 else COLOR_TEXT_RED
@@ -3187,7 +3187,7 @@ def run_game():
             exp_lbl = font_xs.render(f"Expense: -{fin['total_expense']}g/m", True, (255, 140, 140))
             screen.blit(exp_lbl, (275 - exp_lbl.get_width(), 342))
 
-            # 2. Sub-tab navigation: [ 📈 INCOME (+XXg) ] and [ 📉 EXPENSES (-XXg) ]
+            # 2. Sub-tab navigation: [ ▲ INCOME (+XXg) ] and [ ▼ EXPENSES (-XXg) ]
             if not hasattr(state, "economy_subtab") or state.economy_subtab not in ("income", "expense"):
                 state.economy_subtab = "income"
 
@@ -3202,12 +3202,12 @@ def run_game():
 
             pygame.draw.rect(screen, (40, 70, 50) if is_inc_active else ((45, 52, 65) if is_hov_inc else (32, 38, 48)), tab_inc, border_radius=4)
             pygame.draw.rect(screen, COLOR_TEXT_GREEN if is_inc_active else COLOR_PANEL_BORDER, tab_inc, 1, border_radius=4)
-            lbl_inc_txt = font_xs.render(f"📈 INCOME (+{fin['total_income']}g)", True, COLOR_TEXT_GREEN if is_inc_active else (200, 220, 240))
+            lbl_inc_txt = font_xs.render(f"▲ INCOME (+{fin['total_income']}g)", True, COLOR_TEXT_GREEN if is_inc_active else (200, 220, 240))
             screen.blit(lbl_inc_txt, (tab_inc.x + (tab_inc.w - lbl_inc_txt.get_width()) // 2, 374))
 
             pygame.draw.rect(screen, (75, 40, 40) if is_exp_active else ((45, 52, 65) if is_hov_exp else (32, 38, 48)), tab_exp, border_radius=4)
             pygame.draw.rect(screen, COLOR_TEXT_RED if is_exp_active else COLOR_PANEL_BORDER, tab_exp, 1, border_radius=4)
-            lbl_exp_txt = font_xs.render(f"📉 EXPENSES (-{fin['total_expense']}g)", True, COLOR_TEXT_RED if is_exp_active else (200, 220, 240))
+            lbl_exp_txt = font_xs.render(f"▼ EXPENSES (-{fin['total_expense']}g)", True, COLOR_TEXT_RED if is_exp_active else (200, 220, 240))
             screen.blit(lbl_exp_txt, (tab_exp.x + (tab_exp.w - lbl_exp_txt.get_width()) // 2, 374))
 
             if mouse_clicked and is_hov_inc and not is_inc_active:
@@ -3226,7 +3226,7 @@ def run_game():
                 pygame.draw.rect(screen, (32, 38, 50), card_p, border_radius=5)
                 pygame.draw.rect(screen, (80, 110, 150), card_p, 1, border_radius=5)
 
-                screen.blit(font_xs.render("🏛 Provincial Tax Income", True, COLOR_GOLD), (32, 404))
+                screen.blit(font_xs.render("◆ Provincial Tax Income", True, COLOR_GOLD), (32, 404))
                 p_tot_lbl = font_xs.render(f"+{fin['total_prov_tax']}g/m", True, COLOR_TEXT_GREEN)
                 screen.blit(p_tot_lbl, (275 - p_tot_lbl.get_width(), 404))
 
@@ -3252,7 +3252,7 @@ def run_game():
                 pygame.draw.rect(screen, (32, 38, 50), card_v, border_radius=5)
                 pygame.draw.rect(screen, (80, 110, 150), card_v, 1, border_radius=5)
 
-                screen.blit(font_xs.render("👑 Feudal Vassal Tithes", True, COLOR_GOLD), (32, 502))
+                screen.blit(font_xs.render("♚ Feudal Vassal Tithes", True, COLOR_GOLD), (32, 502))
                 v_tot_lbl = font_xs.render(f"+{fin['total_vassal_tax']}g/m", True, COLOR_TEXT_GREEN)
                 screen.blit(v_tot_lbl, (275 - v_tot_lbl.get_width(), 502))
 
@@ -3297,7 +3297,7 @@ def run_game():
                 pygame.draw.rect(screen, (32, 38, 50), card_c, border_radius=5)
                 pygame.draw.rect(screen, (80, 110, 150), card_c, 1, border_radius=5)
 
-                screen.blit(font_xs.render("🏰 Crown Demesne Rents", True, COLOR_GOLD), (32, 626))
+                screen.blit(font_xs.render("[Fort] Crown Demesne Rents", True, COLOR_GOLD), (32, 626))
                 c_tot_lbl = font_xs.render(f"+{fin['total_crown_income']}g/m", True, COLOR_TEXT_GREEN)
                 screen.blit(c_tot_lbl, (275 - c_tot_lbl.get_width(), 626))
 
@@ -3339,7 +3339,7 @@ def run_game():
                 pygame.draw.rect(screen, (42, 34, 38), card_b, border_radius=5)
                 pygame.draw.rect(screen, (150, 80, 80), card_b, 1, border_radius=5)
 
-                screen.blit(font_xs.render("🛡 Forts & Barracks Maintenance", True, COLOR_GOLD), (32, 522))
+                screen.blit(font_xs.render("⚔ Forts & Barracks Maintenance", True, COLOR_GOLD), (32, 522))
                 b_tot_lbl = font_xs.render(f"-{fin['total_facility_upkeep']}g/m", True, COLOR_TEXT_RED)
                 screen.blit(b_tot_lbl, (275 - b_tot_lbl.get_width(), 522))
 
@@ -4148,11 +4148,11 @@ def run_game():
                 p_bg = (185, 35, 35)
                 p_border = (255, 220, 50)
             elif army.is_mustering:
-                txt_badge = f"⏳ {army.muster_days}d ({army.troops:,})"
+                txt_badge = f" {army.muster_days}d ({army.troops:,})"
                 p_bg = (65, 52, 20)
                 p_border = COLOR_GOLD
             elif army.is_demobilizing:
-                txt_badge = f"🏠 HOME ({army.troops:,})"
+                txt_badge = f"◆ HOME ({army.troops:,})"
                 p_bg = (30, 48, 70)
                 p_border = (120, 180, 240)
             elif army.is_sieging:
@@ -4285,9 +4285,9 @@ def run_game():
             
             p_cap = s_data['province'].replace("_", " ").title()
             if h_type == "city":
-                sub_c = font_sm.render(f"Holding Type: 🏙 Commercial City ({p_cap})", True, COLOR_TEXT_WHITE)
+                sub_c = font_sm.render(f"Holding Type: [City] Commercial City ({p_cap})", True, COLOR_TEXT_WHITE)
             elif h_type == "fort":
-                sub_c = font_sm.render(f"Holding Type: 🏰 Stone Fortress ({p_cap})", True, COLOR_TEXT_WHITE)
+                sub_c = font_sm.render(f"Holding Type: [Fort] Stone Fortress ({p_cap})", True, COLOR_TEXT_WHITE)
             else:
                 lvl = s_data.get("level", 0)
                 sub_c = font_sm.render(f"Holding Type: ⚔ Military Barracks Lvl {lvl} ({p_cap})", True, COLOR_TEXT_WHITE)
@@ -4366,7 +4366,7 @@ def run_game():
                 b_v_hov = v_btn.collidepoint(mouse_pos)
                 pygame.draw.rect(screen, (40, 75, 110) if b_v_hov else (30, 55, 85), v_btn, border_radius=6)
                 pygame.draw.rect(screen, (100, 180, 255), v_btn, 1, border_radius=6)
-                screen.blit(font_xs.render("👑 VIEW VASSAL PROFILE & DOSSIER", True, COLOR_TEXT_WHITE), (915, cur_y + 16))
+                screen.blit(font_xs.render("♚ VIEW VASSAL PROFILE & DOSSIER", True, COLOR_TEXT_WHITE), (915, cur_y + 16))
                 if mouse_clicked and b_v_hov:
                     v_list = state.vassals.get(s_data["province"], [])
                     matching_v = next((v for v in v_list if v.get("id") == s_data["vassal_id"] or v.get("name") == s_data["lord"]), None)
@@ -4405,13 +4405,13 @@ def run_game():
             if sel_army.in_battle:
                 screen.blit(font_md.render("STATUS: ⚔ IN PITCHED BATTLE!", True, COLOR_TEXT_RED), (880, 202))
             elif sel_army.is_mustering:
-                screen.blit(font_md.render(f"STATUS: ⏳ MUSTERING ({sel_army.muster_days}d left)", True, COLOR_GOLD), (880, 202))
+                screen.blit(font_md.render(f"STATUS: MUSTERING ({sel_army.muster_days}d left)", True, COLOR_GOLD), (880, 202))
             elif sel_army.is_demobilizing:
                 home_p = PROVINCES[sel_army.flag_origin]["name"].split()[0]
-                screen.blit(font_md.render(f"STATUS: 🏠 Returning Home to {home_p}", True, (140, 200, 255)), (880, 202))
+                screen.blit(font_md.render(f"STATUS: ◆ Returning Home to {home_p}", True, (140, 200, 255)), (880, 202))
             elif sel_army.is_sieging:
                 t_lbl = sel_army.siege_target_name or 'Holding'
-                screen.blit(font_md.render(f"STATUS: 🏰 Besieging {t_lbl} ({sel_army.siege_progress}%)", True, COLOR_GOLD), (880, 202))
+                screen.blit(font_md.render(f"STATUS: [Fort] Besieging {t_lbl} ({sel_army.siege_progress}%)", True, COLOR_GOLD), (880, 202))
             elif sel_army.is_moving:
                 screen.blit(font_sm.render(f"Marching to: {PROVINCES[sel_army.next_province]['name']} ({int(sel_army.move_progress)}%)", True, COLOR_TEXT_WHITE), (880, 202))
             else:
@@ -4528,7 +4528,7 @@ def run_game():
                 screen.blit(font_xs.render(owner_char["title"], True, COLOR_TEXT_WHITE), (975, 182))
                 
                 # Click to inspect hint
-                hint_str = "👑 Click to Inspect Sovereign Dossier"
+                hint_str = "♚ Click to Inspect Sovereign Dossier"
                 hint_col = (255, 220, 130) if is_player_owned else (255, 180, 180)
                 screen.blit(font_xs.render(hint_str, True, hint_col), (975, 198))
 
@@ -4596,7 +4596,7 @@ def run_game():
                     htype = h_info["type"]
                     if htype == "town":
                         htype = "city"
-                    h_icon = "🏙" if htype == "city" else ("🏰" if htype == "fort" else "⚔")
+                    h_icon = "[City]" if htype == "city" else ("[Fort]" if htype == "fort" else "⚔")
                     screen.blit(font_xs.render(f"{h_icon} {h_info['name']}", True, COLOR_GOLD), (888, cy + 5))
 
                     if htype == "city":
@@ -4617,8 +4617,8 @@ def run_game():
                     screen.blit(font_md.render("Construct New Holding", True, COLOR_GOLD), (880, cy + 14))
 
                     menu_specs = [
-                        ("city", "🏙 CITY (1 Tile - 600g)", "+100 Garrison  •  +3 Gold / month", 600),
-                        ("fort", "🏰 FORT (2 Tiles - 1,000g)", "+300 Garrison  •  +1 Gold / month  [T: Rotate]", 1000),
+                        ("city", "[City] CITY (1 Tile - 600g)", "+100 Garrison  •  +3 Gold / month", 600),
+                        ("fort", "[Fort] FORT (2 Tiles - 1,000g)", "+300 Garrison  •  +1 Gold / month  [T: Rotate]", 1000),
                         ("barrack", "⚔ BARRACKS (1 Tile - 800g)", "+100 Gar  •  +10 Recruits/mo  •  -1g Upkeep", 800)
                     ]
 
@@ -4685,7 +4685,7 @@ def run_game():
                     pygame.draw.rect(screen, v_bg, v_box, border_radius=4)
                     pygame.draw.rect(screen, (100, 255, 120) if is_v_sel else COLOR_PANEL_BORDER, v_box, 1, border_radius=4)
 
-                    screen.blit(font_xs.render(f"👑 {v['name']}", True, COLOR_GOLD if is_v_sel else COLOR_TEXT_WHITE), (888, vy + 4))
+                    screen.blit(font_xs.render(f"♚ {v['name']}", True, COLOR_GOLD if is_v_sel else COLOR_TEXT_WHITE), (888, vy + 4))
                     st = get_vassal_landed_status(state, v, state.selected_province)
                     c_info = v.get('city_name') if st["is_landed"] else 'Landless Noble (Unlanded)'
                     screen.blit(font_xs.render(f"Fief: {c_info}", True, (200, 230, 255)), (888, vy + 17))
@@ -4745,7 +4745,7 @@ def run_game():
                     eb_rect = pygame.Rect(880, 180, 290, 46)
                     pygame.draw.rect(screen, (70, 50, 15), eb_rect, border_radius=4)
                     pygame.draw.rect(screen, COLOR_GOLD, eb_rect, 2, border_radius=4)
-                    screen.blit(font_xs.render(f"🖌 CARVING: {f_name} ({num_tiles} tiles)", True, COLOR_GOLD), (886, 184))
+                    screen.blit(font_xs.render(f"✎ CARVING: {f_name} ({num_tiles} tiles)", True, COLOR_GOLD), (886, 184))
                     screen.blit(font_xs.render("Click green tiles on map (Min 1)", True, (240, 240, 240)), (886, 202))
                     
                     # DONE button
@@ -4841,7 +4841,7 @@ def run_game():
                         holder_str = f"Lord: {f_data.get('holder', 'Unknown')}"
                         h_col = (180, 255, 180)
 
-                    screen.blit(font_xs.render(f"🛡 {f_data['name']} ({len(f_data['tiles'])} Tiles)", True, COLOR_GOLD), (888, fy + 4))
+                    screen.blit(font_xs.render(f"⚔ {f_data['name']} ({len(f_data['tiles'])} Tiles)", True, COLOR_GOLD), (888, fy + 4))
                     screen.blit(font_xs.render(holder_str, True, h_col), (888, fy + 18))
 
                     # Action buttons on fief card
@@ -4855,7 +4855,7 @@ def run_game():
                     e_hov = b_edit.collidepoint(mouse_pos)
                     pygame.draw.rect(screen, (80, 70, 30) if e_hov else (50, 45, 25), b_edit, border_radius=3)
                     pygame.draw.rect(screen, COLOR_GOLD, b_edit, 1, border_radius=3)
-                    screen.blit(font_xs.render("EDIT 🖌" if not is_f_editing else "STOP ✕", True, COLOR_GOLD), (902, fy + 38))
+                    screen.blit(font_xs.render("EDIT ✎" if not is_f_editing else "STOP ✕", True, COLOR_GOLD), (902, fy + 38))
                     if mouse_clicked and e_hov:
                         state.editing_fief_id = None if is_f_editing else f_data["id"]
                         state.selected_fief_id = f_data["id"]
@@ -4901,7 +4901,7 @@ def run_game():
                         r_hov = b_revoke.collidepoint(mouse_pos)
                         pygame.draw.rect(screen, (100, 45, 45) if r_hov else (70, 30, 30), b_revoke, border_radius=3)
                         pygame.draw.rect(screen, (240, 100, 100), b_revoke, 1, border_radius=3)
-                        screen.blit(font_xs.render("REVOKE FIEF (👑 Return to Crown)", True, COLOR_TEXT_WHITE), (980, fy + 38))
+                        screen.blit(font_xs.render("REVOKE FIEF (♚ Return to Crown)", True, COLOR_TEXT_WHITE), (980, fy + 38))
                         if mouse_clicked and r_hov:
                             v_prev = f_data["holder"]
                             v_prev_id = f_data.get("vassal_id")
@@ -5143,7 +5143,7 @@ def run_game():
                     pygame.draw.rect(screen, (80, 130, 200) if is_loc else COLOR_PANEL_BORDER, c_rect, 1, border_radius=6)
 
                     # Vassal title & name
-                    v_title_str = f"👑 {c_v['name']}"
+                    v_title_str = f"♚ {c_v['name']}"
                     screen.blit(font_md.render(v_title_str, True, COLOR_GOLD), (pop_x + 40, vy + 10))
                     
                     # Locality & holdings
@@ -5298,7 +5298,7 @@ def run_game():
             total_garrison = v_status.get("total_garrison", 0)
 
             # Name and Titles
-            screen.blit(font_md.render(f"👑 {v_obj['name']}", True, (255, 120, 120) if is_enemy else COLOR_GOLD), (pop_x + 90, pop_y + 74))
+            screen.blit(font_md.render(f"♚ {v_obj['name']}", True, (255, 120, 120) if is_enemy else COLOR_GOLD), (pop_x + 90, pop_y + 74))
             v_religion = "Norse Pagan" if p_owner == state.enemy_id else prov_data.get("faith", "Catholic")
             v_culture = "Norse" if p_owner == state.enemy_id else prov_data.get("culture", "Anglo-Saxon")
             rank_str = f"Feudal Rank: {v_obj.get('title', 'Thane')} of {p_full.split()[0]}  •  Religion: {v_religion} ({v_culture})"
@@ -5311,9 +5311,9 @@ def run_game():
             oath_sub = "(Enemy Vassal)" if is_enemy else "(Faithful Subject)"
             stats_list = [
                 ("⚔ Martial", f"{10 + (levies_contrib // 30)}" if is_landed else "8", "(Commands Fyrd)"),
-                ("💰 Stewardship", f"{11 + (tax_paid * 2)}" if is_landed else "9", "(Manages Estates)"),
-                ("🤝 Diplomacy", "11" if is_enemy else "13", "(Foreign Court)" if is_enemy else "(Royal Harmony)"),
-                ("🛡 Feudal Oath", oath_val, oath_sub)
+                ("◆ Stewardship", f"{11 + (tax_paid * 2)}" if is_landed else "9", "(Manages Estates)"),
+                ("◆ Diplomacy", "11" if is_enemy else "13", "(Foreign Court)" if is_enemy else "(Royal Harmony)"),
+                ("⚔ Feudal Oath", oath_val, oath_sub)
             ]
             for s_i, (s_name, s_val, s_sub) in enumerate(stats_list):
                 bx = pop_x + 25 + s_i * 158
@@ -5334,7 +5334,7 @@ def run_game():
             pygame.draw.rect(screen, (30, 36, 48), left_rect, border_radius=6)
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, left_rect, 1, border_radius=6)
             
-            screen.blit(font_md.render("💰 Vassal Finances & Revenue", True, COLOR_GOLD), (pop_x + 35, col_y + 10))
+            screen.blit(font_md.render("◆ Vassal Finances & Revenue", True, COLOR_GOLD), (pop_x + 35, col_y + 10))
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 35, col_y + 32), (pop_x + 35 + col_w - 20, col_y + 32), 1)
 
             screen.blit(font_sm.render(f"Treasury: {v_obj['gold']} Gold", True, COLOR_GOLD), (pop_x + 40, col_y + 40))
@@ -5412,7 +5412,7 @@ def run_game():
             loc_hov = loc_btn.collidepoint(mouse_pos)
             pygame.draw.rect(screen, (40, 85, 130) if loc_hov else (28, 60, 95), loc_btn, border_radius=6)
             pygame.draw.rect(screen, (100, 180, 255), loc_btn, 1, border_radius=6)
-            screen.blit(font_sm.render("🔍 LOCATE SEAT ON MAP", True, COLOR_TEXT_WHITE), (pop_x + 95, pop_y + pop_h - 50))
+            screen.blit(font_sm.render("▶ LOCATE SEAT ON MAP", True, COLOR_TEXT_WHITE), (pop_x + 95, pop_y + pop_h - 50))
             if modal_mouse_clicked and loc_hov:
                 state.selected_province = v_pid
                 if v_obj.get("tiles"):
@@ -5480,7 +5480,7 @@ def run_game():
                 screen.blit(pygame.transform.smoothscale(r_coa, (38, 44)), (pop_x + 86, pop_y + 84))
 
             # Name and Titles
-            screen.blit(font_md.render(f"👑 {r_char['name']}", True, (255, 120, 120) if is_ruler_enemy else COLOR_GOLD), (pop_x + 135, pop_y + 72))
+            screen.blit(font_md.render(f"♚ {r_char['name']}", True, (255, 120, 120) if is_ruler_enemy else COLOR_GOLD), (pop_x + 135, pop_y + 72))
             rank_str = f"Realm Title: {r_char['title']} • {r_char.get('dynasty', '')}"
             screen.blit(font_xs.render(rank_str, True, COLOR_TEXT_WHITE), (pop_x + 135, pop_y + 96))
             
@@ -5492,9 +5492,9 @@ def run_game():
             stats = r_char.get("stats", {})
             stats_list = [
                 ("⚔ Martial", str(stats.get("martial", 16)), "(Grand Marshal)"),
-                ("💰 Stewardship", str(stats.get("stewardship", 14)), "(Lord Treasurer)"),
-                ("🤝 Diplomacy", str(stats.get("diplomacy", 12)), "(Royal Envoy)"),
-                ("🗡 Intrigue", str(stats.get("intrigue", 13)), "(Spymaster)")
+                ("◆ Stewardship", str(stats.get("stewardship", 14)), "(Lord Treasurer)"),
+                ("◆ Diplomacy", str(stats.get("diplomacy", 12)), "(Royal Envoy)"),
+                ("⚔ Intrigue", str(stats.get("intrigue", 13)), "(Spymaster)")
             ]
             for s_i, (s_name, s_val, s_sub) in enumerate(stats_list):
                 bx = pop_x + 25 + s_i * 158
@@ -5531,7 +5531,7 @@ def run_game():
             pygame.draw.rect(screen, (30, 36, 48), left_rect, border_radius=6)
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, left_rect, 1, border_radius=6)
 
-            screen.blit(font_md.render("💰 Royal Treasury & Economy", True, COLOR_GOLD), (pop_x + 35, col_y + 10))
+            screen.blit(font_md.render("◆ Royal Treasury & Economy", True, COLOR_GOLD), (pop_x + 35, col_y + 10))
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 35, col_y + 32), (pop_x + 35 + col_w - 20, col_y + 32), 1)
 
             screen.blit(font_sm.render(f"Treasury: {r_char.get('gold', 0):,} Gold", True, COLOR_GOLD), (pop_x + 40, col_y + 40))
@@ -5546,7 +5546,7 @@ def run_game():
             p_list_str = ", ".join(r_prov_names[:6]) + ("..." if len(r_prov_names) > 6 else "")
             screen.blit(font_xs.render(f"  ({p_list_str})", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 182))
 
-            stance_str = "⚔ AT WAR (Invading Britain)" if is_ruler_enemy else "🛡 AT WAR (Defending England)"
+            stance_str = "⚔ AT WAR (Invading Britain)" if is_ruler_enemy else "⚔ AT WAR (Defending England)"
             stance_col = (255, 100, 100) if is_ruler_enemy else COLOR_GOLD
             screen.blit(font_xs.render(f"• Feudal Stance: {stance_str}", True, stance_col), (pop_x + 40, col_y + 204))
 
@@ -5581,7 +5581,7 @@ def run_game():
             pygame.draw.rect(screen, (40, 85, 130) if loc_hov else (28, 60, 95), loc_btn, border_radius=6)
             pygame.draw.rect(screen, (100, 180, 255), loc_btn, 1, border_radius=6)
             cap_name = "JORVIK" if is_ruler_enemy else "WESSEX"
-            screen.blit(font_sm.render(f"🔍 LOCATE CAPITAL ({cap_name})", True, COLOR_TEXT_WHITE), (pop_x + 75, pop_y + pop_h - 45))
+            screen.blit(font_sm.render(f"▶ LOCATE CAPITAL ({cap_name})", True, COLOR_TEXT_WHITE), (pop_x + 75, pop_y + pop_h - 45))
             if modal_mouse_clicked and loc_hov:
                 cap_prov = "jorvik" if is_ruler_enemy else "wessex"
                 state.selected_province = cap_prov
