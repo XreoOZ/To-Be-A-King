@@ -264,6 +264,32 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
         screen.blit(p_title, (880, 75))
         sub_title = font_xs.render(f"Culture: {sel_prov['culture']}  •  Faith: {sel_prov['religion']}", True, COLOR_TEXT_MUTED)
         screen.blit(sub_title, (880, 102))
+
+        # Realm Capital Status Badge / Change Capital Button
+        active_player_cap = state.get_realm_capital(state.player_id)
+        active_enemy_cap = state.get_realm_capital(state.enemy_id)
+        
+        if state.selected_province == active_player_cap:
+            cap_rect = pygame.Rect(1030, 73, 140, 24)
+            pygame.draw.rect(screen, (50, 42, 20), cap_rect, border_radius=4)
+            pygame.draw.rect(screen, COLOR_GOLD, cap_rect, 1, border_radius=4)
+            lbl = font_xs.render("★ REALM CAPITAL", True, COLOR_GOLD)
+            screen.blit(lbl, (cap_rect.x + (cap_rect.w - lbl.get_width()) // 2, cap_rect.y + 5))
+        elif is_player_owned:
+            cap_btn = pygame.Rect(1030, 73, 140, 24)
+            cb_hov = cap_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (45, 65, 95) if cb_hov else (30, 42, 60), cap_btn, border_radius=4)
+            pygame.draw.rect(screen, (100, 180, 255) if cb_hov else COLOR_PANEL_BORDER, cap_btn, 1, border_radius=4)
+            lbl = font_xs.render("★ MAKE CAPITAL", True, (220, 240, 255) if cb_hov else COLOR_TEXT_WHITE)
+            screen.blit(lbl, (cap_btn.x + (cap_btn.w - lbl.get_width()) // 2, cap_btn.y + 5))
+            if mouse_clicked and cb_hov:
+                state.set_player_capital(state.selected_province)
+        elif state.selected_province == active_enemy_cap:
+            cap_rect = pygame.Rect(1030, 73, 140, 24)
+            pygame.draw.rect(screen, (55, 25, 25), cap_rect, border_radius=4)
+            pygame.draw.rect(screen, (220, 80, 80), cap_rect, 1, border_radius=4)
+            lbl = font_xs.render("★ ENEMY CAPITAL", True, (255, 160, 160))
+            screen.blit(lbl, (cap_rect.x + (cap_rect.w - lbl.get_width()) // 2, cap_rect.y + 5))
     
         # CLEAN TAB NAVIGATION BAR (Province Overview | Buildings | Vassals | Fiefs)
         tabs = [("overview", "Overview"), ("buildings", "Buildings"), ("vassals", "Vassals"), ("fiefs", "Fiefs")]

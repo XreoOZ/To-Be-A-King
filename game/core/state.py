@@ -105,6 +105,15 @@ class GameState:
         self.player_raise_cooldown = 0   # in days (3 months / 90 days cooldown)
         self.enemy_raise_cooldown = 0    # in days (3 months / 90 days cooldown)
         
+        # Royal Capital & Realm Seats
+        self.player_capital = "wessex"
+        self.player_primary_capital = "wessex"
+        self.player_capital_was_lost = False
+        
+        self.enemy_capital = "jorvik"
+        self.enemy_primary_capital = "jorvik"
+        self.enemy_capital_was_lost = False
+        
         # AI decision timer
         self.ai_timer = 30
         
@@ -180,6 +189,97 @@ class GameState:
                 return a
         return None
 
+    def get_realm_capital(self, owner_id):
+        """
+        Returns the active capital province ID for the given realm owner.
+        Handles emergency capital relocation if capital is captured,
+        and restoration when liberated.
+        """
+        if owner_id == self.player_id:
+            pri = self.player_primary_capital
+            if PROVINCES.get(pri, {}).get("owner") == self.player_id:
+                if self.player_capital_was_lost:
+                    self.player_capital_was_lost = False
+                    self.player_capital = pri
+                    if self.player_id in CHARACTERS:
+                        CHARACTERS[self.player_id]["province"] = pri
+                    p_name = PROVINCES[pri]["name"]
+                    self.logs.append(f"Royal Triumph! The Royal Seat has been restored to {p_name}!")
+                return pri
+
+            owned = [pid for pid, p in PROVINCES.items() if p.get("owner") == self.player_id]
+            if not owned:
+                return pri
+
+            if self.player_capital in owned and self.player_capital != pri:
+                return self.player_capital
+
+            sorted_owned = sorted(owned, key=lambda p: (PROVINCES[p].get("levies_max", 0), len(PROVINCES[p].get("tiles", []))), reverse=True)
+            new_cap = sorted_owned[0]
+            self.player_capital = new_cap
+            if self.player_id in CHARACTERS:
+                CHARACTERS[self.player_id]["province"] = new_cap
+            if not self.player_capital_was_lost:
+                self.player_capital_was_lost = True
+                p_old = PROVINCES.get(pri, {}).get("name", pri.capitalize())
+                p_new = PROVINCES[new_cap]["name"]
+                self.logs.append(f"Catastrophe! {p_old} has fallen! King Alfred flees and establishes emergency royal capital in {p_new}!")
+            return new_cap
+
+        elif owner_id == self.enemy_id:
+            pri = self.enemy_primary_capital
+            if PROVINCES.get(pri, {}).get("owner") == self.enemy_id:
+                if self.enemy_capital_was_lost:
+                    self.enemy_capital_was_lost = False
+                    self.enemy_capital = pri
+                    if self.enemy_id in CHARACTERS:
+                        CHARACTERS[self.enemy_id]["province"] = pri
+                    p_name = PROVINCES[pri]["name"]
+                    self.logs.append(f"Seat of Power Restored! Jarl Halfdan has returned the Danelaw Royal Seat to {p_name}!")
+                return pri
+
+            owned = [pid for pid, p in PROVINCES.items() if p.get("owner") == self.enemy_id]
+            if not owned:
+                return pri
+
+            if self.enemy_capital in owned and self.enemy_capital != pri:
+                return self.enemy_capital
+
+            sorted_owned = sorted(owned, key=lambda p: (PROVINCES[p].get("levies_max", 0), len(PROVINCES[p].get("tiles", []))), reverse=True)
+            new_cap = sorted_owned[0]
+            self.enemy_capital = new_cap
+            if self.enemy_id in CHARACTERS:
+                CHARACTERS[self.enemy_id]["province"] = new_cap
+            if not self.enemy_capital_was_lost:
+                self.enemy_capital_was_lost = True
+                p_old = PROVINCES.get(pri, {}).get("name", pri.capitalize())
+                p_new = PROVINCES[new_cap]["name"]
+                self.logs.append(f"War Emergency! {p_old} has fallen! Jarl Halfdan establishes emergency war capital in {p_new}! War summons depart from here.")
+            return new_cap
+
+        return "wessex"
+
+    def set_player_capital(self, province_id):
+        """Allows the player to move their Royal Capital to any owned province."""
+        if province_id not in PROVINCES:
+            return False
+        if PROVINCES[province_id].get("owner") != self.player_id:
+            self.logs.append(f"Cannot relocate capital: {PROVINCES[province_id]['name']} is not under your control!")
+            return False
+        curr_cap = self.get_realm_capital(self.player_id)
+        if province_id == curr_cap:
+            self.logs.append(f"{PROVINCES[province_id]['name']} is already your royal capital.")
+            return False
+
+        self.player_primary_capital = province_id
+        self.player_capital = province_id
+        self.player_capital_was_lost = False
+        if self.player_id in CHARACTERS:
+            CHARACTERS[self.player_id]["province"] = province_id
+        p_name = PROVINCES[province_id]["name"]
+        self.logs.append(f"Royal Decree: King Alfred relocates the Realm Capital to {p_name}! Royal couriers and war summons will now depart from {p_name}.")
+        return True
+
     # ---------------------------------------------------------
     # Army Operations
     # ---------------------------------------------------------
@@ -204,7 +304,7 @@ class GameState:
         self.army_id_counter += 1
         
         army_name = f"{prov['name'].split()[0]} Fyrd"
-        capital_pid = "wessex"
+        capital_pid = self.get_realm_capital(self.player_id)
         is_royal = (province_id == capital_pid)
         new_army = Army(army_id, self.player_id, province_id, available, army_name,
                         flag_origin=province_id, rank=3 if is_royal else 1)
@@ -239,7 +339,8 @@ class GameState:
                 new_army.is_mustering = False
                 new_army.muster_days = 30
                 p_short = prov["name"].split()[0]
-                self.logs.append(f"Royal Courier dispatched from Winchester to {p_short} ({hops} shires away, {total_days}d ride)! 30d muster begins upon arrival.")
+                cap_short = PROVINCES[capital_pid]["name"].split()[0]
+                self.logs.append(f"Royal Courier dispatched from {cap_short} to {p_short} ({hops} shires away, {total_days}d ride)! 30d muster begins upon arrival.")
             else:
                 new_army.is_mustering = True
                 new_army.muster_days = 30
@@ -260,7 +361,7 @@ class GameState:
 
         raised_count = 0
         total_men = 0
-        capital_pid = "wessex"
+        capital_pid = self.get_realm_capital(self.player_id)
         courier_count = 0
         for pid, prov in PROVINCES.items():
             if prov["owner"] == self.player_id and prov["levies_current"] > 0 and prov.get("raise_cooldown_days", 0) <= 0:
@@ -314,8 +415,9 @@ class GameState:
         
         if raised_count > 0:
             self.player_raise_cooldown = LEVY_RAISE_COOLDOWN_DAYS
+            cap_short = PROVINCES[capital_pid]["name"].split()[0]
             if courier_count > 0:
-                self.logs.append(f"Royal Couriers dispatched from Winchester to {courier_count} shires! ({total_men:,} total men summoned, 30d muster begins as couriers arrive)")
+                self.logs.append(f"Royal Couriers dispatched from {cap_short} to {courier_count} shires! ({total_men:,} total men summoned, 30d muster begins as couriers arrive)")
             else:
                 self.logs.append(f"Mobilized royal capital levies: {total_men:,} men! (Mustering for 30 days)")
         else:
@@ -328,7 +430,7 @@ class GameState:
 
         raised_count = 0
         total_men = 0
-        capital_pid = "jorvik"
+        capital_pid = self.get_realm_capital(self.enemy_id)
         danelaw_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.enemy_id]
         has_enemy_field = any(a.owner == self.enemy_id for a in self.armies)
         min_to_raise = 25 if (is_emergency or not has_enemy_field) else 50
@@ -388,6 +490,8 @@ class GameState:
                 total_men += available
         if raised_count > 0:
             self.enemy_raise_cooldown = LEVY_RAISE_COOLDOWN_DAYS
+            cap_short = PROVINCES[capital_pid]["name"].split()[0]
+            self.logs.append(f"War Summons! Halfdan mobilizes {total_men:,} warriors across Danelaw (Couriers dispatch from {cap_short})!")
         return raised_count, total_men
 
     def rally_all_armies_to(self, target_province_id):
@@ -935,6 +1039,10 @@ class GameState:
                             else:
                                 self.enemy["prestige"] += 100
                                 self.logs.append(f"DISASTER! All boroughs in {prov['name']} have fallen to the Danelaw!")
+                            
+                            # Automatically relocate or restore capitals if needed
+                            self.get_realm_capital(self.player_id)
+                            self.get_realm_capital(self.enemy_id)
                     else:
                         # Friendly liberation of occupied holding!
                         for t in h_tiles:
@@ -965,6 +1073,10 @@ class GameState:
                     else:
                         self.enemy["prestige"] += 100
                         self.logs.append(f"Disaster! {prov['name']} has fallen to the Danelaw!")
+                    
+                    # Automatically relocate or restore capitals if needed
+                    self.get_realm_capital(self.player_id)
+                    self.get_realm_capital(self.enemy_id)
             else:
                 a.is_sieging = False
                 a.siege_progress = 0
@@ -1053,8 +1165,8 @@ class GameState:
             # Border threat: Gather at the frontier to meet the enemy
             safe_rally = list(threatened_borders.keys())[0]
         else:
-            # Standard rally: Jorvik capital
-            safe_rally = "jorvik" if "jorvik" in danelaw_provs else danelaw_provs[0]
+            # Standard rally: Active Danelaw realm capital
+            safe_rally = self.get_realm_capital(self.enemy_id)
 
         safe_rally_tile = get_province_capital_tile(safe_rally)
 

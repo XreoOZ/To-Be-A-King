@@ -652,15 +652,33 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                 state.logs.append(f"Constructed Crown {b_spec['name']} in {prov_obj['name']} (-{b_cost}g)!")
                 state.build_mode = False
     
+    active_player_cap = state.get_realm_capital(state.player_id)
+    active_enemy_cap = state.get_realm_capital(state.enemy_id)
+
     # Province Name Labels (Medieval Plaque / Banner)
     for pid, (lx, ly) in province_anchors.items():
         p_data = PROVINCES.get(pid)
         if p_data:
             short_name = p_data["name"].split()[0]
+            is_player_cap = (pid == active_player_cap)
+            is_enemy_cap = (pid == active_enemy_cap)
+            if is_player_cap or is_enemy_cap:
+                short_name = f"★ {short_name}"
+
             is_sel = (pid == state.selected_province)
             is_hov = (pid == state.hovered_province)
             
-            txt_col = (255, 220, 60) if is_sel else ((225, 235, 255) if is_hov else (240, 244, 250))
+            if is_sel:
+                txt_col = (255, 220, 60)
+            elif is_player_cap:
+                txt_col = (255, 230, 130)
+            elif is_enemy_cap:
+                txt_col = (255, 170, 170)
+            elif is_hov:
+                txt_col = (225, 235, 255)
+            else:
+                txt_col = (240, 244, 250)
+
             txt_surf = font_xs.render(short_name, True, txt_col)
             bw = txt_surf.get_width() + 14
             bh = 18
@@ -671,9 +689,18 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
             plaque_surf.fill((16, 20, 30, 215))
             screen.blit(plaque_surf, (bx, by))
             
-            border_c = (255, 215, 60) if is_sel else ((160, 180, 210) if is_hov else (55, 70, 95))
+            if is_sel:
+                border_c = (255, 215, 60)
+            elif is_player_cap:
+                border_c = (230, 190, 60)
+            elif is_enemy_cap:
+                border_c = (210, 70, 70)
+            elif is_hov:
+                border_c = (160, 180, 210)
+            else:
+                border_c = (55, 70, 95)
+
             pygame.draw.rect(screen, border_c, (bx, by, bw, bh), 1, border_radius=3)
-            
             screen.blit(txt_surf, (bx + 7, by + 2))
     
     # ---------------------------------------------------------
