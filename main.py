@@ -253,6 +253,17 @@ def make_banner_cloth(pid, width, height, is_large=True):
 
 banner_cloth_large = {pid: make_banner_cloth(pid, 32, 22, is_large=True) for pid in prov_flag_cache}
 banner_cloth_small = {pid: make_banner_cloth(pid, 18, 13, is_large=False) for pid in prov_flag_cache}
+_cloth_scaled_cache = {}
+
+def get_scaled_banner_cloth(pid, width, height, is_large=True):
+    width = max(8, width)
+    height = max(6, height)
+    key = (pid, width, height, is_large)
+    if key in _cloth_scaled_cache:
+        return _cloth_scaled_cache[key]
+    cloth = make_banner_cloth(pid, width, height, is_large=is_large)
+    _cloth_scaled_cache[key] = cloth
+    return cloth
 
 def draw_waving_banner(surface, cloth_surf, pole_x, pole_y, pole_h, ticks, amp=3.0, freq=0.25, is_main=False):
     # Wooden flagpole
@@ -261,8 +272,8 @@ def draw_waving_banner(surface, cloth_surf, pole_x, pole_y, pole_h, ticks, amp=3
     pygame.draw.line(surface, (95, 70, 48), (pole_x - 1, top_y), (pole_x - 1, pole_y), 1)
 
     # Golden Spearhead Finial on top
-    finial_h = 7 if is_main else 4
-    finial_w = 4 if is_main else 2
+    finial_h = max(3, int(pole_h * 0.18)) if is_main else max(2, int(pole_h * 0.14))
+    finial_w = max(2, int(pole_h * 0.10)) if is_main else max(1, int(pole_h * 0.08))
     pygame.draw.polygon(surface, COLOR_GOLD, [
         (pole_x, top_y - finial_h),
         (pole_x - finial_w, top_y),
@@ -274,7 +285,7 @@ def draw_waving_banner(surface, cloth_surf, pole_x, pole_y, pole_h, ticks, amp=3
     # Waving cloth flutter animation
     cw, ch = cloth_surf.get_size()
     strip_w = 2
-    cloth_top = top_y + (4 if is_main else 2)
+    cloth_top = top_y + max(2, int(pole_h * 0.10))
     time_val = ticks * 0.0055
 
     for sx in range(0, cw, strip_w):
@@ -1579,7 +1590,7 @@ def run_game():
                                     pct = a.move_progress / 100.0
                                     ax = int(ax + (nxt[0] - ax) * pct)
                                     ay = int(ay + (nxt[1] - ay) * pct)
-                                badge_rect = pygame.Rect(ax - 42, ay - 25, 84, 24)
+                                badge_rect = pygame.Rect(ax - curr_tile_w, ay - curr_tile_h, curr_tile_w * 2, int(curr_tile_h * 1.5))
                                 if sel_rect.colliderect(badge_rect):
                                     state.selected_army_ids.append(a.id)
                         if state.selected_army_ids:
@@ -2677,39 +2688,77 @@ def run_game():
             is_player = (army.owner == state.player_id)
             is_sel_army = (army.id == state.selected_army_id or army.id in state.selected_army_ids)
 
-            # RTS Golden Ground Selection Ring
+            # Current tile scale relative to base tile size (tracks camera zoom perfectly!)
+            tile_scale = curr_tile_w / BASE_TILE_W
+
+            # RTS Golden Ground Selection Ring (scaled to 1.4 tiles)
             if is_sel_army:
-                sel_surf = pygame.Surface((46, 14), pygame.SRCALPHA)
-                pygame.draw.ellipse(sel_surf, (240, 195, 50, 180), (0, 0, 46, 14), 2)
-                screen.blit(sel_surf, (cx - 23, cy - 7))
+                ring_w = int(curr_tile_w * 1.4)
+                ring_h = int(curr_tile_h * 0.42)
+                sel_surf = pygame.Surface((ring_w, ring_h), pygame.SRCALPHA)
+                pygame.draw.ellipse(sel_surf, (240, 195, 50, 190), (0, 0, ring_w, ring_h), 2)
+                screen.blit(sel_surf, (cx - ring_w // 2, cy - ring_h // 2))
 
             # -------------------------------------------------------------
-            # WAVING BANNER HIERARCHY:
-            # 1 Grand Central Standard (Large, Waving)
-            # + All Contingent Standards (Small, Waving, Encircling the Grand Banner)
+            # STANDARDIZED 2-TILE BANNER HIERARCHY:
+            # Entire unit cluster is dynamically scaled to fit within ~2 tiles width
+            # across all zoom levels, keeping all standards visible and proportional.
             # -------------------------------------------------------------
+            n_sub = len(army.sub_flags)
+
+            # Main banner dimensions
+            if n_sub == 0:
+                cw_main = max(16, int(26 * tile_scale))
+                ch_main = max(11, int(18 * tile_scale))
+                pole_h_main = max(22, int(34 * tile_scale))
+            else:
+                cw_main = max(15, int(22 * tile_scale))
+                ch_main = max(10, int(15 * tile_scale))
+                pole_h_main = max(20, int(30 * tile_scale))
+
+            # Sub-banner dimensions (scaled slightly if army has many merged contingents)
+            if n_sub <= 2:
+                sub_factor = 1.0
+            else:
+                sub_factor = max(0.68, 1.0 - (n_sub - 2) * 0.05)
+
+            cw_sub = max(9, int(14 * tile_scale * sub_factor))
+            ch_sub = max(6, int(10 * tile_scale * sub_factor))
+            pole_h_sub = max(13, int(20 * tile_scale * sub_factor))
+
             banner_draw_queue = []
             # Grand standard in center (dy = 0)
-            banner_draw_queue.append((0, True, army.flag_origin, cx, cy, 0))
+            banner_draw_queue.append((0, True, army.flag_origin, cx, cy, 0, cw_main, ch_main, pole_h_main))
 
-            # All secondary contingents encircling the grand standard
+            # Sub contingents encircling the grand standard within the 2-tile footprint
             for idx, sf in enumerate(army.sub_flags):
-                dx, dy = SUB_FLAG_OFFSETS[idx % len(SUB_FLAG_OFFSETS)]
-                mult = 1.0 + (idx // len(SUB_FLAG_OFFSETS)) * 0.25
-                cur_dx = int(dx * mult)
-                cur_dy = int(dy * mult)
-                banner_draw_queue.append((cur_dy, False, sf, cx + cur_dx, cy + cur_dy, (idx + 1) * 750))
+                side = -1 if (idx % 2 == 0) else 1
+                rank = idx // 2
+                
+                if rank == 0:
+                    dx = int(side * curr_tile_w * 0.28)
+                    dy = int(2 * tile_scale)
+                elif rank == 1:
+                    dx = int(side * curr_tile_w * 0.52)
+                    dy = int(-3 * tile_scale)
+                elif rank == 2:
+                    dx = int(side * curr_tile_w * 0.70)
+                    dy = int(1 * tile_scale)
+                elif rank == 3:
+                    dx = int(side * curr_tile_w * 0.38)
+                    dy = int(-8 * tile_scale)
+                else:
+                    dx = int(side * curr_tile_w * (0.50 + (rank % 3) * 0.12))
+                    dy = int(-6 * tile_scale)
+
+                banner_draw_queue.append((dy, False, sf, cx + dx, cy + dy, (idx + 1) * 750, cw_sub, ch_sub, pole_h_sub))
 
             # Sort by depth so background banners render behind foreground banners
             banner_draw_queue.sort(key=lambda b: b[0])
 
-            for dy, is_main, f_id, px, py, t_off in banner_draw_queue:
-                if is_main:
-                    c_surf = banner_cloth_large.get(f_id, banner_cloth_large.get("wessex"))
-                    draw_waving_banner(screen, c_surf, px, py, pole_h=42, ticks=anim_ticks, amp=3.2, freq=0.25, is_main=True)
-                else:
-                    c_surf = banner_cloth_small.get(f_id, banner_cloth_small.get("wessex"))
-                    draw_waving_banner(screen, c_surf, px, py, pole_h=26, ticks=anim_ticks + t_off, amp=2.0, freq=0.30, is_main=False)
+            for dy, is_main, f_id, px, py, t_off, b_cw, b_ch, b_ph in banner_draw_queue:
+                c_surf = get_scaled_banner_cloth(f_id, b_cw, b_ch, is_large=is_main)
+                draw_waving_banner(screen, c_surf, px, py, pole_h=b_ph, ticks=anim_ticks + t_off, amp=max(1.2, (3.0 if is_main else 1.8) * (b_cw / 30.0)), freq=0.25 if is_main else 0.30, is_main=is_main)
 
             # -------------------------------------------------------------
             # Sleek Troop Count Pill Under Standard Base (No Clunky Red Box)
@@ -2741,10 +2790,10 @@ def run_game():
 
             lbl = font_xs.render(txt_badge, True, COLOR_TEXT_WHITE if not is_sel_army else (255, 235, 140))
             tw = lbl.get_width()
-            pw = max(42, tw + 12)
+            pw = max(int(36 * tile_scale), tw + 8)
             ph = 16
             px_pill = cx - pw // 2
-            py_pill = cy + 4
+            py_pill = cy + max(2, int(4 * tile_scale))
 
             pill_surf = pygame.Surface((pw, ph), pygame.SRCALPHA)
             pill_surf.fill((*p_bg, 225))
@@ -2753,13 +2802,12 @@ def run_game():
             screen.blit(lbl, (px_pill + (pw - tw) // 2, py_pill + 1))
 
             # Hitbox covering all banners + pill for natural mouse selection
-            all_x = [cx, cx + 34, px_pill, px_pill + pw]
-            for idx, sf in enumerate(army.sub_flags):
-                dx, dy = SUB_FLAG_OFFSETS[idx % len(SUB_FLAG_OFFSETS)]
-                all_x.extend([cx + dx - 2, cx + dx + 20])
+            all_x = [cx, cx + cw_main, px_pill, px_pill + pw]
+            for dy_val, is_m, sf, b_px, b_py, t_off, b_cw, b_ch, b_ph in banner_draw_queue:
+                all_x.extend([b_px - 2, b_px + b_cw + 2])
             min_x = min(all_x) - 4
             max_x = max(all_x) + 4
-            hit_rect = pygame.Rect(min_x, cy - 48, max_x - min_x, (py_pill + ph + 4) - (cy - 48))
+            hit_rect = pygame.Rect(min_x, cy - pole_h_main - 6, max_x - min_x, (py_pill + ph + 4) - (cy - pole_h_main - 6))
 
             is_badge_hover = hit_rect.collidepoint(mouse_pos)
 
