@@ -1274,13 +1274,6 @@ class GameState:
                             for t in h_tiles:
                                 self.settlements[t]["occupied_by"] = a.owner
 
-                            # Viking Plunder Economy
-                            if a.owner == self.enemy_id:
-                                h_type = cur_settlement.get("type", "city")
-                                loot = 30 if h_type in ("city", "town") else (15 if h_type == "fort" else 10)
-                                self.enemy["gold"] = round(self.enemy.get("gold", 100) + loot, 1)
-                                self.logs.append(f"⚔ Viking Raid! Halfdan's warriors plundered +{loot}g from {h_name}!")
-
                             remaining = get_siegeable_holdings(self, a.province, a.owner)
                             if remaining:
                                 self.logs.append(f"Holding Fallen! {a.name} captured {h_name}. {prov['name']} is now contested ({len(remaining)} holding(s) remain)!")
