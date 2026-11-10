@@ -85,12 +85,24 @@ def load_image(subpath, size=None):
     surf.fill((120, 120, 120, 180))
     return surf
 
+import copy
+
 # Load Data
 with open(os.path.join(DATA_DIR, "characters.json"), "r", encoding="utf-8") as f:
-    CHARACTERS = json.load(f)
+    INITIAL_CHARACTERS = json.load(f)
 
 with open(os.path.join(DATA_DIR, "provinces.json"), "r", encoding="utf-8") as f:
-    PROVINCES = json.load(f)
+    INITIAL_PROVINCES = json.load(f)
+
+CHARACTERS = copy.deepcopy(INITIAL_CHARACTERS)
+PROVINCES = copy.deepcopy(INITIAL_PROVINCES)
+
+def reset_global_world_data():
+    """Restores PROVINCES and CHARACTERS dictionaries to pristine AD 867 state."""
+    CHARACTERS.clear()
+    CHARACTERS.update(copy.deepcopy(INITIAL_CHARACTERS))
+    PROVINCES.clear()
+    PROVINCES.update(copy.deepcopy(INITIAL_PROVINCES))
 
 with open(os.path.join(ASSETS_DIR, "map", "britain_map.json"), "r", encoding="utf-8") as f:
     MAP_DATA = json.load(f)
@@ -1039,6 +1051,7 @@ def run_game():
         screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     clock = pygame.time.Clock()
 
+    reset_global_world_data()
     state = GameState()
 
     # Map Rendering Setup
@@ -1413,6 +1426,7 @@ def run_game():
         screen.blit(rst_lbl, (rst_btn.x + (rst_btn.w - rst_lbl.get_width()) // 2, rst_btn.y + 8))
         if mouse_clicked and b_rst_hov:
             # Reinitialize entire game state and 1:1 starter cities matching vassals!
+            reset_global_world_data()
             state = GameState()
             setup_province_starter_cities(state)
             state.logs.append("Game reset to 1 January 867 AD! Vassals & cities synchronized.")
