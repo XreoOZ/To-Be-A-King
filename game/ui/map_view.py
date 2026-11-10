@@ -8,7 +8,8 @@ from game.config import (
     WINDOW_WIDTH, WINDOW_HEIGHT, COLOR_OCEAN, COLOR_PANEL_BORDER, COLOR_WESSEX,
     COLOR_DANELAW, COLOR_GOLD, COLOR_TEXT_WHITE, COLOR_TEXT_MUTED,
     COLOR_TEXT_RED, COLOR_TEXT_GREEN, BASE_TILE_W, BASE_TILE_H,
-    VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y
+    VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y,
+    MAP_VIEWPORT_X, MAP_VIEWPORT_W, PANEL_Y, PANEL_H
 )
 from game.data.provinces import PROVINCES, PROVINCE_FACTION_COLORS
 from game.data.buildings import BUILDING_SPECS
@@ -51,7 +52,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
 
     # 3. CENTER: TERRITORY BALANCE & MAP
     # ---------------------------------------------------------
-    map_bg_rect = pygame.Rect(292, 54, 566, WINDOW_HEIGHT - 60)
+    map_bg_rect = pygame.Rect(MAP_VIEWPORT_X, PANEL_Y, MAP_VIEWPORT_W, PANEL_H)
     pygame.draw.rect(screen, COLOR_OCEAN, map_bg_rect, border_radius=6)
     pygame.draw.rect(screen, COLOR_PANEL_BORDER, map_bg_rect, 2, border_radius=6)
     
@@ -60,9 +61,9 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     danelaw_count = state.get_provinces_count(state.enemy_id)
     total_provs = 12
     
-    bar_x = 310
-    bar_y = 66
-    bar_w = 490
+    bar_x = MAP_VIEWPORT_X + 26
+    bar_y = PANEL_Y + 12
+    bar_w = MAP_VIEWPORT_W - 52
     bar_h = 24
     
     pygame.draw.rect(screen, (25, 30, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
@@ -77,7 +78,9 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     screen.blit(d_lbl, (bar_x + bar_w - d_lbl.get_width() - 10, bar_y + 3))
     
     # Floating Zoom HUD rect anchor
-    hud_rect = pygame.Rect(816, 62, 34, 118)
+    hud_w, hud_h = 36, 118
+    hud_x, hud_y = map_bg_rect.right - 48, bar_y + bar_h + 12
+    hud_rect = pygame.Rect(hud_x, hud_y, hud_w, hud_h)
     
     # Clip all map rendering inside the map viewport
     screen.set_clip(map_bg_rect)
@@ -1007,7 +1010,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     # FLOATING MAP ZOOM & CAMERA CONTROLS HUD
     # ---------------------------------------------------------
     hud_w, hud_h = 36, 118
-    hud_x, hud_y = 816, 62
+    hud_x, hud_y = map_bg_rect.right - 48, bar_y + bar_h + 12
     hud_rect = pygame.Rect(hud_x, hud_y, hud_w, hud_h)
     hud_surf = pygame.Surface((hud_w, hud_h), pygame.SRCALPHA)
     hud_surf.fill((22, 28, 40, 220))

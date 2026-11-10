@@ -4,16 +4,28 @@ Game Configuration, Constants, Colors, and Display Setup
 import os
 import pygame
 
-# Game Window Dimensions
-WINDOW_WIDTH = 1200
-WINDOW_HEIGHT = 720
+# Game Window Dimensions (Full HD 1920x1080)
+WINDOW_WIDTH = 1920
+WINDOW_HEIGHT = 1080
 FPS = 60
 
+# Layout Grid Constants
+HEADER_HEIGHT = 54
+PANEL_MARGIN = 14
+PANEL_L_X = 14
+PANEL_L_W = 420
+PANEL_R_X = 1486
+PANEL_R_W = 420
+MAP_VIEWPORT_X = 444
+MAP_VIEWPORT_W = 1032
+PANEL_Y = 64
+PANEL_H = WINDOW_HEIGHT - 76  # 1004
+
 # Map Viewport & Base Tile Dimensions
-BASE_TILE_W = 34
-BASE_TILE_H = 32
-VIEWPORT_CENTER_X = 575
-VIEWPORT_CENTER_Y = 385
+BASE_TILE_W = 44
+BASE_TILE_H = 42
+VIEWPORT_CENTER_X = MAP_VIEWPORT_X + MAP_VIEWPORT_W // 2  # 960
+VIEWPORT_CENTER_Y = PANEL_Y + PANEL_H // 2                # 566
 
 # Travel & Simulation Constants
 DAYS_PER_TILE = 5  # Number of in-game days it takes to traverse one province

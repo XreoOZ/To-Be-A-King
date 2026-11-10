@@ -3,7 +3,7 @@ Left Panel Component (Player Profile, Armies, Demesne, Vassals, Laws, In/Expense
 """
 import pygame
 from game.config import (
-    WINDOW_HEIGHT, COLOR_PANEL_BG, COLOR_PANEL_BORDER, COLOR_GOLD,
+    WINDOW_HEIGHT, PANEL_L_X, PANEL_L_W, PANEL_Y, PANEL_H, COLOR_PANEL_BG, COLOR_PANEL_BORDER, COLOR_GOLD,
     COLOR_PRESTIGE, COLOR_PIETY, COLOR_TEXT_WHITE, COLOR_TEXT_MUTED,
     COLOR_TEXT_RED, COLOR_TEXT_GREEN, COLOR_BUTTON_NORMAL,
     COLOR_BUTTON_HOVER, COLOR_BUTTON_ACTIVE
@@ -24,12 +24,14 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
 
     # 2. LEFT PANEL: PLAYER RULER & ACTIVE FORCES
     # ---------------------------------------------------------
-    left_panel = pygame.Rect(10, 62, 290, WINDOW_HEIGHT - 72)
+    content_x = PANEL_L_X + 12
+    content_w = PANEL_L_W - 24
+    left_panel = pygame.Rect(PANEL_L_X, PANEL_Y, PANEL_L_W, PANEL_H)
     pygame.draw.rect(screen, COLOR_PANEL_BG, left_panel, border_radius=6)
     pygame.draw.rect(screen, COLOR_PANEL_BORDER, left_panel, 2, border_radius=6)
     
     # Portrait & Wessex Shield (Clickable Ruler Card)
-    r_card_p = pygame.Rect(20, 70, 270, 96)
+    r_card_p = pygame.Rect(content_x, 70, content_w, 98)
     is_rcp_hov = r_card_p.collidepoint(mouse_pos)
     if is_rcp_hov:
         pygame.draw.rect(screen, (45, 55, 75), r_card_p, border_radius=6)
@@ -37,11 +39,11 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
     p_img = portrait_cache.get(state.player_id)
     if p_img:
-        screen.blit(p_img, (25, 75))
-        pygame.draw.rect(screen, COLOR_GOLD, (25, 75, 64, 64), 1)
+        screen.blit(p_img, (content_x + 6, 75))
+        pygame.draw.rect(screen, COLOR_GOLD, (content_x + 6, 75, 64, 64), 1)
     c_img = coa_cache.get(state.player_id)
     if c_img:
-        screen.blit(c_img, (88, 125))
+        screen.blit(c_img, (content_x + 52, 120))
     
     # Ruler Info
     name_surf = font_md.render(state.player["name"], True, COLOR_GOLD if is_rcp_hov else COLOR_TEXT_WHITE)
@@ -49,20 +51,20 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     dynasty_surf = font_sm.render(f"Martial Skill: {state.player['stats']['martial']}", True, COLOR_TEXT_RED)
     age_surf = font_sm.render(f"Age: {state.player['age']} • Gold: {state.player['gold']}", True, COLOR_TEXT_MUTED)
     
-    screen.blit(name_surf, (115, 75))
-    screen.blit(title_surf, (115, 96))
-    screen.blit(dynasty_surf, (115, 116))
-    screen.blit(age_surf, (115, 134))
+    screen.blit(name_surf, (content_x + 85, 75))
+    screen.blit(title_surf, (content_x + 85, 96))
+    screen.blit(dynasty_surf, (content_x + 85, 116))
+    screen.blit(age_surf, (content_x + 85, 134))
     
     if mouse_clicked and is_rcp_hov:
         state.inspecting_ruler = state.player_id
         state.logs.append(f"Inspecting Sovereign Dossier for {state.player['name']}.")
     
     # Realm Mobilization Buttons
-    pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 172), (285, 172), 1)
+    pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 174), (content_x + content_w, 174), 1)
     
     # Raise All Button
-    btn_raise_all = pygame.Rect(25, 185, 125, 36)
+    btn_raise_all = pygame.Rect(content_x, 184, 192, 38)
     is_all_cd = (state.player_raise_cooldown > 0)
     b_hover = btn_raise_all.collidepoint(mouse_pos) and not is_all_cd
     if is_all_cd:
@@ -74,16 +76,18 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     else:
         pygame.draw.rect(screen, (40, 110, 60) if b_hover else (30, 80, 45), btn_raise_all, border_radius=4)
         pygame.draw.rect(screen, COLOR_TEXT_GREEN, btn_raise_all, 1, border_radius=4)
-        screen.blit(font_sm.render("RAISE ALL (R)", True, COLOR_TEXT_WHITE), (35, 193))
+        ra_lbl = font_sm.render("RAISE ALL (R)", True, COLOR_TEXT_WHITE)
+        screen.blit(ra_lbl, (btn_raise_all.x + (btn_raise_all.w - ra_lbl.get_width()) // 2, 194))
         if mouse_clicked and b_hover:
             state.raise_all_levies()
     
     # Disband All Button
-    btn_disband_all = pygame.Rect(160, 185, 125, 36)
+    btn_disband_all = pygame.Rect(content_x + 204, 184, 192, 38)
     b_hover_d = btn_disband_all.collidepoint(mouse_pos)
     pygame.draw.rect(screen, (100, 40, 40) if b_hover_d else (75, 30, 30), btn_disband_all, border_radius=4)
     pygame.draw.rect(screen, COLOR_TEXT_RED, btn_disband_all, 1, border_radius=4)
-    screen.blit(font_sm.render("DISBAND ALL", True, COLOR_TEXT_WHITE), (175, 193))
+    da_lbl = font_sm.render("DISBAND ALL", True, COLOR_TEXT_WHITE)
+    screen.blit(da_lbl, (btn_disband_all.x + (btn_disband_all.w - da_lbl.get_width()) // 2, 194))
     if mouse_clicked and b_hover_d:
         for a in list(state.armies):
             if a.owner == state.player_id:
@@ -93,13 +97,13 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     # Left Panel Sub-Tabs: [ ⚔ Armies ]  [ ♟ Vassals ]  [ ♚ Demesne ]
     #                      [ ⚖ Realm Laws ]     [ ◆ In/Expense ]
     # ---------------------------------------------------------
-    pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 233), (285, 233), 1)
+    pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 232), (content_x + content_w, 232), 1)
     tab_y = 236
-    tab_armies = pygame.Rect(25, tab_y, 84, 25)
-    tab_vassals = pygame.Rect(113, tab_y, 84, 25)
-    tab_demesne = pygame.Rect(201, tab_y, 84, 25)
-    tab_laws = pygame.Rect(25, tab_y + 29, 127, 25)
-    tab_economy = pygame.Rect(156, tab_y + 29, 129, 25)
+    tab_armies = pygame.Rect(content_x, tab_y, 126, 26)
+    tab_vassals = pygame.Rect(content_x + 135, tab_y, 126, 26)
+    tab_demesne = pygame.Rect(content_x + 270, tab_y, 126, 26)
+    tab_laws = pygame.Rect(content_x, tab_y + 30, 193, 26)
+    tab_economy = pygame.Rect(content_x + 203, tab_y + 30, 193, 26)
     
     is_hov_ta = tab_armies.collidepoint(mouse_pos)
     is_hov_tv = tab_vassals.collidepoint(mouse_pos)
@@ -211,7 +215,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         else:
             ay = 330
             for a in player_armies[:3]:
-                a_rect = pygame.Rect(25, ay, 260, 44)
+                a_rect = pygame.Rect(content_x, ay, content_w, 44)
                 is_sel = (a.id == state.selected_army_id)
                 b_hover_a = a_rect.collidepoint(mouse_pos)
                 
@@ -291,7 +295,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 p_name = p_info.get("name", pid).split()[0]
                 p_tiles_cnt = sum(len(it.get("tiles", [])) for it in p_items)
     
-                p_card = pygame.Rect(25, fy, 260, 50)
+                p_card = pygame.Rect(content_x, fy, content_w, 50)
                 is_p_hov = p_card.collidepoint(mouse_pos)
                 is_active_prov = (state.selected_province == pid)
     
@@ -321,22 +325,22 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
             # Bottom Pagination Controls for Province List
             py_btn = 645
-            btn_prev = pygame.Rect(25, py_btn, 80, 26)
-            btn_next = pygame.Rect(205, py_btn, 80, 26)
+            btn_prev = pygame.Rect(content_x, py_btn, 110, 28)
+            btn_next = pygame.Rect(content_x + content_w - 110, py_btn, 110, 28)
             is_prev_hov = btn_prev.collidepoint(mouse_pos)
             is_next_hov = btn_next.collidepoint(mouse_pos)
     
             pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
-            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.demesne_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
+            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.demesne_page > 0 else COLOR_TEXT_MUTED), (btn_prev.x + (btn_prev.w - font_xs.size("PREV")[0]) // 2, py_btn + 6))
     
             pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
-            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.demesne_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
+            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.demesne_page < max_pages - 1 else COLOR_TEXT_MUTED), (btn_next.x + (btn_next.w - font_xs.size("NEXT")[0]) // 2, py_btn + 6))
     
             page_str = f"Page {state.demesne_page + 1}/{max_pages}"
             p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
-            screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
+            screen.blit(p_lbl, (content_x + (content_w - p_lbl.get_width()) // 2, py_btn + 6))
     
             if mouse_clicked and is_prev_hov and state.demesne_page > 0:
                 state.demesne_page -= 1
@@ -375,7 +379,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
             fy = 328
             for f in cur_page_fiefs:
-                f_rect = pygame.Rect(25, fy, 260, 50)
+                f_rect = pygame.Rect(content_x, fy, content_w, 50)
                 is_sel = (f["id"] == state.selected_fief_id or (not f["is_fief"] and f.get("tiles") and state.selected_settlement in f["tiles"]))
                 b_hover_f = f_rect.collidepoint(mouse_pos)
     
@@ -422,23 +426,23 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
             # Bottom Pagination Controls for Fiefs in this Province
             py_btn = 645
-            btn_prev = pygame.Rect(25, py_btn, 80, 26)
-            btn_next = pygame.Rect(205, py_btn, 80, 26)
+            btn_prev = pygame.Rect(content_x, py_btn, 110, 28)
+            btn_next = pygame.Rect(content_x + content_w - 110, py_btn, 110, 28)
     
             is_prev_hov = btn_prev.collidepoint(mouse_pos)
             is_next_hov = btn_next.collidepoint(mouse_pos)
     
             pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
-            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.demesne_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
+            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.demesne_page > 0 else COLOR_TEXT_MUTED), (btn_prev.x + (btn_prev.w - font_xs.size("PREV")[0]) // 2, py_btn + 6))
     
             pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
-            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.demesne_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
+            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.demesne_page < max_pages - 1 else COLOR_TEXT_MUTED), (btn_next.x + (btn_next.w - font_xs.size("NEXT")[0]) // 2, py_btn + 6))
     
             page_str = f"Page {state.demesne_page + 1}/{max_pages}"
             p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
-            screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
+            screen.blit(p_lbl, (content_x + (content_w - p_lbl.get_width()) // 2, py_btn + 6))
     
             if mouse_clicked and is_prev_hov and state.demesne_page > 0:
                 state.demesne_page -= 1
@@ -466,7 +470,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         
         vy = 328
         for v_pid, v_data in cur_page_vassals:
-            v_card = pygame.Rect(25, vy, 260, 50)
+            v_card = pygame.Rect(content_x, vy, content_w, 50)
             is_vc_hov = v_card.collidepoint(mouse_pos)
             pygame.draw.rect(screen, (50, 60, 78) if is_vc_hov else (34, 40, 52), v_card, border_radius=4)
             pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
@@ -474,7 +478,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             prov_short = PROVINCES[v_pid]["name"].split()[0]
             screen.blit(font_xs.render(f"♟ {v_data['name']}", True, COLOR_GOLD), (32, vy + 4))
             p_tag = font_xs.render(f"[{prov_short}]", True, (140, 200, 255))
-            screen.blit(p_tag, (280 - p_tag.get_width(), vy + 4))
+            screen.blit(p_tag, (content_x + content_w - p_tag.get_width() - 8, vy + 4))
             
             st = get_vassal_landed_status(state, v_data, v_pid)
             h_name = v_data.get("city_name") if st["is_landed"] else "Landless Noble (Unlanded)"
@@ -495,23 +499,23 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             
         # Pagination Controls at bottom
         py_btn = 645
-        btn_prev = pygame.Rect(25, py_btn, 80, 26)
-        btn_next = pygame.Rect(205, py_btn, 80, 26)
+        btn_prev = pygame.Rect(content_x, py_btn, 110, 28)
+        btn_next = pygame.Rect(content_x + content_w - 110, py_btn, 110, 28)
         
         is_prev_hov = btn_prev.collidepoint(mouse_pos)
         is_next_hov = btn_next.collidepoint(mouse_pos)
         
         pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
-        screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.vassal_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
+        screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.vassal_page > 0 else COLOR_TEXT_MUTED), (btn_prev.x + (btn_prev.w - font_xs.size("PREV")[0]) // 2, py_btn + 6))
         
         pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
-        screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.vassal_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
+        screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.vassal_page < max_pages - 1 else COLOR_TEXT_MUTED), (btn_next.x + (btn_next.w - font_xs.size("NEXT")[0]) // 2, py_btn + 6))
         
         page_str = f"Page {state.vassal_page + 1}/{max_pages}"
         p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
-        screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
+        screen.blit(p_lbl, (content_x + (content_w - p_lbl.get_width()) // 2, py_btn + 6))
         
         if mouse_clicked and is_prev_hov and state.vassal_page > 0:
             state.vassal_page -= 1
@@ -528,7 +532,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         # -------------------------------------------------------------
         # Universal Realm Law Enactment Bar ("STANDARDIZE ALL")
         # -------------------------------------------------------------
-        uni_rect = pygame.Rect(25, 298, 260, 56)
+        uni_rect = pygame.Rect(content_x, 298, content_w, 56)
         pygame.draw.rect(screen, (32, 38, 50), uni_rect, border_radius=5)
         pygame.draw.rect(screen, (70, 95, 130), uni_rect, 1, border_radius=5)
     
@@ -544,7 +548,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         btn_uni_l_inc = pygame.Rect(222, 303, 16, 17)
     
         # Row 2: Standardize All Button
-        btn_uni_apply = pygame.Rect(31, 326, 248, 22)
+        btn_uni_apply = pygame.Rect(content_x + 6, 326, content_w - 12, 22)
     
         hov_uni_t_dec = btn_uni_t_dec.collidepoint(mouse_pos)
         hov_uni_t_inc = btn_uni_t_inc.collidepoint(mouse_pos)
@@ -648,7 +652,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         p_top_str = f"{state.laws_page + 1}/{max_pages}"
         p_top_lbl = font_xs.render(p_top_str, True, COLOR_TEXT_MUTED)
         screen.blit(p_top_lbl, (244 - p_top_lbl.get_width() // 2, 361))
-        screen.blit(font_xs.render(">", True, p_top_next_col), (273, 361))
+        screen.blit(font_xs.render(">", True, p_top_next_col), (content_x + content_w - 14, 361))
     
         if mouse_clicked and is_top_prev_hov and state.laws_page > 0:
             state.laws_page -= 1
@@ -660,7 +664,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
         vy = 380
         for v_pid, v_data in cur_page_vassals:
-            v_card = pygame.Rect(25, vy, 260, 74)
+            v_card = pygame.Rect(content_x, vy, content_w, 74)
             is_vc_hov = v_card.collidepoint(mouse_pos)
             pygame.draw.rect(screen, (46, 54, 70) if is_vc_hov else (32, 38, 50), v_card, border_radius=5)
             pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=5)
@@ -671,7 +675,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 lord_name = lord_name[:21] + ".."
             screen.blit(font_xs.render(f"♟ {lord_name}", True, COLOR_GOLD), (32, vy + 4))
             p_tag = font_xs.render(f"[{prov_short}]", True, (140, 200, 255))
-            screen.blit(p_tag, (280 - p_tag.get_width(), vy + 4))
+            screen.blit(p_tag, (content_x + content_w - p_tag.get_width() - 8, vy + 4))
     
             st = get_vassal_landed_status(state, v_data, v_pid)
             h_name = v_data.get("city_name") if st["is_landed"] else "Landless Noble"
@@ -681,7 +685,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
             # Lock Button at top right of card
             is_locked = v_data.get("laws_locked", v_data.get("tax_locked", False) or v_data.get("levy_locked", False))
-            btn_lock = pygame.Rect(196, vy + 18, 84, 16)
+            btn_lock = pygame.Rect(content_x + content_w - 92, vy + 18, 86, 18)
             hov_lock = btn_lock.collidepoint(mouse_pos)
     
             lock_bg = (65, 50, 20) if is_locked else ((45, 52, 68) if hov_lock else (28, 34, 46))
@@ -813,23 +817,23 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
         # Bottom Pagination Controls (py_btn = 618)
         py_btn = 618
-        btn_prev = pygame.Rect(25, py_btn, 80, 26)
-        btn_next = pygame.Rect(205, py_btn, 80, 26)
+        btn_prev = pygame.Rect(content_x, py_btn, 110, 28)
+        btn_next = pygame.Rect(content_x + content_w - 110, py_btn, 110, 28)
     
         is_prev_hov = btn_prev.collidepoint(mouse_pos)
         is_next_hov = btn_next.collidepoint(mouse_pos)
     
         pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
-        screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.laws_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
+        screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.laws_page > 0 else COLOR_TEXT_MUTED), (btn_prev.x + (btn_prev.w - font_xs.size("PREV")[0]) // 2, py_btn + 6))
     
         pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
-        screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.laws_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
+        screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.laws_page < max_pages - 1 else COLOR_TEXT_MUTED), (btn_next.x + (btn_next.w - font_xs.size("NEXT")[0]) // 2, py_btn + 6))
     
         page_str = f"Page {state.laws_page + 1}/{max_pages}"
         p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
-        screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
+        screen.blit(p_lbl, (content_x + (content_w - p_lbl.get_width()) // 2, py_btn + 6))
     
         if mouse_clicked and is_prev_hov and state.laws_page > 0:
             state.laws_page -= 1
@@ -841,7 +845,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         fin = get_realm_finances(state, state.player_id)
     
         # 1. Summary Treasury Card (y = 298 to 364)
-        sum_card = pygame.Rect(25, 298, 260, 66)
+        sum_card = pygame.Rect(content_x, 298, content_w, 66)
         pygame.draw.rect(screen, (34, 42, 56), sum_card, border_radius=6)
         pygame.draw.rect(screen, COLOR_GOLD, sum_card, 1, border_radius=6)
     
@@ -861,8 +865,8 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         if not hasattr(state, "economy_subtab") or state.economy_subtab not in ("income", "expense"):
             state.economy_subtab = "income"
     
-        tab_inc = pygame.Rect(25, 370, 128, 24)
-        tab_exp = pygame.Rect(157, 370, 128, 24)
+        tab_inc = pygame.Rect(content_x, 370, 193, 26)
+        tab_exp = pygame.Rect(content_x + 203, 370, 193, 26)
     
         is_inc_active = (state.economy_subtab == "income")
         is_exp_active = (state.economy_subtab == "expense")
@@ -892,7 +896,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             # INCOME BREAKDOWN
             # -------------------------------------------------------------
             # 1. Provincial Land Tax & Customs Card (y = 400, h = 92)
-            card_p = pygame.Rect(25, 400, 260, 92)
+            card_p = pygame.Rect(content_x, 400, content_w, 92)
             pygame.draw.rect(screen, (32, 38, 50), card_p, border_radius=5)
             pygame.draw.rect(screen, (80, 110, 150), card_p, 1, border_radius=5)
     
@@ -918,7 +922,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             screen.blit(font_xs.render("Tip: Upgrade towns to increase province wealth", True, (150, 180, 210)), (32, 474))
     
             # 2. Feudal Vassal Tithes Card (y = 498, h = 118)
-            card_v = pygame.Rect(25, 498, 260, 118)
+            card_v = pygame.Rect(content_x, 498, content_w, 118)
             pygame.draw.rect(screen, (32, 38, 50), card_v, border_radius=5)
             pygame.draw.rect(screen, (80, 110, 150), card_v, 1, border_radius=5)
     
@@ -963,7 +967,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             screen.blit(font_xs.render("Adjust individual rates under [ ⚖ LAWS ] tab", True, COLOR_GOLD), (34, 596))
     
             # 3. Direct Crown Demesne Revenue Card (y = 622, h = 54)
-            card_c = pygame.Rect(25, 622, 260, 54)
+            card_c = pygame.Rect(content_x, 622, content_w, 54)
             pygame.draw.rect(screen, (32, 38, 50), card_c, border_radius=5)
             pygame.draw.rect(screen, (80, 110, 150), card_c, 1, border_radius=5)
     
@@ -984,7 +988,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             # EXPENSES BREAKDOWN
             # -------------------------------------------------------------
             # 1. Army Field Mobilization Upkeep Card (y = 400, h = 112)
-            card_a = pygame.Rect(25, 400, 260, 112)
+            card_a = pygame.Rect(content_x, 400, content_w, 112)
             pygame.draw.rect(screen, (42, 34, 38), card_a, border_radius=5)
             pygame.draw.rect(screen, (150, 80, 80), card_a, 1, border_radius=5)
     
@@ -1013,7 +1017,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 screen.blit(font_xs.render("  (0 active field armies = 0g upkeep)", True, COLOR_TEXT_MUTED), (34, 462))
     
             # 2. Military Facilities & Barracks Upkeep Card (y = 518, h = 82)
-            card_b = pygame.Rect(25, 518, 260, 82)
+            card_b = pygame.Rect(content_x, 518, content_w, 82)
             pygame.draw.rect(screen, (42, 34, 38), card_b, border_radius=5)
             pygame.draw.rect(screen, (150, 80, 80), card_b, 1, border_radius=5)
     
@@ -1033,7 +1037,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 screen.blit(font_xs.render("• Standard wooden palisades (0g additional upkeep)", True, COLOR_TEXT_MUTED), (34, 558))
     
             # 3. Monthly Financial Statement Card (y = 606, h = 70)
-            card_s = pygame.Rect(25, 606, 260, 70)
+            card_s = pygame.Rect(content_x, 606, content_w, 70)
             pygame.draw.rect(screen, (32, 40, 52), card_s, border_radius=5)
             pygame.draw.rect(screen, COLOR_GOLD, card_s, 1, border_radius=5)
     

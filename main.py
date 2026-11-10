@@ -31,6 +31,7 @@ from game.config import (
     COLOR_TEXT_MUTED, COLOR_TEXT_RED, COLOR_TEXT_GREEN, COLOR_BUTTON_NORMAL,
     COLOR_BUTTON_HOVER, COLOR_BUTTON_ACTIVE, COLOR_OCEAN, COLOR_WESSEX,
     COLOR_DANELAW, BASE_TILE_W, BASE_TILE_H, VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y,
+    PANEL_L_X, PANEL_L_W, PANEL_R_X, PANEL_R_W, MAP_VIEWPORT_X, MAP_VIEWPORT_W, PANEL_Y, PANEL_H,
     maximize_window, get_fonts
 )
 from game.data.characters import CHARACTERS, INITIAL_CHARACTERS, get_character
@@ -96,7 +97,7 @@ def run_game():
     state = GameState()
     setup_province_starter_cities(state)
 
-    map_viewport = pygame.Rect(290, 53, 570, WINDOW_HEIGHT - 53)
+    map_viewport = pygame.Rect(MAP_VIEWPORT_X, PANEL_Y, MAP_VIEWPORT_W, PANEL_H)
 
     running = True
     box_start = None
@@ -121,8 +122,8 @@ def run_game():
                 running = False
 
             elif event.type == pygame.MOUSEWHEEL:
-                r_panel_rect = pygame.Rect(860, 62, 330, WINDOW_HEIGHT - 72)
-                l_panel_rect = pygame.Rect(10, 62, 290, WINDOW_HEIGHT - 72)
+                r_panel_rect = pygame.Rect(PANEL_R_X, PANEL_Y, PANEL_R_W, PANEL_H)
+                l_panel_rect = pygame.Rect(PANEL_L_X, PANEL_Y, PANEL_L_W, PANEL_H)
                 if r_panel_rect.collidepoint(mouse_pos) and state.right_tab == "fiefs":
                     if event.y > 0:
                         state.fief_page = max(0, state.fief_page - 1)

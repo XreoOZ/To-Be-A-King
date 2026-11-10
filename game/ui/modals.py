@@ -282,7 +282,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         dim_surf.fill((0, 0, 0, 185))
         screen.blit(dim_surf, (0, 0))
     
-        pop_w, pop_h = 680, 530
+        pop_w, pop_h = 780, 540
         pop_x = (WINDOW_WIDTH - pop_w) // 2
         pop_y = (WINDOW_HEIGHT - pop_h) // 2
         pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
@@ -364,7 +364,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             screen.blit(font_xs.render(s_sub, True, (120, 160, 200)), (bx + 48, by + 22))
     
         # Two Main Columns: Economy & Treasury (Left), Military & Fiefs (Right)
-        col_w = 305
+        col_w = 355
         col_y = pop_y + 194
     
         # LEFT COLUMN: ECONOMY & INCOME ("income etc seluruhnya")
@@ -385,9 +385,9 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             
             # Interactive Tax Controls in Dossier (Player only)
             if not is_enemy:
-                d_t_dec = pygame.Rect(pop_x + 214, col_y + 102, 16, 16)
-                d_t_inc = pygame.Rect(pop_x + 232, col_y + 102, 16, 16)
-                d_t_lock = pygame.Rect(pop_x + 250, col_y + 102, 68, 16)
+                d_t_dec = pygame.Rect(pop_x + 25 + col_w - 105, col_y + 102, 16, 16)
+                d_t_inc = pygame.Rect(pop_x + 25 + col_w - 86, col_y + 102, 16, 16)
+                d_t_lock = pygame.Rect(pop_x + 25 + col_w - 66, col_y + 102, 62, 16)
     
                 h_t_dec = d_t_dec.collidepoint(mouse_pos)
                 h_t_inc = d_t_inc.collidepoint(mouse_pos)
@@ -396,11 +396,11 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                 is_t_locked = v_obj.get("tax_locked", False)
                 pygame.draw.rect(screen, (70, 80, 100) if h_t_dec else (42, 48, 62), d_t_dec, border_radius=3)
                 pygame.draw.rect(screen, COLOR_PANEL_BORDER, d_t_dec, 1, border_radius=3)
-                screen.blit(font_xs.render("-", True, COLOR_TEXT_WHITE), (pop_x + 219, col_y + 101))
+                screen.blit(font_xs.render("-", True, COLOR_TEXT_WHITE), (d_t_dec.x + 5, col_y + 101))
     
                 pygame.draw.rect(screen, (70, 80, 100) if h_t_inc else (42, 48, 62), d_t_inc, border_radius=3)
                 pygame.draw.rect(screen, COLOR_PANEL_BORDER, d_t_inc, 1, border_radius=3)
-                screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE), (pop_x + 236, col_y + 101))
+                screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE), (d_t_inc.x + 4, col_y + 101))
     
                 l_t_bg = (65, 50, 20) if is_t_locked else ((45, 52, 68) if h_t_lock else (28, 34, 46))
                 l_t_bd = COLOR_GOLD if is_t_locked else ((120, 160, 210) if h_t_lock else (70, 80, 95))
@@ -475,15 +475,15 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         screen.blit(font_xs.render(status_str, True, COLOR_GOLD if v_gold_val >= target_cost else (180, 190, 205)), (pop_x + 40, col_y + 212))
     
         # RIGHT COLUMN: MILITARY & DOMAIN ("keseluruhan kekuasaan dia")
-        right_rect = pygame.Rect(pop_x + 350, col_y, col_w, 245)
+        right_rect = pygame.Rect(pop_x + 400, col_y, col_w, 245)
         pygame.draw.rect(screen, (30, 36, 48), right_rect, border_radius=6)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, right_rect, 1, border_radius=6)
     
-        screen.blit(font_md.render("⚔ Military Duty & Fiefdoms", True, COLOR_GOLD), (pop_x + 360, col_y + 10))
-        pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 360, col_y + 32), (pop_x + 360 + col_w - 20, col_y + 32), 1)
+        screen.blit(font_md.render("⚔ Military Duty & Fiefdoms", True, COLOR_GOLD), (pop_x + 415, col_y + 10))
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 415, col_y + 32), (pop_x + 415 + col_w - 30, col_y + 32), 1)
     
         if is_landed:
-            screen.blit(font_sm.render(f"Fyrd Levies ({levy_rate}%): +{levies_contrib} Soldiers", True, COLOR_TEXT_GREEN), (pop_x + 365, col_y + 40))
+            screen.blit(font_sm.render(f"Fyrd Levies ({levy_rate}%): +{levies_contrib} Soldiers", True, COLOR_TEXT_GREEN), (pop_x + 415, col_y + 40))
     
             # Interactive Levy Controls in Dossier (Player only)
             if not is_enemy:
@@ -536,7 +536,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             screen.blit(font_xs.render(service_text, True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 98))
             screen.blit(font_xs.render(f"• Fiefdoms Controlled: {len(held_fiefs)} Fief(s) ({total_held_tiles} Tiles)", True, (150, 215, 255)), (pop_x + 365, col_y + 114))
         else:
-            screen.blit(font_sm.render(f"Fyrd Levies ({levy_rate}%): 0 Soldiers", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 40))
+            screen.blit(font_sm.render(f"Fyrd Levies ({levy_rate}%): 0 Soldiers", True, COLOR_TEXT_MUTED), (pop_x + 415, col_y + 40))
             screen.blit(font_xs.render("• Household Guards: None (Unlanded)", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 66))
             screen.blit(font_xs.render("• Total Domain Force: 0 Men", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 82))
             screen.blit(font_xs.render("• Feudal Service: Awaiting royal fief or title", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 98))
@@ -595,7 +595,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         dim_surf.fill((0, 0, 0, 185))
         screen.blit(dim_surf, (0, 0))
     
-        pop_w, pop_h = 680, 500
+        pop_w, pop_h = 780, 520
         pop_x = (WINDOW_WIDTH - pop_w) // 2
         pop_y = (WINDOW_HEIGHT - pop_h) // 2
         pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
@@ -656,7 +656,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             screen.blit(font_xs.render(s_sub, True, (120, 160, 200)), (bx + 48, by + 22))
     
         # Two Main Columns: Economy & Treasury (Left), Military & Fiefs (Right)
-        col_w = 305
+        col_w = 355
         col_y = pop_y + 194
     
         # Calculate ruler's realm stats
@@ -704,12 +704,12 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         pygame.draw.rect(screen, (30, 36, 48), right_rect, border_radius=6)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, right_rect, 1, border_radius=6)
     
-        screen.blit(font_md.render("⚔ Military Might & Feudal Roster", True, COLOR_GOLD), (pop_x + 360, col_y + 10))
-        pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 360, col_y + 32), (pop_x + 360 + col_w - 20, col_y + 32), 1)
+        screen.blit(font_md.render("⚔ Military Might & Feudal Roster", True, COLOR_GOLD), (pop_x + 415, col_y + 10))
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 415, col_y + 32), (pop_x + 415 + col_w - 30, col_y + 32), 1)
     
-        screen.blit(font_sm.render(f"Available Levies: {total_garrison:,} Men", True, COLOR_TEXT_GREEN), (pop_x + 365, col_y + 40))
+        screen.blit(font_sm.render(f"Available Levies: {total_garrison:,} Men", True, COLOR_TEXT_GREEN), (pop_x + 415, col_y + 40))
         screen.blit(font_xs.render(f"• Active Armies in Field: {total_armies_count} Hosts ({total_field:,} Men)", True, (255, 200, 120)), (pop_x + 365, col_y + 66))
-        screen.blit(font_xs.render(f"• Sworn Feudal Lords: {len(r_vassals)} Vassals", True, COLOR_TEXT_WHITE), (pop_x + 365, col_y + 88))
+        screen.blit(font_xs.render(f"• Sworn Feudal Lords: {len(r_vassals)} Vassals", True, COLOR_TEXT_WHITE), (pop_x + 415, col_y + 88))
         screen.blit(font_xs.render(f"• Capital Province: {'Jorvik (York)' if is_ruler_enemy else 'Wessex (Winchester)'}", True, (150, 215, 255)), (pop_x + 365, col_y + 110))
         
         # Vassals preview list
