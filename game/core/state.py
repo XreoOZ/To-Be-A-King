@@ -837,15 +837,23 @@ class GameState:
         contingents_to_disband = []
         if army.sub_flags:
             n_contingents = len(army.sub_flags) + 1
+            total_crown = min(army.troops, getattr(army, "crown_troops", 0))
+            crown_share = total_crown // n_contingents
+            dom_crown = total_crown - (crown_share * len(army.sub_flags))
+
             share = army.troops // n_contingents
             dom_troops = army.troops - (share * len(army.sub_flags))
             army.troops = dom_troops
+            army.crown_troops = dom_crown
+            army.vassal_levies = max(0, dom_troops - dom_crown)
             
             for sf in army.sub_flags:
                 new_id = f"army_{self.army_id_counter}"
                 self.army_id_counter += 1
                 p_short = PROVINCES[sf]["name"].split()[0]
                 sf_host = Army(new_id, army.owner, army.province, share, f"{p_short} Fyrd", flag_origin=sf, tile=army.tile)
+                sf_host.crown_troops = crown_share
+                sf_host.vassal_levies = max(0, share - crown_share)
                 self.armies.append(sf_host)
                 contingents_to_disband.append(sf_host)
                 
@@ -1147,12 +1155,12 @@ class GameState:
                 prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + recruits)
 
         # Army upkeep cost (1 gold per 100 Crown Demesne troops; Feudal Vassal Levies are FREE!)
-        player_crown_field = sum(getattr(a, "crown_troops", 0) for a in self.armies if a.owner == self.player_id)
-        upkeep = player_crown_field // 100
+        player_crown_field = sum(min(a.troops, getattr(a, "crown_troops", 0)) for a in self.armies if a.owner == self.player_id)
+        upkeep = max(0, int(round(player_crown_field / 100.0)))
         self.player["gold"] = max(0, self.player["gold"] - upkeep)
 
-        enemy_crown_field = sum(getattr(a, "crown_troops", 0) for a in self.armies if a.owner == self.enemy_id)
-        enemy_upkeep = enemy_crown_field // 100
+        enemy_crown_field = sum(min(a.troops, getattr(a, "crown_troops", 0)) for a in self.armies if a.owner == self.enemy_id)
+        enemy_upkeep = max(0, int(round(enemy_crown_field / 100.0)))
         self.enemy["gold"] = max(0, self.enemy["gold"] - enemy_upkeep)
 
         self.player["prestige"] += 1
@@ -1358,20 +1366,53 @@ class GameState:
                 a.is_mustering = False
 
             # One combat round per game-tick
-            alfred_martial  = self.player["stats"]["martial"]
-            halfdan_martial = self.enemy["stats"]["martial"]
+            p_martial = CHARACTERS.get(self.player_id, {}).get("stats", {}).get("martial", 10)
+            e_martial = CHARACTERS.get(self.enemy_id, {}).get("stats", {}).get("martial", 10)
 
-            dmg_to_a2 = max(1, int(a1.troops * 0.08 * (1 + alfred_martial * 0.02))  + random.randint(10, 50))
-            dmg_to_a1 = max(1, int(a2.troops * 0.08 * (1 + halfdan_martial * 0.02)) + random.randint(10, 50))
+            dmg_to_a2 = max(1, int(a1.troops * 0.08 * (1 + p_martial * 0.02))  + random.randint(10, 50))
+            dmg_to_a1 = max(1, int(a2.troops * 0.08 * (1 + e_martial * 0.02)) + random.randint(10, 50))
 
-            a1.troops = max(0, a1.troops - dmg_to_a1)
-            a2.troops = max(0, a2.troops - dmg_to_a2)
-            if a1.troops > 0:
-                a1.crown_troops = min(getattr(a1, "crown_troops", 0), a1.troops)
-                a1.vassal_levies = a1.troops - a1.crown_troops
-            if a2.troops > 0:
-                a2.crown_troops = min(getattr(a2, "crown_troops", 0), a2.troops)
-                a2.vassal_levies = a2.troops - a2.crown_troops
+            # Apply proportional casualties to both Crown Troops and Vassal Levies in a1
+            actual_loss_1 = min(a1.troops, dmg_to_a1)
+            prev_troops_1 = a1.troops
+            prev_crown_1 = min(prev_troops_1, getattr(a1, "crown_troops", 0))
+            prev_vassal_1 = max(0, prev_troops_1 - prev_crown_1)
+            if prev_troops_1 > 0:
+                crown_loss_1 = int(round(actual_loss_1 * (prev_crown_1 / float(prev_troops_1))))
+                crown_loss_1 = min(prev_crown_1, crown_loss_1)
+                vassal_loss_1 = actual_loss_1 - crown_loss_1
+                if vassal_loss_1 > prev_vassal_1:
+                    excess = vassal_loss_1 - prev_vassal_1
+                    vassal_loss_1 = prev_vassal_1
+                    crown_loss_1 = min(prev_crown_1, crown_loss_1 + excess)
+            else:
+                crown_loss_1 = 0
+                vassal_loss_1 = 0
+
+            a1.troops = max(0, prev_troops_1 - actual_loss_1)
+            a1.crown_troops = max(0, prev_crown_1 - crown_loss_1)
+            a1.vassal_levies = max(0, a1.troops - a1.crown_troops)
+
+            # Apply proportional casualties to both Crown Troops and Vassal Levies in a2
+            actual_loss_2 = min(a2.troops, dmg_to_a2)
+            prev_troops_2 = a2.troops
+            prev_crown_2 = min(prev_troops_2, getattr(a2, "crown_troops", 0))
+            prev_vassal_2 = max(0, prev_troops_2 - prev_crown_2)
+            if prev_troops_2 > 0:
+                crown_loss_2 = int(round(actual_loss_2 * (prev_crown_2 / float(prev_troops_2))))
+                crown_loss_2 = min(prev_crown_2, crown_loss_2)
+                vassal_loss_2 = actual_loss_2 - crown_loss_2
+                if vassal_loss_2 > prev_vassal_2:
+                    excess = vassal_loss_2 - prev_vassal_2
+                    vassal_loss_2 = prev_vassal_2
+                    crown_loss_2 = min(prev_crown_2, crown_loss_2 + excess)
+            else:
+                crown_loss_2 = 0
+                vassal_loss_2 = 0
+
+            a2.troops = max(0, prev_troops_2 - actual_loss_2)
+            a2.crown_troops = max(0, prev_crown_2 - crown_loss_2)
+            a2.vassal_levies = max(0, a2.troops - a2.crown_troops)
 
             p_name = PROVINCES.get(a1.province, {}).get("name", "the realm")
             if a1.troops <= 0 and a2.troops <= 0:

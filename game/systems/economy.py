@@ -359,9 +359,11 @@ def get_realm_finances(state, char_id=None):
     total_army_upkeep = 0
     for a in state.armies:
         if a.owner == char_id:
-            c_tr = getattr(a, "crown_troops", 0)
-            v_tr = getattr(a, "vassal_levies", max(0, a.troops - c_tr))
-            cost = c_tr // 100
+            c_tr = min(a.troops, getattr(a, "crown_troops", 0))
+            a.crown_troops = c_tr
+            v_tr = max(0, a.troops - c_tr)
+            a.vassal_levies = v_tr
+            cost = max(0, int(round(c_tr / 100.0)))
             total_army_upkeep += cost
             army_expenses.append({
                 "name": a.name,
