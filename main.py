@@ -447,10 +447,16 @@ class Army:
         self.target_city = None
         self.siege_target_name = None
         
-        # Mobilization & Demobilization
+        # Mobilization, Royal Courier Summons & Demobilization
         self.is_mustering = False
         self.muster_days = 0
         self.is_demobilizing = False
+        self.courier_en_route = False
+        self.courier_path = []
+        self.courier_current_prov = None
+        self.courier_next_prov = None
+        self.courier_progress = 0.0
+        self.courier_days_left = 0
 
     @property
     def is_moving(self):
@@ -871,7 +877,7 @@ def get_realm_finances(state, char_id=None):
                 "name": a.name,
                 "troops": a.troops,
                 "cost": cost,
-                "status": "Mustering" if a.is_mustering else ("In Battle" if a.in_battle else "Mobilized")
+                "status": "Courier En Route" if a.courier_en_route else ("Mustering" if a.is_mustering else ("In Battle" if a.in_battle else "Mobilized"))
             })
 
     # 5. Barracks & Garrison Maintenance
@@ -1111,45 +1117,97 @@ class GameState:
         self.army_id_counter += 1
         
         army_name = f"{prov['name'].split()[0]} Fyrd"
-        is_royal = (province_id == "wessex")
+        capital_pid = "wessex"
+        is_royal = (province_id == capital_pid)
         new_army = Army(army_id, self.player_id, province_id, available, army_name,
                         flag_origin=province_id, rank=3 if is_royal else 1)
-        new_army.is_mustering = True
-        new_army.muster_days = 30
-        self.armies.append(new_army)
         
+        if is_royal:
+            new_army.is_mustering = True
+            new_army.muster_days = 30
+            new_army.courier_en_route = False
+            self.logs.append(f"Summoned {available:,} men in royal capital {prov['name']}! Mustering troops (30 days)...")
+        else:
+            full_route = find_shortest_path(capital_pid, province_id)
+            if full_route and len(full_route) > 1:
+                hops = len(full_route) - 1
+                total_days = hops * DAYS_PER_TILE
+                new_army.courier_en_route = True
+                new_army.courier_path = full_route[1:]
+                new_army.courier_current_prov = full_route[0]
+                new_army.courier_next_prov = full_route[1]
+                new_army.courier_progress = 0.0
+                new_army.courier_days_left = total_days
+                new_army.is_mustering = False
+                new_army.muster_days = 30
+                p_short = prov["name"].split()[0]
+                self.logs.append(f"Royal Courier dispatched from Winchester to {p_short} ({hops} shires away, {total_days}d ride)! 30d muster begins upon arrival.")
+            else:
+                new_army.is_mustering = True
+                new_army.muster_days = 30
+                new_army.courier_en_route = False
+                self.logs.append(f"Summoned {available:,} men in {prov['name']}! Mustering troops (30 days)...")
+
+        self.armies.append(new_army)
         prov["levies_current"] = 0
         self.selected_army_id = army_id
-        self.logs.append(f"Summoned {available:,} men in {prov['name']}! Mustering troops (30 days)...")
 
     def raise_all_levies(self):
         raised_count = 0
         total_men = 0
+        capital_pid = "wessex"
+        courier_count = 0
         for pid, prov in PROVINCES.items():
             if prov["owner"] == self.player_id and prov["levies_current"] > 0:
                 available = prov["levies_current"]
                 army_id = f"army_{self.army_id_counter}"
                 self.army_id_counter += 1
                 army_name = f"{prov['name'].split()[0]} Fyrd"
-                is_royal = (pid == "wessex")
+                is_royal = (pid == capital_pid)
                 new_army = Army(army_id, self.player_id, pid, available, army_name,
                                 flag_origin=pid, rank=3 if is_royal else 1)
-                new_army.is_mustering = True
-                new_army.muster_days = 30
+                
+                if is_royal:
+                    new_army.is_mustering = True
+                    new_army.muster_days = 30
+                    new_army.courier_en_route = False
+                else:
+                    full_route = find_shortest_path(capital_pid, pid)
+                    if full_route and len(full_route) > 1:
+                        hops = len(full_route) - 1
+                        total_days = hops * DAYS_PER_TILE
+                        new_army.courier_en_route = True
+                        new_army.courier_path = full_route[1:]
+                        new_army.courier_current_prov = full_route[0]
+                        new_army.courier_next_prov = full_route[1]
+                        new_army.courier_progress = 0.0
+                        new_army.courier_days_left = total_days
+                        new_army.is_mustering = False
+                        new_army.muster_days = 30
+                        courier_count += 1
+                    else:
+                        new_army.is_mustering = True
+                        new_army.muster_days = 30
+                        new_army.courier_en_route = False
+
                 self.armies.append(new_army)
                 prov["levies_current"] = 0
                 raised_count += 1
                 total_men += available
         
         if raised_count > 0:
-            self.logs.append(f"Mobilized all realm levies: {total_men:,} men in {raised_count} hosts! (Mustering for 30 days)")
+            if courier_count > 0:
+                self.logs.append(f"Royal Couriers dispatched from Winchester to {courier_count} shires! ({total_men:,} total men summoned, 30d muster begins as couriers arrive)")
+            else:
+                self.logs.append(f"Mobilized royal capital levies: {total_men:,} men! (Mustering for 30 days)")
         else:
             self.logs.append("All available levies are already raised.")
 
     def raise_all_enemy_levies(self, is_emergency=False):
-        """Mobilizes ALL available levies across 100% of Danelaw provinces (All-In)."""
+        """Mobilizes ALL available levies across 100% of Danelaw provinces (All-In with war couriers)."""
         raised_count = 0
         total_men = 0
+        capital_pid = "jorvik"
         danelaw_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.enemy_id]
         for pid in danelaw_provs:
             prov = PROVINCES[pid]
@@ -1159,11 +1217,33 @@ class GameState:
                 self.army_id_counter += 1
                 p_short = prov["name"].split()[0]
                 army_name = f"{p_short} Warband"
-                is_royal = (pid == "jorvik")
+                is_royal = (pid == capital_pid)
                 new_army = Army(army_id, self.enemy_id, pid, available, army_name,
                                 flag_origin=pid, rank=3 if is_royal else 1)
-                new_army.is_mustering = True
-                new_army.muster_days = 12 if is_emergency else 20
+                
+                m_days = 12 if is_emergency else 20
+                if is_royal:
+                    new_army.is_mustering = True
+                    new_army.muster_days = m_days
+                    new_army.courier_en_route = False
+                else:
+                    full_route = find_shortest_path(capital_pid, pid)
+                    if full_route and len(full_route) > 1:
+                        hops = len(full_route) - 1
+                        total_days = hops * DAYS_PER_TILE
+                        new_army.courier_en_route = True
+                        new_army.courier_path = full_route[1:]
+                        new_army.courier_current_prov = full_route[0]
+                        new_army.courier_next_prov = full_route[1]
+                        new_army.courier_progress = 0.0
+                        new_army.courier_days_left = total_days
+                        new_army.is_mustering = False
+                        new_army.muster_days = m_days
+                    else:
+                        new_army.is_mustering = True
+                        new_army.muster_days = m_days
+                        new_army.courier_en_route = False
+
                 self.armies.append(new_army)
                 prov["levies_current"] = 0
                 raised_count += 1
@@ -1178,7 +1258,7 @@ class GameState:
 
         rallied = 0
         for a in player_armies:
-            if a.province != target_province_id and not a.in_battle and not a.is_mustering:
+            if a.province != target_province_id and not a.in_battle and not a.is_mustering and not a.courier_en_route:
                 path = find_shortest_path(a.province, target_province_id)
                 if path and len(path) > 1:
                     a.path = path[1:]
@@ -1190,7 +1270,7 @@ class GameState:
         self.logs.append(f"Rally orders issued! {len(player_armies)} hosts marching to {target_name}.")
 
     def merge_armies_in_province(self, province_id, owner_id):
-        armies_here = [a for a in self.armies if a.province == province_id and a.owner == owner_id and not a.is_moving and not a.is_demobilizing and not a.is_mustering]
+        armies_here = [a for a in self.armies if a.province == province_id and a.owner == owner_id and not a.is_moving and not a.is_demobilizing and not a.is_mustering and not a.courier_en_route]
         if len(armies_here) <= 1:
             return
 
@@ -1225,12 +1305,15 @@ class GameState:
             self.logs.append(f"{army.name} is locked in combat and cannot disband!")
             return
 
-        # If mustering, cancel muster and refund troops immediately
-        if army.is_mustering:
+        # If mustering or courier en route, cancel summons and refund troops immediately
+        if army.is_mustering or army.courier_en_route:
             prov = PROVINCES.get(army.flag_origin)
             if prov:
                 prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + army.troops)
-            self.logs.append(f"Muster cancelled for {army.name}. {army.troops:,} men returned to garrison.")
+            if army.courier_en_route:
+                self.logs.append(f"Summons recalled for {army.name}. Royal courier stopped; {army.troops:,} men remain in garrison.")
+            else:
+                self.logs.append(f"Muster cancelled for {army.name}. {army.troops:,} men returned to garrison.")
             if army.id == self.selected_army_id:
                 self.selected_army_id = None
             if army in self.armies:
@@ -1288,6 +1371,9 @@ class GameState:
         if army.in_battle:
             self.logs.append(f"{army.name} is locked in combat and cannot retreat!")
             return
+        if army.courier_en_route:
+            self.logs.append(f"{army.name} is awaiting the Royal Courier ({army.courier_days_left}d left) and has not begun muster!")
+            return
         if army.is_mustering:
             self.logs.append(f"{army.name} is still mustering ({army.muster_days} days left) and cannot march!")
             return
@@ -1322,9 +1408,33 @@ class GameState:
                 self.year += 1
                 self.yearly_tick()
 
-        # Update Muster Preparation Days
+        # 1. Update Royal Couriers En Route
         for a in list(self.armies):
-            if a.is_mustering:
+            if a.courier_en_route:
+                a.courier_days_left = max(0, a.courier_days_left - 1)
+                a.courier_progress += (100.0 / DAYS_PER_TILE)
+                if a.courier_progress >= 100.0:
+                    a.courier_progress = 0.0
+                    if a.courier_path:
+                        a.courier_current_prov = a.courier_path.pop(0)
+                        if a.courier_path:
+                            a.courier_next_prov = a.courier_path[0]
+                        else:
+                            a.courier_next_prov = None
+
+                    # Courier has arrived at destination province!
+                    if not a.courier_path:
+                        a.courier_en_route = False
+                        a.is_mustering = True
+                        p_short = PROVINCES[a.province]["name"].split()[0]
+                        if a.owner == self.player_id:
+                            self.logs.append(f"Royal Courier arrived in {p_short}! King Alfred's seal delivered to Ealdorman. {a.troops:,} {a.name} begins {a.muster_days}-day muster!")
+                        else:
+                            self.logs.append(f"War summons reached {p_short}! {a.troops:,} {a.name} begins {a.muster_days}-day muster.")
+
+        # 2. Update Muster Preparation Days (only for armies where courier has already arrived)
+        for a in list(self.armies):
+            if a.is_mustering and not a.courier_en_route:
                 a.muster_days -= 1
                 if a.muster_days <= 0:
                     a.is_mustering = False
@@ -1580,7 +1690,7 @@ class GameState:
         for a in list(self.armies):
             if a not in self.armies:
                 continue
-            if a.is_moving or a.in_battle or a.is_mustering or a.is_demobilizing:
+            if a.is_moving or a.in_battle or a.is_mustering or a.courier_en_route or a.is_demobilizing:
                 continue
 
             prov = PROVINCES[a.province]
@@ -1744,7 +1854,7 @@ class GameState:
         # ---------------------------------------------------------
         active_viking_armies = [a for a in self.armies if a.owner == self.enemy_id and not a.in_battle]
         for a in active_viking_armies:
-            if a.is_mustering:
+            if a.is_mustering or a.courier_en_route:
                 continue
             if a.province != safe_rally and not a.is_moving:
                 # If already at a threatened border and sufficiently strong, hold ground!
@@ -1761,7 +1871,7 @@ class GameState:
         # ---------------------------------------------------------
         # 5. ADVANCE TO BORDER TO BLOCK INVASION OR COUNTER-ATTACK
         # ---------------------------------------------------------
-        staging_hosts = [a for a in self.armies if a.province == safe_rally and a.owner == self.enemy_id and not a.is_mustering and not a.in_battle and not a.is_moving]
+        staging_hosts = [a for a in self.armies if a.province == safe_rally and a.owner == self.enemy_id and not a.is_mustering and not a.courier_en_route and not a.in_battle and not a.is_moving]
         if staging_hosts:
             main_host = staging_hosts[0]
 
@@ -2644,13 +2754,14 @@ def run_game():
                     
                     status_str = "Idle"
                     if a.in_battle: status_str = "⚔ IN BATTLE!"
-                    elif a.is_mustering: status_str = f" Mustering ({a.muster_days}d)"
+                    elif a.courier_en_route: status_str = f"✉ Courier En Route ({a.courier_days_left}d)"
+                    elif a.is_mustering: status_str = f"Mustering ({a.muster_days}d)"
                     elif a.is_demobilizing: status_str = f"◆ Returning to {PROVINCES[a.flag_origin]['name'].split()[0]}"
                     elif a.is_sieging: status_str = f"Besieging {a.siege_target_name or 'Holding'} ({a.siege_progress}%)"
                     elif a.is_moving: status_str = f"Marching to {PROVINCES[a.next_province]['name'].split()[0]}"
                     else: status_str = f"Stationed in {PROVINCES[a.province]['name'].split()[0]}"
 
-                    st_color = COLOR_GOLD if a.in_battle else ((255, 180, 50) if a.is_mustering else ((150, 200, 255) if a.is_demobilizing else COLOR_TEXT_MUTED))
+                    st_color = COLOR_GOLD if a.in_battle else ((255, 215, 80) if a.courier_en_route else ((255, 180, 50) if a.is_mustering else ((150, 200, 255) if a.is_demobilizing else COLOR_TEXT_MUTED)))
                     screen.blit(font_xs.render(status_str, True, st_color), (35, ay + 24))
 
                     if mouse_clicked and b_hover_a:
@@ -4147,6 +4258,10 @@ def run_game():
                 txt_badge = f"⚔ {army.troops:,}"
                 p_bg = (185, 35, 35)
                 p_border = (255, 220, 50)
+            elif army.courier_en_route:
+                txt_badge = f"✉ Summons ({army.courier_days_left}d + {army.muster_days}d)"
+                p_bg = (55, 42, 18)
+                p_border = (245, 205, 70)
             elif army.is_mustering:
                 txt_badge = f" {army.muster_days}d ({army.troops:,})"
                 p_bg = (65, 52, 20)
@@ -4194,6 +4309,44 @@ def run_game():
             if mouse_clicked and is_badge_hover:
                 state.selected_army_id = army.id
                 state.selected_province = army.province
+
+        # -------------------------------------------------------------
+        # DRAW TRAVELLING ROYAL COURIERS (Riders Galloping Between Shires)
+        # -------------------------------------------------------------
+        for army in state.armies:
+            if army.courier_en_route and army.courier_current_prov and army.courier_next_prov:
+                c_pos = province_anchors.get(army.courier_current_prov)
+                n_pos = province_anchors.get(army.courier_next_prov)
+                dest_pos = province_anchors.get(army.province)
+                if c_pos and n_pos:
+                    pct = army.courier_progress / 100.0
+                    mx = int(c_pos[0] + (n_pos[0] - c_pos[0]) * pct)
+                    my = int(c_pos[1] + (n_pos[1] - c_pos[1]) * pct)
+                    
+                    is_player = (army.owner == state.player_id)
+                    dest_name = PROVINCES[army.province]["name"].split()[0]
+                    
+                    # Subtle guide line connecting courier to destination
+                    if dest_pos:
+                        guide_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+                        pygame.draw.line(guide_surf, (250, 215, 80, 85) if is_player else (120, 180, 255, 85), (mx, my), dest_pos, 2)
+                        screen.blit(guide_surf, (0, 0))
+                    
+                    # Galloping Courier Pill Badge
+                    c_text = f"✉ Courier -> {dest_name} ({army.courier_days_left}d left)"
+                    c_lbl = font_xs.render(c_text, True, (255, 240, 180) if is_player else (220, 240, 255))
+                    cw = c_lbl.get_width() + 16
+                    ch = 18
+                    
+                    c_surf = pygame.Surface((cw, ch), pygame.SRCALPHA)
+                    c_surf.fill((25, 20, 10, 230) if is_player else (15, 22, 35, 230))
+                    pygame.draw.rect(c_surf, COLOR_GOLD if is_player else (100, 160, 240), (0, 0, cw, ch), 1, border_radius=9)
+                    c_surf.blit(c_lbl, (8, 1))
+                    screen.blit(c_surf, (mx - cw // 2, my - 24))
+                    
+                    # Gold / Blue courier marker pip
+                    pygame.draw.circle(screen, COLOR_GOLD if is_player else (100, 160, 240), (mx, my), 5)
+                    pygame.draw.circle(screen, (255, 255, 255), (mx, my), 2)
 
         # Victory / Defeat Banner
         if wessex_count == total_provs:
@@ -4404,6 +4557,11 @@ def run_game():
             
             if sel_army.in_battle:
                 screen.blit(font_md.render("STATUS: ⚔ IN PITCHED BATTLE!", True, COLOR_TEXT_RED), (880, 202))
+            elif sel_army.courier_en_route:
+                screen.blit(font_md.render(f"STATUS: ROYAL COURIER EN ROUTE ({sel_army.courier_days_left}d left)", True, (255, 215, 80)), (880, 202))
+                dest_p = PROVINCES[sel_army.province]["name"].split()[0]
+                cap_p = "Winchester" if sel_army.owner == state.player_id else "Jorvik"
+                screen.blit(font_xs.render(f"Decree riding from {cap_p} to {dest_p}.", True, COLOR_TEXT_WHITE), (880, 222))
             elif sel_army.is_mustering:
                 screen.blit(font_md.render(f"STATUS: MUSTERING ({sel_army.muster_days}d left)", True, COLOR_GOLD), (880, 202))
             elif sel_army.is_demobilizing:
@@ -4439,13 +4597,15 @@ def run_game():
                 if mouse_clicked and b_m_hover:
                     state.merge_armies_in_province(sel_army.province, state.player_id)
 
-            # Disband / Cancel Muster / Cancel Return Button
-            if sel_army.is_mustering:
+            # Disband / Cancel Muster / Cancel Summons Button
+            if sel_army.is_mustering or sel_army.courier_en_route:
                 dis_btn = pygame.Rect(880, 435, 290, 40)
                 b_d_hover = dis_btn.collidepoint(mouse_pos)
                 pygame.draw.rect(screen, (90, 40, 40) if b_d_hover else (70, 30, 30), dis_btn, border_radius=6)
                 pygame.draw.rect(screen, (240, 90, 90), dis_btn, 1, border_radius=6)
-                screen.blit(font_md.render("CANCEL MUSTER (Refund Men)", True, (255, 220, 220)), (915, 444))
+                btn_txt = "CANCEL SUMMONS (Recall Courier)" if sel_army.courier_en_route else "CANCEL MUSTER (Refund Men)"
+                b_lbl = font_md.render(btn_txt, True, (255, 220, 220))
+                screen.blit(b_lbl, (880 + (290 - b_lbl.get_width()) // 2, 444))
                 if mouse_clicked and b_d_hover:
                     state.disband_army(sel_army)
             elif sel_army.is_demobilizing:
