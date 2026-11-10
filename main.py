@@ -1304,6 +1304,9 @@ def run_game():
                     }
                     f_unclaimed_idx += 1
 
+        # Synchronize target_state's counter so newly carved fiefs never collide with starter fiefs!
+        target_state.fief_id_counter = max(target_state.fief_id_counter, fief_counter + 10)
+
     # Setup starter cities and fiefs matching each vassal exactly
     setup_province_starter_cities(state)
 
@@ -1324,11 +1327,12 @@ def run_game():
 
         # Prefer adjacent pair of free tiles
         new_tiles = []
+        free_set = set(free_tiles)
         for (fc, fr) in free_tiles:
-            if (fc + 1, fr) in free_tiles:
+            if (fc + 1, fr) in free_set:
                 new_tiles = [(fc, fr), (fc + 1, fr)]
                 break
-            elif (fc, fr + 1) in free_tiles:
+            elif (fc, fr + 1) in free_set:
                 new_tiles = [(fc, fr), (fc, fr + 1)]
                 break
                 
@@ -1338,12 +1342,13 @@ def run_game():
         target_state.fief_id_counter += 1
         fid = f"fief_{target_state.fief_id_counter}"
         pname = PROVINCES[province_id]["name"].split()[0]
+        cur_prov_fief_count = sum(1 for f in target_state.fiefs.values() if f.get("province") == province_id)
         target_state.fiefs[fid] = {
             "id": fid,
             "province": province_id,
             "tiles": new_tiles,
             "holder": None,
-            "name": f"{pname} Fief #{target_state.fief_id_counter}",
+            "name": f"{pname} Fief #{cur_prov_fief_count + 1}",
             "vassal_id": None
         }
         target_state.selected_fief_id = fid
@@ -2049,11 +2054,6 @@ def run_game():
                     pygame.draw.line(screen, border_col,
                                      (cell_x, cell_y), (cell_x + curr_tile_w - 1, cell_y), BORDER_W)
 
-                # Golden highlight on selected province (reinforcing border)
-                if is_selected:
-                    pygame.draw.rect(screen, COLOR_GOLD,
-                                     (cell_x, cell_y, curr_tile_w, curr_tile_h), 1)
-
         # -----------------------------------------------------------
         # PASS 2.5: Draw Fiefdom Sub-divisions & Borders
         # -----------------------------------------------------------
@@ -2062,25 +2062,35 @@ def run_game():
             f_color = fief_palette[f_idx % len(fief_palette)]
             is_f_sel = (state.selected_fief_id == fid)
             is_f_edit = (state.editing_fief_id == fid)
+            is_cur_prov = (fdata.get("province") == state.selected_province)
             f_tiles_set = set(fdata["tiles"])
             
             for (fc, fr) in fdata["tiles"]:
                 fx = origin_x + (fc * curr_tile_w)
                 fy = origin_y + (fr * curr_tile_h)
                 
-                # Fief fill tint if editing or selected
+                # Fief fill tint:
+                # - When editing: vivid golden glow
+                # - When selected: vibrant green glow
+                # - When in selected province: visible distinct color tint so EVERY fief is identifiable at a glance!
                 if is_f_edit:
                     f_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
-                    f_surf.fill((240, 205, 50, 90))
+                    f_surf.fill((255, 220, 50, 105))
                     screen.blit(f_surf, (fx, fy))
                 elif is_f_sel:
                     f_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
-                    f_surf.fill((100, 255, 120, 75))
+                    f_surf.fill((100, 255, 120, 85))
+                    screen.blit(f_surf, (fx, fy))
+                elif is_cur_prov:
+                    f_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
+                    fill_col = (*f_color, 45) if fdata.get("holder") else (235, 195, 100, 45)
+                    f_surf.fill(fill_col)
                     screen.blit(f_surf, (fx, fy))
                 
                 # Draw fief border ONLY on outer boundary edges (no internal seam line between tiles of same fief!)
-                edge_col = COLOR_GOLD if is_f_edit else ((100, 255, 120) if is_f_sel else (f_color if fdata["holder"] else (170, 180, 200)))
-                edge_w = 2 if (is_f_edit or is_f_sel) else 1
+                # Every fief gets a bold, distinct border: editing = gold (3px), selected = green (2px), regular = distinct palette color (2px)
+                edge_col = (255, 225, 60) if is_f_edit else ((100, 255, 120) if is_f_sel else f_color)
+                edge_w = 3 if is_f_edit else 2
                 
                 # Right edge
                 if (fc + 1, fr) not in f_tiles_set:
