@@ -475,6 +475,9 @@ class GameState:
         self.editing_fief_id = None      # Current fief ID being edited/painted
         self.granting_fief_id = None     # Fief currently being granted via modal
         self.grant_page = 0              # Pagination index for grant modal
+        self.inspecting_vassal = None    # {"province": pid, "vassal": v_dict} when inspecting vassal profile
+        self.pre_popup_speed = None      # Saved game speed before a popup paused the game
+        self.popup_was_active = False    # Track whether a popup was active on previous frame
         
         # Left Panel Sub-Tab System ('armies', 'vassals', or 'demesne')
         self.left_tab = "armies"
@@ -1482,36 +1485,74 @@ def run_game():
                     box_end   = None
 
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE:
-                    state.speed = 0 if state.speed > 0 else 3
-                elif event.key == pygame.K_1:
-                    state.speed = 1
-                elif event.key == pygame.K_2:
-                    state.speed = 2
-                elif event.key == pygame.K_3:
-                    state.speed = 3
-                elif event.key == pygame.K_4:
-                    state.speed = 4
-                elif event.key == pygame.K_5:
-                    state.speed = 5
-                elif event.key == pygame.K_r:
-                    state.raise_all_levies()
-                elif event.key == pygame.K_m:
-                    if state.selected_province:
-                        state.rally_all_armies_to(state.selected_province)
-                elif event.key == pygame.K_b:
-                    # Toggle Build Mode
-                    state.build_mode = not state.build_mode
-                elif event.key == pygame.K_t:
-                    # Rotate building orientation
-                    state.build_orientation = "V" if state.build_orientation == "H" else "H"
-                elif event.key == pygame.K_ESCAPE:
-                    if state.build_mode:
-                        state.build_mode = False
-                    else:
-                        # Clear selection
-                        state.selected_army_ids = []
-                        state.selected_army_id  = None
+                is_popup_open = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal)
+                if is_popup_open:
+                    if event.key == pygame.K_ESCAPE:
+                        if state.inspecting_vassal:
+                            state.inspecting_vassal = None
+                        elif state.granting_fief_id:
+                            state.granting_fief_id = None
+                    elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
+                        # Queue intended speed to resume when popup is closed
+                        state.pre_popup_speed = int(event.unicode)
+                else:
+                    if event.key == pygame.K_SPACE:
+                        state.speed = 0 if state.speed > 0 else 3
+                    elif event.key == pygame.K_1:
+                        state.speed = 1
+                    elif event.key == pygame.K_2:
+                        state.speed = 2
+                    elif event.key == pygame.K_3:
+                        state.speed = 3
+                    elif event.key == pygame.K_4:
+                        state.speed = 4
+                    elif event.key == pygame.K_5:
+                        state.speed = 5
+                    elif event.key == pygame.K_r:
+                        state.raise_all_levies()
+                    elif event.key == pygame.K_m:
+                        if state.selected_province:
+                            state.rally_all_armies_to(state.selected_province)
+                    elif event.key == pygame.K_b:
+                        # Toggle Build Mode
+                        state.build_mode = not state.build_mode
+                    elif event.key == pygame.K_t:
+                        # Rotate building orientation
+                        state.build_orientation = "V" if state.build_orientation == "H" else "H"
+                    elif event.key == pygame.K_ESCAPE:
+                        if state.build_mode:
+                            state.build_mode = False
+                        else:
+                            # Clear selection
+                            state.selected_army_ids = []
+                            state.selected_army_id  = None
+
+        # -------------------------------------------------------------
+        # POPUP MODAL AUTO-PAUSE & AUTO-RESUME SYSTEM
+        # -------------------------------------------------------------
+        is_popup_active = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal)
+        if is_popup_active:
+            if not state.popup_was_active:
+                if state.speed > 0:
+                    state.pre_popup_speed = state.speed
+                    state.speed = 0
+                    state.logs.append("⏸ Royal Council: Game paused for royal decision.")
+                state.popup_was_active = True
+        else:
+            if state.popup_was_active:
+                if state.pre_popup_speed is not None and state.pre_popup_speed > 0:
+                    state.speed = state.pre_popup_speed
+                    state.logs.append(f"▶ Resumed game speed ({state.speed}x).")
+                    state.pre_popup_speed = None
+                state.popup_was_active = False
+
+        # Inhibit background dragging/ordering/clicking when modal popup is open
+        modal_mouse_clicked = mouse_clicked
+        if is_popup_active:
+            mouse_clicked = False
+            box_start = None
+            box_end = None
+            right_clicked = False
 
         # Smooth keyboard pan navigation (Arrows / WASD)
         keys = pygame.key.get_pressed()
@@ -1592,7 +1633,10 @@ def run_game():
             lbl = font_xs.render(speed_texts[sp], True, speed_colors[sp] if is_active else COLOR_TEXT_MUTED)
             screen.blit(lbl, (btn_x + 16 - lbl.get_width() // 2, 20 - lbl.get_height() // 2))
             if mouse_clicked and btn_rect.collidepoint(mouse_pos):
-                state.speed = sp
+                if is_popup_active:
+                    state.pre_popup_speed = sp
+                else:
+                    state.speed = sp
 
         # Player Resources
         stats_x = 590
@@ -1845,12 +1889,12 @@ def run_game():
                 screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 17))
                 screen.blit(font_xs.render(f"Gold: {v_data['gold']}g  •  Levy: +{v_data['levy_contribution']}  •  Tax: +{v_data['tax_contribution']}g/m", True, COLOR_TEXT_MUTED), (32, vy + 30))
                 
-                if mouse_clicked and is_vc_hov:
+                if game_mouse_clicked and is_vc_hov:
                     state.selected_province = v_pid
-                    state.right_tab = "vassals"
+                    state.inspecting_vassal = {"province": v_pid, "vassal": v_data}
                     if v_data.get("tiles"):
                         state.selected_settlement = v_data["tiles"][0]
-                    state.logs.append(f"Inspecting vassal {v_data['name']} in {PROVINCES[v_pid]['name']}.")
+                    state.logs.append(f"Opened royal dossier for vassal {v_data['name']}.")
                 
                 vy += 54
                 
@@ -2579,13 +2623,29 @@ def run_game():
             screen.blit(font_sm.render("Economic Income: +6 Gold / month", True, COLOR_TEXT_GREEN), (880, 250))
             screen.blit(font_sm.render("Local Garrison: 300 Defenders", True, COLOR_TEXT_WHITE), (880, 275))
             
+            if s_data.get("vassal_id"):
+                v_btn = pygame.Rect(880, 310, 290, 34)
+                b_v_hov = v_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (40, 75, 110) if b_v_hov else (30, 55, 85), v_btn, border_radius=6)
+                pygame.draw.rect(screen, (100, 180, 255), v_btn, 1, border_radius=6)
+                screen.blit(font_xs.render("👑 VIEW VASSAL PROFILE & DOSSIER", True, COLOR_TEXT_WHITE), (915, 318))
+                if game_mouse_clicked and b_v_hov:
+                    v_list = state.vassals.get(s_data["province"], [])
+                    matching_v = next((v for v in v_list if v.get("id") == s_data["vassal_id"] or v.get("name") == s_data["lord"]), None)
+                    if matching_v:
+                        state.inspecting_vassal = {"province": s_data["province"], "vassal": matching_v}
+                        state.logs.append(f"Opened royal dossier for vassal {matching_v['name']}.")
+                cls_y = 352
+            else:
+                cls_y = 315
+
             # Close/Back button
-            cls_btn = pygame.Rect(880, 315, 290, 36)
+            cls_btn = pygame.Rect(880, cls_y, 290, 34)
             b_c_hov = cls_btn.collidepoint(mouse_pos)
             pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_c_hov else COLOR_BUTTON_NORMAL, cls_btn, border_radius=6)
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, cls_btn, 1, border_radius=6)
-            screen.blit(font_sm.render("← Back to Province View", True, COLOR_TEXT_WHITE), (940, 323))
-            if mouse_clicked and b_c_hov:
+            screen.blit(font_sm.render("← Back to Province View", True, COLOR_TEXT_WHITE), (940, cls_y + 8))
+            if game_mouse_clicked and b_c_hov:
                 state.selected_settlement = None
                 state.selected_vassal_idx = None
 
@@ -2819,10 +2879,12 @@ def run_game():
                     screen.blit(font_xs.render(f"Fief: {c_info}", True, (200, 230, 255)), (888, vy + 17))
                     screen.blit(font_xs.render(f"Gold: {v['gold']}g  •  Levies: +{v['levy_contribution']}  •  Tax: +{v['tax_contribution']}g/m", True, COLOR_TEXT_MUTED), (888, vy + 29))
 
-                    if mouse_clicked and is_v_hov:
+                    if game_mouse_clicked and is_v_hov:
                         state.selected_vassal_idx = v_idx
+                        state.inspecting_vassal = {"province": state.selected_province, "vassal": v}
                         if v.get("tiles"):
                             state.selected_settlement = v["tiles"][0]
+                        state.logs.append(f"Opened royal dossier for vassal {v['name']}.")
 
                     vy += 50
 
@@ -3026,7 +3088,7 @@ def run_game():
             pygame.draw.rect(screen, COLOR_TEXT_RED, den_btn, 1, border_radius=6)
             screen.blit(font_md.render("DENY REQUEST (NO)", True, COLOR_TEXT_WHITE), (pop_x + 295, pop_y + 178))
 
-            if mouse_clicked and app_hov:
+            if modal_mouse_clicked and app_hov:
                 pid = req["province_id"]
                 p_obj = PROVINCES.get(pid)
                 if p_obj:
@@ -3058,7 +3120,7 @@ def run_game():
                     state.logs.append(f"Granted charter! {req['vassal']} established {city_title} inside {fief_label}.")
                 state.vassal_build_requests.pop(0)
 
-            elif mouse_clicked and den_hov:
+            elif modal_mouse_clicked and den_hov:
                 state.logs.append(f"Denied charter to {req['vassal']}. Funds remain unspent.")
                 state.vassal_build_requests.pop(0)
 
@@ -3136,7 +3198,7 @@ def run_game():
                     pygame.draw.rect(screen, COLOR_TEXT_GREEN, g_btn, 1, border_radius=6)
                     screen.blit(font_sm.render("BESTOW FIEF ⚔", True, COLOR_TEXT_WHITE), (pop_x + pop_w - 170, vy + 37))
 
-                    if mouse_clicked and b_g_hov:
+                    if modal_mouse_clicked and b_g_hov:
                         # Assign Fief
                         f_target["holder"] = c_v["name"]
                         f_target["vassal_id"] = c_v["id"]
@@ -3173,7 +3235,7 @@ def run_game():
                         p_hov = prev_btn.collidepoint(mouse_pos)
                         pygame.draw.rect(screen, (55, 62, 78) if p_hov else (38, 44, 56), prev_btn, border_radius=4)
                         screen.blit(font_xs.render("← Prev", True, COLOR_TEXT_WHITE), (pop_x + 158, pop_y + 395))
-                        if mouse_clicked and p_hov:
+                        if modal_mouse_clicked and p_hov:
                             state.grant_page -= 1
 
                     if state.grant_page < total_pages - 1:
@@ -3181,7 +3243,7 @@ def run_game():
                         n_hov = next_btn.collidepoint(mouse_pos)
                         pygame.draw.rect(screen, (55, 62, 78) if n_hov else (38, 44, 56), next_btn, border_radius=4)
                         screen.blit(font_xs.render("Next →", True, COLOR_TEXT_WHITE), (pop_x + pop_w - 202, pop_y + 395))
-                        if mouse_clicked and n_hov:
+                        if modal_mouse_clicked and n_hov:
                             state.grant_page += 1
 
             # Close / Cancel Button
@@ -3190,8 +3252,176 @@ def run_game():
             pygame.draw.rect(screen, (75, 35, 35) if c_hov else (55, 25, 25), close_btn, border_radius=6)
             pygame.draw.rect(screen, (220, 80, 80), close_btn, 1, border_radius=6)
             screen.blit(font_sm.render("CANCEL INVESTITURE", True, (255, 220, 220)), (pop_x + (pop_w - 200) // 2 + 25, pop_y + pop_h - 38))
-            if mouse_clicked and c_hov:
+            if modal_mouse_clicked and c_hov:
                 state.granting_fief_id = None
+
+        # ---------------------------------------------------------
+        # 7. VASSAL PROFILE & FEUDAL DOSSIER MODAL
+        # ---------------------------------------------------------
+        if state.inspecting_vassal:
+            v_pid = state.inspecting_vassal.get("province")
+            v_obj = state.inspecting_vassal.get("vassal")
+
+            # Dimmed backdrop
+            dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+            dim_surf.fill((0, 0, 0, 185))
+            screen.blit(dim_surf, (0, 0))
+
+            pop_w, pop_h = 680, 530
+            pop_x = (WINDOW_WIDTH - pop_w) // 2
+            pop_y = (WINDOW_HEIGHT - pop_h) // 2
+            pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
+
+            pygame.draw.rect(screen, COLOR_PANEL_BG, pop_rect, border_radius=10)
+            pygame.draw.rect(screen, COLOR_GOLD, pop_rect, 2, border_radius=10)
+
+            # Close 'X' Button at top right
+            x_btn = pygame.Rect(pop_x + pop_w - 38, pop_y + 12, 26, 26)
+            x_hov = x_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (85, 30, 30) if x_hov else (48, 22, 22), x_btn, border_radius=4)
+            pygame.draw.rect(screen, (225, 80, 80), x_btn, 1, border_radius=4)
+            x_lbl = font_sm.render("✕", True, COLOR_TEXT_WHITE)
+            screen.blit(x_lbl, (x_btn.x + 7, x_btn.y + 3))
+            if modal_mouse_clicked and x_hov:
+                state.inspecting_vassal = None
+
+            # Header Title
+            screen.blit(font_lg.render("FEUDAL VASSAL DOSSIER", True, COLOR_GOLD), (pop_x + 25, pop_y + 16))
+            p_full = PROVINCES.get(v_pid, {}).get("name", "Wessex")
+            screen.blit(font_xs.render(f"Feudal Subject of King Alfred • Province of {p_full}", True, COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 44))
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 64), (pop_x + pop_w - 25, pop_y + 64), 1)
+
+            # Top Character Banner Section
+            # Crest / Heraldic Flag
+            emblem = prov_flag_cache.get(v_pid)
+            if emblem:
+                screen.blit(pygame.transform.smoothscale(emblem, (44, 50)), (pop_x + 30, pop_y + 74))
+            else:
+                pygame.draw.rect(screen, (50, 60, 80), (pop_x + 30, pop_y + 74, 44, 50), border_radius=4)
+
+            # Name and Titles
+            screen.blit(font_md.render(f"👑 {v_obj['name']}", True, COLOR_GOLD), (pop_x + 90, pop_y + 74))
+            rank_str = f"Feudal Rank: {v_obj.get('title', 'Thane')} of {p_full.split()[0]}  •  Religion: Catholic"
+            screen.blit(font_xs.render(rank_str, True, COLOR_TEXT_WHITE), (pop_x + 90, pop_y + 98))
+            seat_str = f"Seat of Power: {v_obj.get('city_name') or 'Landless Subject (Awaiting Royal Charter)'}"
+            screen.blit(font_xs.render(seat_str, True, (140, 205, 255)), (pop_x + 90, pop_y + 114))
+
+            # Feudal Attributes Grid (Martial, Stewardship, Diplomacy, Feudal Oath)
+            stats_list = [
+                ("⚔ Martial", f"{10 + (v_obj['levy_contribution'] // 30)}", "(Commands Fyrd)"),
+                ("💰 Stewardship", f"{11 + (v_obj['tax_contribution'] * 2)}", "(Manages Estates)"),
+                ("🤝 Diplomacy", "13", "(Royal Harmony)"),
+                ("🛡 Feudal Oath", "100%", "(Faithful Subject)")
+            ]
+            for s_i, (s_name, s_val, s_sub) in enumerate(stats_list):
+                bx = pop_x + 25 + s_i * 158
+                by = pop_y + 138
+                b_rect = pygame.Rect(bx, by, 150, 44)
+                pygame.draw.rect(screen, (34, 40, 54), b_rect, border_radius=4)
+                pygame.draw.rect(screen, COLOR_PANEL_BORDER, b_rect, 1, border_radius=4)
+                screen.blit(font_xs.render(s_name, True, COLOR_TEXT_MUTED), (bx + 8, by + 4))
+                screen.blit(font_md.render(s_val, True, COLOR_GOLD), (bx + 8, by + 18))
+                screen.blit(font_xs.render(s_sub, True, (120, 160, 200)), (bx + 48, by + 22))
+
+            # Compute vassal's overall fiefdoms and holdings
+            held_fiefs = [f for f in state.fiefs.values() if f.get("holder") == v_obj["name"] or f.get("vassal_id") == v_obj.get("id")]
+            total_held_tiles = sum(len(f.get("tiles", [])) for f in held_fiefs)
+
+            # Two Main Columns: Economy & Treasury (Left), Military & Fiefs (Right)
+            col_w = 305
+            col_y = pop_y + 194
+
+            # LEFT COLUMN: ECONOMY & INCOME ("income etc seluruhnya")
+            left_rect = pygame.Rect(pop_x + 25, col_y, col_w, 245)
+            pygame.draw.rect(screen, (30, 36, 48), left_rect, border_radius=6)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, left_rect, 1, border_radius=6)
+            
+            screen.blit(font_md.render("💰 Vassal Finances & Revenue", True, COLOR_GOLD), (pop_x + 35, col_y + 10))
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 35, col_y + 32), (pop_x + 35 + col_w - 20, col_y + 32), 1)
+
+            screen.blit(font_sm.render(f"Treasury: {v_obj['gold']} Gold", True, COLOR_GOLD), (pop_x + 40, col_y + 40))
+            
+            # Breakdown of monthly finances
+            tax_paid = v_obj.get("tax_contribution", 4)
+            monthly_gross = tax_paid + 24
+            net_profit = 24
+            
+            screen.blit(font_xs.render(f"• Gross Domain Income: +{monthly_gross}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 68))
+            screen.blit(font_xs.render("  (From tenant rents, tolls & agricultural yield)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 84))
+            screen.blit(font_xs.render(f"• Feudal Royal Tax to Liege: -{tax_paid}g / month", True, COLOR_TEXT_RED), (pop_x + 40, col_y + 104))
+            screen.blit(font_xs.render("  (Directly enriches King Alfred's treasury)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
+            screen.blit(font_xs.render(f"• Net Monthly Savings: +{net_profit}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 140))
+            
+            # Autonomous Charter Status Bar
+            screen.blit(font_xs.render("• Charter Fund (1,000g needed to build town):", True, COLOR_GOLD), (pop_x + 40, col_y + 168))
+            bar_w = col_w - 30
+            bar_h = 16
+            bx = pop_x + 40
+            by = col_y + 188
+            pygame.draw.rect(screen, (20, 24, 32), (bx, by, bar_w, bar_h), border_radius=3)
+            fill_pct = min(1.0, max(0.0, v_obj['gold'] / 1000.0))
+            if fill_pct > 0:
+                pygame.draw.rect(screen, COLOR_GOLD if fill_pct >= 1.0 else (80, 150, 240), (bx, by, int(bar_w * fill_pct), bar_h), border_radius=3)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, (bx, by, bar_w, bar_h), 1, border_radius=3)
+            p_text = f"{v_obj['gold']} / 1,000g ({int(fill_pct * 100)}%)"
+            p_lbl = font_xs.render(p_text, True, COLOR_TEXT_WHITE)
+            screen.blit(p_lbl, (bx + (bar_w - p_lbl.get_width()) // 2, by + 1))
+
+            status_str = "Eligible to petition charter!" if v_obj['gold'] >= 1000 else f"Needs {1000 - v_obj['gold']}g more to petition build"
+            screen.blit(font_xs.render(status_str, True, COLOR_GOLD if v_obj['gold'] >= 1000 else (180, 190, 205)), (pop_x + 40, col_y + 212))
+
+            # RIGHT COLUMN: MILITARY & DOMAIN ("keseluruhan kekuasaan dia")
+            right_rect = pygame.Rect(pop_x + 350, col_y, col_w, 245)
+            pygame.draw.rect(screen, (30, 36, 48), right_rect, border_radius=6)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, right_rect, 1, border_radius=6)
+
+            screen.blit(font_md.render("⚔ Military Duty & Fiefdoms", True, COLOR_GOLD), (pop_x + 360, col_y + 10))
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 360, col_y + 32), (pop_x + 360 + col_w - 20, col_y + 32), 1)
+
+            screen.blit(font_sm.render(f"Fyrd Levies: +{v_obj['levy_contribution']} Soldiers", True, COLOR_TEXT_GREEN), (pop_x + 365, col_y + 40))
+            screen.blit(font_xs.render(f"• Household Guards / Garrison: {v_obj['levy_contribution'] * 2} Men", True, COLOR_TEXT_WHITE), (pop_x + 365, col_y + 68))
+            screen.blit(font_xs.render(f"• Feudal Service: Ready to march on King's call", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 86))
+            screen.blit(font_xs.render(f"• Fiefdoms Controlled: {len(held_fiefs)} Fief(s) ({total_held_tiles} Tiles)", True, (150, 215, 255)), (pop_x + 365, col_y + 110))
+            
+            # List held fiefs
+            fy_item = col_y + 132
+            if not held_fiefs:
+                screen.blit(font_xs.render("• No fiefdoms granted yet (Unlanded)", True, COLOR_TEXT_MUTED), (pop_x + 365, fy_item))
+            else:
+                for h_f in held_fiefs[:4]:
+                    f_prov = PROVINCES.get(h_f["province"], {}).get("name", "").split()[0]
+                    f_sub = f"  - {h_f['name']} ({len(h_f['tiles'])}t in {f_prov})"
+                    screen.blit(font_xs.render(f_sub, True, COLOR_GOLD), (pop_x + 365, fy_item))
+                    fy_item += 19
+
+            # Action Buttons at Bottom
+            btn_w, btn_h = 280, 38
+            
+            # Button 1: Locate on Map (pans camera to vassal seat)
+            loc_btn = pygame.Rect(pop_x + 40, pop_y + pop_h - 60, btn_w, btn_h)
+            loc_hov = loc_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (40, 85, 130) if loc_hov else (28, 60, 95), loc_btn, border_radius=6)
+            pygame.draw.rect(screen, (100, 180, 255), loc_btn, 1, border_radius=6)
+            screen.blit(font_sm.render("🔍 LOCATE SEAT ON MAP", True, COLOR_TEXT_WHITE), (pop_x + 95, pop_y + pop_h - 50))
+            if modal_mouse_clicked and loc_hov:
+                state.selected_province = v_pid
+                if v_obj.get("tiles"):
+                    tc, tr = v_obj["tiles"][0]
+                    state.selected_settlement = (tc, tr)
+                    # Pan camera to focus on this holding
+                    state.cam_pan_x = VIEWPORT_CENTER_X - (tc * curr_tile_w + curr_tile_w // 2)
+                    state.cam_pan_y = VIEWPORT_CENTER_Y - (tr * curr_tile_h + curr_tile_h // 2)
+                state.inspecting_vassal = None
+                state.logs.append(f"Centering camera on {v_obj['name']}'s seat in {p_full}.")
+
+            # Button 2: Close Dossier (ESC)
+            close_btn = pygame.Rect(pop_x + pop_w - 40 - btn_w, pop_y + pop_h - 60, btn_w, btn_h)
+            c_hov = close_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (75, 35, 35) if c_hov else (55, 25, 25), close_btn, border_radius=6)
+            pygame.draw.rect(screen, (220, 80, 80), close_btn, 1, border_radius=6)
+            screen.blit(font_sm.render("CLOSE DOSSIER (ESC)", True, (255, 220, 220)), (pop_x + pop_w - 40 - btn_w + 70, pop_y + pop_h - 50))
+            if modal_mouse_clicked and c_hov:
+                state.inspecting_vassal = None
 
         pygame.display.flip()
 
