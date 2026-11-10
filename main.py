@@ -478,7 +478,7 @@ BUILDING_SPECS = {
         "income": 3,
         "upkeep": 0,
         "garrison": 100,
-        "recruits": 0,
+        "recruits": 10,
         "icon": "[City]"
     },
     "fort": {
@@ -489,7 +489,7 @@ BUILDING_SPECS = {
         "income": 1,
         "upkeep": 0,
         "garrison": 300,
-        "recruits": 0,
+        "recruits": 10,
         "icon": "[Fort]"
     },
     "barrack": {
@@ -1493,10 +1493,14 @@ class GameState:
             if htype == "city":
                 if is_crown and prov_ruler:
                     prov_ruler["gold"] += 3
+                # City contributes +10 recruits per month to provincial levy pool
+                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 10)
 
             elif htype == "fort":
                 if is_crown and prov_ruler:
                     prov_ruler["gold"] += 1
+                # Fort contributes +10 recruits per month to provincial levy pool
+                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 10)
 
             elif htype == "barrack":
                 lvl = sdata.get("level", 0)
@@ -1506,7 +1510,7 @@ class GameState:
 
                 if is_crown and prov_ruler:
                     prov_ruler["gold"] = max(0, prov_ruler["gold"] - upkeep)
-                # Boost province levies pool directly
+                # Boost province levies pool directly based on upgrade level (+10 base, +5 per level)
                 prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + recruits)
 
         # Army upkeep cost (1 gold per 500 men)
@@ -4457,16 +4461,18 @@ def run_game():
             cur_y = 216
             if h_type == "city":
                 screen.blit(font_sm.render("Economic Income: +3 Gold / month", True, COLOR_TEXT_GREEN), (880, cur_y))
-                screen.blit(font_sm.render("Local Garrison: 100 Defenders", True, COLOR_TEXT_WHITE), (880, cur_y + 22))
-                screen.blit(font_xs.render("• Generates gold to fund realm armies & barracks.", True, COLOR_TEXT_MUTED), (880, cur_y + 44))
-                cur_y += 70
+                screen.blit(font_sm.render("Recruitment Rate: +10 Men / month", True, COLOR_TEXT_GREEN), (880, cur_y + 22))
+                screen.blit(font_sm.render("Local Garrison: 100 Defenders", True, COLOR_TEXT_WHITE), (880, cur_y + 44))
+                screen.blit(font_xs.render("• Generates gold and recruits to supply and replenish realm fyrd.", True, COLOR_TEXT_MUTED), (880, cur_y + 66))
+                cur_y += 90
 
             elif h_type == "fort":
                 screen.blit(font_sm.render("Economic Income: +1 Gold / month (Tolls)", True, COLOR_TEXT_GREEN), (880, cur_y))
-                screen.blit(font_sm.render("Local Garrison: 300 Defenders", True, COLOR_TEXT_WHITE), (880, cur_y + 22))
-                screen.blit(font_sm.render("Fortification: High Defense (Twin Turrets)", True, (160, 210, 255)), (880, cur_y + 44))
-                screen.blit(font_xs.render("• Shields the province and prolongs siege defense.", True, COLOR_TEXT_MUTED), (880, cur_y + 66))
-                cur_y += 92
+                screen.blit(font_sm.render("Recruitment Rate: +10 Men / month", True, COLOR_TEXT_GREEN), (880, cur_y + 22))
+                screen.blit(font_sm.render("Local Garrison: 300 Defenders", True, COLOR_TEXT_WHITE), (880, cur_y + 44))
+                screen.blit(font_sm.render("Fortification: High Defense (Twin Turrets)", True, (160, 210, 255)), (880, cur_y + 66))
+                screen.blit(font_xs.render("• Shields the province and trains +10 garrison defenders monthly.", True, COLOR_TEXT_MUTED), (880, cur_y + 88))
+                cur_y += 112
 
             else: # Barracks
                 lvl = s_data.get("level", 0)
@@ -4760,9 +4766,9 @@ def run_game():
                     screen.blit(font_xs.render(f"{h_icon} {h_info['name']}", True, COLOR_GOLD), (888, cy + 5))
 
                     if htype == "city":
-                        stat_sub = "Lord: " + h_info['lord'] + "  •  +3 Gold/m  •  100 Gar"
+                        stat_sub = f"Lord: {h_info['lord']}  •  +3g  •  +10 Rec/m  •  100 Gar"
                     elif htype == "fort":
-                        stat_sub = "Lord: " + h_info['lord'] + "  •  +1 Gold/m  •  300 Gar"
+                        stat_sub = f"Lord: {h_info['lord']}  •  +1g  •  +10 Rec/m  •  300 Gar"
                     else:
                         bstats = get_barrack_stats(h_info['level'])
                         stat_sub = f"Lord: {h_info['lord']}  •  -{bstats['upkeep']}g Upk  •  +{bstats['recruits']} Rec/m"
@@ -4777,9 +4783,9 @@ def run_game():
                     screen.blit(font_md.render("Construct New Holding", True, COLOR_GOLD), (880, cy + 14))
 
                     menu_specs = [
-                        ("city", "[City] CITY (1 Tile - 600g)", "+100 Garrison  •  +3 Gold / month", 600),
-                        ("fort", "[Fort] FORT (2 Tiles - 1,000g)", "+300 Garrison  •  +1 Gold / month  [T: Rotate]", 1000),
-                        ("barrack", "⚔ BARRACKS (1 Tile - 800g)", "+100 Gar  •  +10 Recruits/mo  •  -1g Upkeep", 800)
+                        ("city", "[City] CITY (1 Tile - 600g)", "+100 Gar  •  +10 Recruits/m  •  +3 Gold/m", 600),
+                        ("fort", "[Fort] FORT (2 Tiles - 1,000g)", "+300 Gar  •  +10 Recruits/m  •  +1 Gold/m  [T: Rotate]", 1000),
+                        ("barrack", "⚔ BARRACKS (1 Tile - 800g)", "+100 Gar  •  +10 Recruits/m (Upgr)  •  -1g Upkeep", 800)
                     ]
 
                     btn_y = cy + 36
