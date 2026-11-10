@@ -19,6 +19,21 @@ import json
 import random
 import math
 from collections import deque
+
+# Enable Windows Per-Monitor High-DPI Awareness before initializing Pygame
+# This prevents Windows DWM from forcibly blurring/stretching the application window on high-DPI / scaled displays (e.g. 125%, 150%).
+try:
+    import ctypes
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        ctypes.windll.user32.SetProcessDPIAware()
+except Exception:
+    pass
+
+# Force crisp, razor-sharp pixel scaling (0 = nearest-neighbor, eliminates bilinear blur/smudging on high-res monitors)
+os.environ["SDL_RENDER_SCALE_QUALITY"] = "0"
+
 import pygame
 
 # Initialize Pygame
