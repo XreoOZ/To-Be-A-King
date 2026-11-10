@@ -3442,10 +3442,10 @@ def run_game():
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_uni_inc, 1, border_radius=3)
             screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE if hov_uni_inc else (200, 210, 230)), (123, 333))
 
-            # [ ⚡ SAMARATAKAN ] button
+            # [ ⚡ STANDARDIZE ALL ] button
             pygame.draw.rect(screen, (35, 95, 52) if hov_uni_apply else (25, 72, 40), btn_uni_apply, border_radius=3)
             pygame.draw.rect(screen, COLOR_TEXT_GREEN, btn_uni_apply, 1, border_radius=3)
-            apply_txt = font_xs.render("⚡ SAMARATAKAN", True, COLOR_TEXT_WHITE)
+            apply_txt = font_xs.render("⚡ STANDARDIZE ALL", True, COLOR_TEXT_WHITE)
             screen.blit(apply_txt, (btn_uni_apply.x + (btn_uni_apply.w - apply_txt.get_width()) // 2, 334))
 
             if mouse_clicked:
@@ -3480,7 +3480,7 @@ def run_game():
                                     sync_province_holdings_stats(state, r_pid)
                                     app_count += 1
                     law_name = "Tax" if is_tax_active else "Levy"
-                    state.logs.append(f"Samaratakan Hukum: {law_name} diset ke {uni_target}% untuk {app_count} vassal! ({lock_count} vassal terkunci tetap aman).")
+                    state.logs.append(f"Royal Decree: Standardized {law_name} Laws to {uni_target}% across {app_count} vassals! ({lock_count} locked vassals unchanged).")
 
             # -------------------------------------------------------------
             # Vassals List with Individual Settings & LOCK Toggles
