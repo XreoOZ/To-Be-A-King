@@ -356,18 +356,14 @@ class GameState:
             a.target_city = None
             a.siege_progress = 0
             a.tile_path = []
-            if a.owner == self.player_id:
-                self.disband_army(a)
-            elif a.owner == self.enemy_id:
-                # Return troops immediately to home garrison and clear out
-                if a.province == "wessex" or (getattr(a, "tile", None) and CELL_TO_PROV.get(a.tile) == "wessex"):
-                    prov = PROVINCES.get(a.flag_origin)
-                    if prov:
-                        prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + a.troops)
-                    if a in self.armies:
-                        self.armies.remove(a)
-                else:
-                    self.disband_army(a)
+            a.siege_intent = False
+            a.siege_prep_days = 0
+            a.siege_packup_days = 0
+            prov = PROVINCES.get(a.flag_origin) or PROVINCES.get(a.province)
+            if prov:
+                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + a.troops)
+            if a in self.armies:
+                self.armies.remove(a)
 
         liege_char = CHARACTERS.get(self.enemy_id, {})
         vassal_char = CHARACTERS.get(self.player_id, {})
@@ -418,23 +414,20 @@ class GameState:
             if s.get("province") == "jorvik":
                 s["occupied_by"] = None
 
-        # Stand down all wartime armies & cancel sieges
+        # Stand down all wartime armies & cancel sieges completely
         for a in list(self.armies):
             a.is_sieging = False
             a.target_city = None
             a.siege_progress = 0
             a.tile_path = []
-            if a.owner == self.enemy_id:
-                self.disband_army(a)
-            elif a.owner == self.player_id:
-                if a.province == "jorvik" or (getattr(a, "tile", None) and CELL_TO_PROV.get(a.tile) == "jorvik"):
-                    prov = PROVINCES.get(a.flag_origin)
-                    if prov:
-                        prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + a.troops)
-                    if a in self.armies:
-                        self.armies.remove(a)
-                else:
-                    self.disband_army(a)
+            a.siege_intent = False
+            a.siege_prep_days = 0
+            a.siege_packup_days = 0
+            prov = PROVINCES.get(a.flag_origin) or PROVINCES.get(a.province)
+            if prov:
+                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + a.troops)
+            if a in self.armies:
+                self.armies.remove(a)
 
         self.subjugation_event = {
             "type": "enemy_vassalized",
@@ -816,6 +809,8 @@ class GameState:
             return
         if army.in_battle:
             self.logs.append(f"{army.name} is locked in combat and cannot disband!")
+            return
+        if getattr(army, "is_demobilizing", False):
             return
 
         # If mustering or courier en route, cancel summons and refund troops immediately
@@ -1325,11 +1320,12 @@ class GameState:
 
                     # If reached final destination with no blocker:
                     elif not a.is_moving:
-                        if a.is_demobilizing and a.province == a.flag_origin:
-                            prov = PROVINCES.get(a.flag_origin)
+                        if a.is_demobilizing:
+                            prov = PROVINCES.get(a.flag_origin) or PROVINCES.get(a.province)
                             if prov:
                                 prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + a.troops)
-                            self.logs.append(f"{a.name} arrived safely home in {prov['name']}. {a.troops:,} men demobilized to garrison.")
+                            p_name = prov['name'] if prov else "homeland"
+                            self.logs.append(f"{a.name} arrived safely home in {p_name}. {a.troops:,} men demobilized to garrison.")
                             if a.id == self.selected_army_id:
                                 self.selected_army_id = None
                             if a in self.armies:

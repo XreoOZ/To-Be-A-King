@@ -101,7 +101,14 @@ def run_realm_ai(state, ruler_id):
     if getattr(state, "player_liege", None) == ruler_id and getattr(state, "war_status", "war") == "vassalage":
         # AI does not wage war against its own vassal in peacetime!
         for a in list(state.armies):
-            if a.owner == ruler_id and not a.in_battle and not a.is_sieging and not a.is_mustering and not a.courier_en_route:
+            if a.owner == ruler_id and not getattr(a, "is_demobilizing", False) and not a.in_battle:
+                state.disband_army(a)
+        return
+
+    # Check if this liege is a peaceful vassal of the player
+    if getattr(state, "enemy_liege", None) == state.player_id and getattr(state, "war_status", "war") == "vassalage":
+        for a in list(state.armies):
+            if a.owner == ruler_id and not getattr(a, "is_demobilizing", False) and not a.in_battle:
                 state.disband_army(a)
         return
 
@@ -118,6 +125,7 @@ def run_realm_ai(state, ruler_id):
     # 2. Tactical Reconnaissance: Hostile and Realm Armies
     hostile_armies = [a for a in state.armies if getattr(state, "are_hostile", lambda o1, o2: o1 != o2)(ruler_id, a.owner) and a.troops > 0]
     my_armies = [a for a in state.armies if a.owner == ruler_id and a.troops > 0]
+    hostile_provs = [pid for pid, p in PROVINCES.items() if getattr(state, "are_hostile", lambda o1, o2: o1 != o2)(ruler_id, p.get("owner"))]
 
     invading_threats = {}    # realm pid -> list of invading hostile armies
     threatened_borders = {}  # realm pid -> list of bordering hostile armies
@@ -145,28 +153,37 @@ def run_realm_ai(state, ruler_id):
     unraised_my_levies = sum(state.get_available_province_levies(pid, ruler_id)[0] for pid in realm_provs)
     has_invasion = len(invading_threats) > 0
     has_border_threat = len(threatened_borders) > 0
+    is_at_peace = (not hostile_armies and not hostile_provs and not has_invasion and not has_border_threat)
 
     # 3. Dynamic Demobilization & Peacetime Economy
-    if not has_invasion and not has_border_threat:
-        can_attack = (total_my_field >= 200 and ruler.get("gold", 100) >= 30)
-        if not can_attack and not hostile_armies:
-            active_offensive = any(a.province not in realm_provs or a.is_sieging for a in my_armies)
-            if not active_offensive and my_armies:
-                for a in list(my_armies):
-                    if not a.in_battle and not a.is_sieging and not a.is_mustering and not a.courier_en_route:
-                        state.disband_army(a)
-                state.logs.append(f"⚔ Stand Down: {r_name} demobilizes idle warbands to replenish provincial garrisons and preserve treasury.")
-                return
+    if is_at_peace:
+        # Complete Peacetime: Disband all mobilized warbands to save gold and replenish garrisons!
+        if my_armies:
+            for a in list(my_armies):
+                if not getattr(a, "is_demobilizing", False) and not a.in_battle:
+                    state.disband_army(a)
+            state.logs.append(f"⚔ Stand Down: Peace in the realm. {r_name} demobilizes all field hosts.")
+        return
+
+    # Partial Demobilization: If idle at home without threats or targets, demobilize
+    if not has_invasion and not has_border_threat and not hostile_armies:
+        if not hostile_provs and my_armies:
+            for a in list(my_armies):
+                if not getattr(a, "is_demobilizing", False) and not a.in_battle:
+                    state.disband_army(a)
+            state.logs.append(f"⚔ Stand Down: {r_name} demobilizes idle warbands to replenish garrisons.")
+            return
 
     # 4. Smart Mobilization Logic
     cooldown = getattr(state, "enemy_raise_cooldown", 0) if ruler_id == state.enemy_id else 0
     should_mobilize = False
-    if cooldown <= 0:
+    has_active_threat_or_target = bool(hostile_armies or hostile_provs or has_invasion or has_border_threat)
+    if cooldown <= 0 and has_active_threat_or_target:
         if (has_invasion or has_border_threat) and unraised_my_levies >= 40:
             should_mobilize = True
         elif len(my_armies) == 0 and len(hostile_armies) > 0 and unraised_my_levies >= 50:
             should_mobilize = True
-        elif len(my_armies) == 0 and ruler.get("gold", 100) >= 40 and unraised_my_levies >= 150:
+        elif len(my_armies) == 0 and len(hostile_provs) > 0 and ruler.get("gold", 100) >= 40 and unraised_my_levies >= 150:
             should_mobilize = True
         elif total_my_field < total_threat_troops * 0.85 and unraised_my_levies >= 50:
             should_mobilize = True
@@ -340,6 +357,11 @@ def run_realm_ai(state, ruler_id):
 
                 state.order_army_march_to_tile(main_host, target_tile)
                 state.logs.append(f"⚔ Strategic Advance: {r_name} leads {main_host.troops:,} warriors into {PROVINCES[chosen_target]['name']} to capture {h_name}!")
+            else:
+                # No remaining hostile provinces to conquer: Demobilize the main host!
+                if not getattr(main_host, "is_demobilizing", False) and not main_host.in_battle:
+                    state.disband_army(main_host)
+                    state.logs.append(f"⚔ Stand Down: All objectives completed. {r_name} demobilizes the army to garrison.")
 
 def run_viking_ai(state):
     """Backwards-compatible wrapper calling run_realm_ai for the enemy faction."""
