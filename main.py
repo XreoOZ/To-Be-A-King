@@ -434,6 +434,8 @@ class Army:
         self.flag_origin = flag_origin or province_id
         self.rank = rank  # 3 = King, 2 = Duke/Ealdorman, 1 = Thane/Baron
         self.sub_flags = []  # List of secondary province flags when merged
+        self.crown_troops = 0   # Regular / Crown Demesne troops (costs 1g per 100 soldiers)
+        self.vassal_levies = troops  # Feudal Vassal Levies (FREE 0g/m under feudal duty)
         
         # Movement & Path
         self.path = []              # list of province_ids to march through
@@ -544,6 +546,8 @@ def sync_province_holdings_stats(state, pid=None, is_init=False):
 
         total_tax = 0
         total_garrison = 0
+        crown_garrison = 0
+        vassal_garrison = 0
         for s in p_holdings.values():
             stype = s.get("type", "city")
             base_tax = 0
@@ -564,6 +568,7 @@ def sync_province_holdings_stats(state, pid=None, is_init=False):
             if s.get("is_crown_demesne", False) or not s.get("vassal_id"):
                 total_tax += base_tax
                 total_garrison += base_garrison
+                crown_garrison += base_garrison
             else:
                 # Holding held by a vassal -> liege receives their feudal law levy and tax share
                 v_id = s.get("vassal_id")
@@ -574,16 +579,21 @@ def sync_province_holdings_stats(state, pid=None, is_init=False):
                         break
                 levy_pct = (max(0, min(90, v_obj.get("levy_rate", 20))) / 100.0) if v_obj else 0.20
                 tax_pct = (max(0, min(90, v_obj.get("tax_rate", 10))) / 100.0) if v_obj else 0.10
-                total_garrison += max(0, int(round(base_garrison * levy_pct)))
+                v_garr = max(0, int(round(base_garrison * levy_pct)))
+                total_garrison += v_garr
+                vassal_garrison += v_garr
                 total_tax += max(0, int(round(base_tax * tax_pct)))
 
         if not p_holdings:
             total_tax = 0
             total_garrison = 50  # Rural baseline if zero constructed holdings
+            vassal_garrison = 50
 
         prev_max = prov.get("levies_max", 0)
         prov["tax"] = total_tax
         prov["levies_max"] = total_garrison
+        prov["crown_levies_max"] = crown_garrison
+        prov["vassal_levies_max"] = vassal_garrison
         if is_init or "levies_current" not in prov:
             prov["levies_current"] = total_garrison
         else:
@@ -820,7 +830,7 @@ def get_realm_finances(state, char_id=None):
     - Provincial Tax Income (Tolls, tariffs & customs per province)
     - Feudal Vassal Tithes (Taxes levied under Realm Laws 0-90%)
     - Crown Demesne Direct Revenue (King's royal seats)
-    - Army Field Upkeep (1g per 500 soldiers in the field)
+    - Army Field Upkeep (1g per 100 Crown Demesne troops; Vassal Levies are FREE!)
     - Military Facilities Upkeep (Barracks & garrison drillmasters)
     - Net monthly cash flow & Treasury balance
     """
@@ -884,16 +894,20 @@ def get_realm_finances(state, char_id=None):
 
     total_income = total_prov_tax + total_vassal_tax + total_crown_income
 
-    # 4. Army Field Upkeep (1 gold per 500 soldiers in the field)
+    # 4. Army Field Upkeep (1 gold per 100 Crown Demesne troops; Feudal Vassal Levies are FREE!)
     army_expenses = []
     total_army_upkeep = 0
     for a in state.armies:
         if a.owner == char_id:
-            cost = max(1, a.troops // 500) if a.troops >= 500 else 1
+            c_tr = getattr(a, "crown_troops", 0)
+            v_tr = getattr(a, "vassal_levies", max(0, a.troops - c_tr))
+            cost = c_tr // 100
             total_army_upkeep += cost
             army_expenses.append({
                 "name": a.name,
                 "troops": a.troops,
+                "crown_troops": c_tr,
+                "vassal_levies": v_tr,
                 "cost": cost,
                 "status": "Courier En Route" if a.courier_en_route else ("Mustering" if a.is_mustering else ("In Battle" if a.in_battle else "Mobilized"))
             })
@@ -1153,6 +1167,17 @@ class GameState:
         new_army = Army(army_id, self.player_id, province_id, available, army_name,
                         flag_origin=province_id, rank=3 if is_royal else 1)
         
+        # Partition into Crown Demesne troops (upkeep 1g/100) vs Feudal Vassal Levies (FREE)
+        c_max = prov.get("crown_levies_max", 0)
+        t_max = prov.get("levies_max", available)
+        if t_max > 0 and c_max > 0:
+            c_troops = min(available, int(round(available * (c_max / float(t_max)))))
+        else:
+            c_troops = 0
+        v_troops = max(0, available - c_troops)
+        new_army.crown_troops = c_troops
+        new_army.vassal_levies = v_troops
+        
         if is_royal:
             new_army.is_mustering = True
             new_army.muster_days = 30
@@ -1197,6 +1222,17 @@ class GameState:
                 is_royal = (pid == capital_pid)
                 new_army = Army(army_id, self.player_id, pid, available, army_name,
                                 flag_origin=pid, rank=3 if is_royal else 1)
+                
+                # Partition into Crown Demesne troops (upkeep 1g/100) vs Feudal Vassal Levies (FREE)
+                c_max = prov.get("crown_levies_max", 0)
+                t_max = prov.get("levies_max", available)
+                if t_max > 0 and c_max > 0:
+                    c_troops = min(available, int(round(available * (c_max / float(t_max)))))
+                else:
+                    c_troops = 0
+                v_troops = max(0, available - c_troops)
+                new_army.crown_troops = c_troops
+                new_army.vassal_levies = v_troops
                 
                 if is_royal:
                     new_army.is_mustering = True
@@ -1255,6 +1291,17 @@ class GameState:
                 new_army = Army(army_id, self.enemy_id, pid, available, army_name,
                                 flag_origin=pid, rank=3 if is_royal else 1)
                 
+                # Partition into Crown Demesne troops vs Feudal Vassal Levies (FREE)
+                c_max = prov.get("crown_levies_max", 0)
+                t_max = prov.get("levies_max", available)
+                if t_max > 0 and c_max > 0:
+                    c_troops = min(available, int(round(available * (c_max / float(t_max)))))
+                else:
+                    c_troops = 0
+                v_troops = max(0, available - c_troops)
+                new_army.crown_troops = c_troops
+                new_army.vassal_levies = v_troops
+                
                 m_days = 8 if is_emergency else 14
                 if is_royal:
                     new_army.is_mustering = True
@@ -1309,10 +1356,14 @@ class GameState:
             return
 
         total_troops = sum(a.troops for a in armies_here)
+        total_crown = sum(getattr(a, "crown_troops", 0) for a in armies_here)
+        total_vassal = sum(getattr(a, "vassal_levies", a.troops) for a in armies_here)
         # Sort by rank descending, then troops descending to find dominant host
         armies_here.sort(key=lambda x: (x.rank, x.troops), reverse=True)
         dominant_army = armies_here[0]
         dominant_army.troops = total_troops
+        dominant_army.crown_troops = total_crown
+        dominant_army.vassal_levies = total_vassal
         dominant_army.name = f"Royal Host of {PROVINCES[province_id]['name'].split()[0]}"
         
         # Collect all contingent flags from every joining host (no truncation)
@@ -1550,10 +1601,14 @@ class GameState:
                 # Boost province levies pool directly based on upgrade level (+10 base, +5 per level)
                 prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + recruits)
 
-        # Army upkeep cost (1 gold per 500 men)
-        player_troops = self.get_field_troops(self.player_id)
-        upkeep = player_troops // 500
+        # Army upkeep cost (1 gold per 100 Crown Demesne troops; Feudal Vassal Levies are FREE!)
+        player_crown_field = sum(getattr(a, "crown_troops", 0) for a in self.armies if a.owner == self.player_id)
+        upkeep = player_crown_field // 100
         self.player["gold"] = max(0, self.player["gold"] - upkeep)
+
+        enemy_crown_field = sum(getattr(a, "crown_troops", 0) for a in self.armies if a.owner == self.enemy_id)
+        enemy_upkeep = enemy_crown_field // 100
+        self.enemy["gold"] = max(0, self.enemy["gold"] - enemy_upkeep)
 
         self.player["prestige"] += 1
         self.player["piety"] += 1
@@ -1711,6 +1766,12 @@ class GameState:
 
             a1.troops = max(0, a1.troops - dmg_to_a1)
             a2.troops = max(0, a2.troops - dmg_to_a2)
+            if a1.troops > 0:
+                a1.crown_troops = min(getattr(a1, "crown_troops", 0), a1.troops)
+                a1.vassal_levies = a1.troops - a1.crown_troops
+            if a2.troops > 0:
+                a2.crown_troops = min(getattr(a2, "crown_troops", 0), a2.troops)
+                a2.vassal_levies = a2.troops - a2.crown_troops
 
             if a1.troops <= 0 and a2.troops <= 0:
                 self.logs.append(f"Both armies annihilated at {PROVINCES[pid]['name']}!")
@@ -3603,13 +3664,21 @@ def run_game():
                 a_tot_lbl = font_xs.render(f"-{fin['total_army_upkeep']}g/m", True, COLOR_TEXT_RED)
                 screen.blit(a_tot_lbl, (275 - a_tot_lbl.get_width(), 404))
 
-                screen.blit(font_xs.render("Fyrd rations & supplies (1g per 500 soldiers):", True, COLOR_TEXT_MUTED), (32, 420))
+                screen.blit(font_xs.render("Crown Troops: 1g/100m • Feudal Levies: FREE", True, COLOR_TEXT_MUTED), (32, 420))
 
-                ay_item = 440
+                ay_item = 438
                 if fin['army_expenses']:
                     for a_exp in fin['army_expenses'][:3]:
-                        screen.blit(font_xs.render(f"• {a_exp['name'][:18]} ({a_exp['troops']:,}m):", True, (230, 215, 215)), (34, ay_item))
-                        screen.blit(font_xs.render(f"-{a_exp['cost']}g/m", True, COLOR_TEXT_RED), (220, ay_item))
+                        nm = a_exp['name'][:14]
+                        t_cnt = a_exp['troops']
+                        cost = a_exp['cost']
+                        if cost > 0:
+                            c_cnt = a_exp.get('crown_troops', 0)
+                            screen.blit(font_xs.render(f"• {nm} ({c_cnt}c/{t_cnt:,}m):", True, (230, 215, 215)), (34, ay_item))
+                            screen.blit(font_xs.render(f"-{cost}g/m", True, COLOR_TEXT_RED), (220, ay_item))
+                        else:
+                            screen.blit(font_xs.render(f"• {nm} ({t_cnt:,}m):", True, (200, 225, 200)), (34, ay_item))
+                            screen.blit(font_xs.render("0g (FREE)", True, COLOR_TEXT_GREEN), (210, ay_item))
                         ay_item += 18
                 else:
                     screen.blit(font_xs.render("• All levies garrisoned at home", True, (200, 230, 200)), (34, 444))
