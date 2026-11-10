@@ -461,6 +461,8 @@ class GameState:
         self.active_fief_id = None
         self.fief_brushes = {}
         self.editing_fief_id = None      # Current fief ID being edited/painted
+        self.granting_fief_id = None     # Fief currently being granted via modal
+        self.grant_page = 0              # Pagination index for grant modal
         
         # Left Panel Sub-Tab System ('armies' or 'vassals')
         self.left_tab = "armies"
@@ -2513,20 +2515,15 @@ def run_game():
 
                     # 2. Grant or Revoke Button
                     if f_data["holder"] is None:
-                        # Grant Fief Button
+                        # Grant Fief Button (Opens Vassal Selection Modal)
                         b_grant = pygame.Rect(970, fy + 36, 120, 20)
                         g_hov = b_grant.collidepoint(mouse_pos)
                         pygame.draw.rect(screen, (40, 110, 60) if g_hov else (30, 80, 45), b_grant, border_radius=3)
                         pygame.draw.rect(screen, COLOR_TEXT_GREEN, b_grant, 1, border_radius=3)
                         screen.blit(font_xs.render("GRANT TO VASSAL", True, COLOR_TEXT_WHITE), (982, fy + 38))
                         if mouse_clicked and g_hov:
-                            v_list = state.vassals.get(state.selected_province, [])
-                            if v_list:
-                                chosen_v = random.choice(v_list)
-                                f_data["holder"] = chosen_v["name"]
-                                f_data["vassal_id"] = chosen_v["id"]
-                                chosen_v["gold"] += 100
-                                state.logs.append(f"Granted {f_data['name']} to {chosen_v['name']}!")
+                            state.granting_fief_id = f_data["id"]
+                            state.grant_page = 0
 
                         # 3. Dissolve Button
                         b_del = pygame.Rect(1096, fy + 36, 68, 20)
@@ -2543,7 +2540,7 @@ def run_game():
                             state.logs.append(f"Dissolved {f_data['name']}. Land returned to province.")
                             break
                     else:
-                        # Revoke Fief Button
+                        # Revoke Fief Button (Returns ownership to King Alfred)
                         b_revoke = pygame.Rect(970, fy + 36, 194, 20)
                         r_hov = b_revoke.collidepoint(mouse_pos)
                         pygame.draw.rect(screen, (100, 45, 45) if r_hov else (70, 30, 30), b_revoke, border_radius=3)
@@ -2551,9 +2548,28 @@ def run_game():
                         screen.blit(font_xs.render("REVOKE FIEF (👑 Return to Crown)", True, COLOR_TEXT_WHITE), (980, fy + 38))
                         if mouse_clicked and r_hov:
                             v_prev = f_data["holder"]
+                            v_prev_id = f_data.get("vassal_id")
                             f_data["holder"] = None
                             f_data["vassal_id"] = None
-                            state.logs.append(f"Revoked {f_data['name']} from {v_prev}! Now an unassigned crown fief.")
+                            p_short = PROVINCES[f_data['province']]['name'].split()[0]
+                            f_data["name"] = f"Crown Fief of {p_short}"
+
+                            # 1. Transfer all settlements on this fief directly to the King (Crown Demesne)
+                            for t in f_data["tiles"]:
+                                if t in state.settlements:
+                                    state.settlements[t]["lord"] = f"{state.player['name']} (Crown Demesne)"
+                                    state.settlements[t]["vassal_id"] = None
+                                    state.settlements[t]["is_crown_fief"] = True
+
+                            # 2. Update former vassal's held tiles
+                            for pid, v_list in state.vassals.items():
+                                for v in v_list:
+                                    if v["name"] == v_prev or v["id"] == v_prev_id:
+                                        v["tiles"] = [t for t in v.get("tiles", []) if t not in f_data["tiles"]]
+                                        if not v["tiles"]:
+                                            v["city_name"] = None
+
+                            state.logs.append(f"Revoked {f_data['name']} from {v_prev}! Transferred to Crown Demesne (King Alfred).")
 
                     if mouse_clicked and is_f_hov and not (e_hov or g_hov or d_hov or r_hov):
                         state.selected_fief_id = f_data["id"]
@@ -2661,6 +2677,137 @@ def run_game():
             elif mouse_clicked and den_hov:
                 state.logs.append(f"Denied charter to {req['vassal']}. Funds remain unspent.")
                 state.vassal_build_requests.pop(0)
+
+        # ---------------------------------------------------------
+        # 6. GRANT FIEFDOM TO VASSAL SELECTION MODAL
+        # ---------------------------------------------------------
+        if state.granting_fief_id and state.granting_fief_id in state.fiefs:
+            f_target = state.fiefs[state.granting_fief_id]
+            
+            # Dimmed backdrop
+            dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+            dim_surf.fill((0, 0, 0, 175))
+            screen.blit(dim_surf, (0, 0))
+
+            pop_w, pop_h = 600, 480
+            pop_x = (WINDOW_WIDTH - pop_w) // 2
+            pop_y = (WINDOW_HEIGHT - pop_h) // 2
+            pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
+
+            pygame.draw.rect(screen, COLOR_PANEL_BG, pop_rect, border_radius=8)
+            pygame.draw.rect(screen, COLOR_GOLD, pop_rect, 2, border_radius=8)
+
+            # Header
+            screen.blit(font_lg.render("ROYAL INVESTITURE: GRANT FIEFDOM", True, COLOR_GOLD), (pop_x + 25, pop_y + 18))
+            p_name = PROVINCES.get(f_target['province'], {}).get('name', 'Province')
+            t_sub = font_sm.render(f"Bestow: {f_target['name']} ({len(f_target['tiles'])} Tiles in {p_name})", True, COLOR_TEXT_WHITE)
+            screen.blit(t_sub, (pop_x + 25, pop_y + 48))
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 72), (pop_x + pop_w - 25, pop_y + 72), 1)
+
+            # Collect Vassal Candidates: Local vassals first, then wider realm
+            local_vassals = state.vassals.get(f_target["province"], [])
+            other_vassals = []
+            for pid, prov in PROVINCES.items():
+                if prov["owner"] == state.player_id and pid != f_target["province"]:
+                    for v in state.vassals.get(pid, []):
+                        other_vassals.append((pid, v))
+            
+            candidates = [(f_target["province"], v, True) for v in local_vassals]
+            candidates += [(pid, v, False) for (pid, v) in other_vassals]
+
+            if not candidates:
+                screen.blit(font_md.render("No eligible vassals found in the realm.", True, COLOR_TEXT_MUTED), (pop_x + 40, pop_y + 120))
+            else:
+                # Pagination (3 vassals per page)
+                page_size = 3
+                total_pages = max(1, (len(candidates) + page_size - 1) // page_size)
+                state.grant_page = max(0, min(state.grant_page, total_pages - 1))
+                start_i = state.grant_page * page_size
+                page_candidates = candidates[start_i:start_i + page_size]
+
+                vy = pop_y + 85
+                for c_pid, c_v, is_loc in page_candidates:
+                    c_rect = pygame.Rect(pop_x + 25, vy, pop_w - 50, 92)
+                    is_c_hov = c_rect.collidepoint(mouse_pos)
+                    pygame.draw.rect(screen, (45, 52, 68) if is_c_hov else (34, 40, 54), c_rect, border_radius=6)
+                    pygame.draw.rect(screen, (80, 130, 200) if is_loc else COLOR_PANEL_BORDER, c_rect, 1, border_radius=6)
+
+                    # Vassal title & name
+                    v_title_str = f"👑 {c_v['name']}"
+                    screen.blit(font_md.render(v_title_str, True, COLOR_GOLD), (pop_x + 40, vy + 10))
+                    
+                    # Locality & holdings
+                    loc_str = f"Home: {PROVINCES[c_pid]['name'].split()[0]}" + (" (Local Vassal)" if is_loc else " (Realm Lord)")
+                    n_held_fiefs = sum(1 for f in state.fiefs.values() if f.get("holder") == c_v["name"])
+                    status_str = f"{loc_str}  •  Holds {n_held_fiefs} Fief(s)"
+                    screen.blit(font_xs.render(status_str, True, (150, 210, 255) if is_loc else COLOR_TEXT_MUTED), (pop_x + 40, vy + 34))
+
+                    econ_str = f"Treasury: {c_v.get('gold', 150)}g  •  Levy Support: +{c_v.get('levy_contribution', 120)} soldiers"
+                    screen.blit(font_xs.render(econ_str, True, COLOR_TEXT_GREEN), (pop_x + 40, vy + 56))
+
+                    # Grant Button
+                    g_btn = pygame.Rect(pop_x + pop_w - 180, vy + 28, 140, 36)
+                    b_g_hov = g_btn.collidepoint(mouse_pos)
+                    pygame.draw.rect(screen, (40, 140, 70) if b_g_hov else (28, 100, 50), g_btn, border_radius=6)
+                    pygame.draw.rect(screen, COLOR_TEXT_GREEN, g_btn, 1, border_radius=6)
+                    screen.blit(font_sm.render("BESTOW FIEF ⚔", True, COLOR_TEXT_WHITE), (pop_x + pop_w - 170, vy + 37))
+
+                    if mouse_clicked and b_g_hov:
+                        # Assign Fief
+                        f_target["holder"] = c_v["name"]
+                        f_target["vassal_id"] = c_v["id"]
+                        f_target["name"] = f"Barony of {c_v['name'].split()[1]}"
+
+                        # Update all city settlements located on this fief to the chosen vassal!
+                        for t in f_target["tiles"]:
+                            if t in state.settlements:
+                                state.settlements[t]["lord"] = c_v["name"]
+                                state.settlements[t]["vassal_id"] = c_v["id"]
+                                state.settlements[t]["is_crown_fief"] = False
+                        
+                        # Update Vassal details
+                        if "tiles" not in c_v:
+                            c_v["tiles"] = []
+                        for t in f_target["tiles"]:
+                            if t not in c_v["tiles"]:
+                                c_v["tiles"].append(t)
+                        c_v["gold"] = c_v.get("gold", 150) + 100
+                        
+                        state.logs.append(f"Royal Investiture: Bestowed {f_target['name']} upon {c_v['name']} (+100g)!")
+                        state.granting_fief_id = None
+                        break
+
+                    vy += 100
+
+                # Pagination Controls
+                if total_pages > 1:
+                    pg_str = font_xs.render(f"Page {state.grant_page + 1} of {total_pages}", True, COLOR_TEXT_MUTED)
+                    screen.blit(pg_str, (pop_x + pop_w // 2 - pg_str.get_width() // 2, pop_y + 395))
+
+                    if state.grant_page > 0:
+                        prev_btn = pygame.Rect(pop_x + 140, pop_y + 390, 80, 26)
+                        p_hov = prev_btn.collidepoint(mouse_pos)
+                        pygame.draw.rect(screen, (55, 62, 78) if p_hov else (38, 44, 56), prev_btn, border_radius=4)
+                        screen.blit(font_xs.render("← Prev", True, COLOR_TEXT_WHITE), (pop_x + 158, pop_y + 395))
+                        if mouse_clicked and p_hov:
+                            state.grant_page -= 1
+
+                    if state.grant_page < total_pages - 1:
+                        next_btn = pygame.Rect(pop_x + pop_w - 220, pop_y + 390, 80, 26)
+                        n_hov = next_btn.collidepoint(mouse_pos)
+                        pygame.draw.rect(screen, (55, 62, 78) if n_hov else (38, 44, 56), next_btn, border_radius=4)
+                        screen.blit(font_xs.render("Next →", True, COLOR_TEXT_WHITE), (pop_x + pop_w - 202, pop_y + 395))
+                        if mouse_clicked and n_hov:
+                            state.grant_page += 1
+
+            # Close / Cancel Button
+            close_btn = pygame.Rect(pop_x + (pop_w - 200) // 2, pop_y + pop_h - 45, 200, 32)
+            c_hov = close_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (75, 35, 35) if c_hov else (55, 25, 25), close_btn, border_radius=6)
+            pygame.draw.rect(screen, (220, 80, 80), close_btn, 1, border_radius=6)
+            screen.blit(font_sm.render("CANCEL INVESTITURE", True, (255, 220, 220)), (pop_x + (pop_w - 200) // 2 + 25, pop_y + pop_h - 38))
+            if mouse_clicked and c_hov:
+                state.granting_fief_id = None
 
         pygame.display.flip()
 
