@@ -1455,7 +1455,7 @@ class GameState:
                 new_army.crown_troops = c_troops
                 new_army.vassal_levies = v_troops
                 
-                m_days = 8 if is_emergency else 14
+                m_days = 30  # Standardized 30 days muster (identical to player)
                 if is_royal:
                     new_army.is_mustering = True
                     new_army.muster_days = m_days
@@ -1464,7 +1464,7 @@ class GameState:
                     full_route = find_shortest_path(capital_pid, pid)
                     if full_route and len(full_route) > 1:
                         hops = len(full_route) - 1
-                        total_days = hops * (1 if is_emergency else 2)
+                        total_days = hops * DAYS_PER_TILE  # Standardized courier travel time
                         new_army.courier_en_route = True
                         new_army.courier_path = full_route[1:]
                         new_army.courier_current_prov = full_route[0]
