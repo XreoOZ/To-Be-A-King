@@ -533,6 +533,7 @@ class GameState:
         # Left Panel Sub-Tab System ('armies', 'vassals', or 'demesne')
         self.left_tab = "armies"
         self.vassal_page = 0
+        self.demesne_page = 0
         self.fief_page = 0
         
         # Camera & Map Viewport Zoom / Pan State
@@ -1226,9 +1227,9 @@ def run_game():
             {"owner": target_state.player_id, "lord": target_state.player["name"], "province": "kent_essex", "city": "Royal Castle of London", "fief": "Crown Demesne of London"},
             
             # Jarl Halfdan's 3 Personal Viking Strongholds
-            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "jorvik", "city": "Great Hall of Jorvik", "fief": "Royal Demesne of Jorvik"},
-            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "jorvik", "city": "Citadel of Eoforwic", "fief": "Royal Demesne of Eoforwic"},
-            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "deira", "city": "Viking Stronghold of Deira", "fief": "Royal Demesne of Deira"},
+            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "jorvik", "city": "Great Hall of Jorvik", "fief": "Crown Demesne of Jorvik"},
+            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "jorvik", "city": "Citadel of Eoforwic", "fief": "Crown Demesne of Eoforwic"},
+            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "deira", "city": "Viking Stronghold of Deira", "fief": "Crown Demesne of Deira"},
         ]
 
         for spec in royal_demesnes:
@@ -1261,7 +1262,7 @@ def run_game():
                         "province": pid,
                         "type": "town",
                         "name": spec["city"],
-                        "lord": f"{spec['lord']} (Royal Demesne)",
+                        "lord": f"{spec['lord']} (Crown Demesne)",
                         "vassal_id": None,
                         "is_crown_demesne": True
                     }
@@ -1438,6 +1439,11 @@ def run_game():
                         state.vassal_page = max(0, state.vassal_page - 1)
                     elif event.y < 0:
                         state.vassal_page += 1
+                elif l_panel_rect.collidepoint(mouse_pos) and state.left_tab == "demesne":
+                    if event.y > 0:
+                        state.demesne_page = max(0, state.demesne_page - 1)
+                    elif event.y < 0:
+                        state.demesne_page += 1
                 elif map_viewport.collidepoint(mouse_pos):
                     old_zoom = state.zoom
                     zoom_delta = 0.12 * event.y
@@ -1750,7 +1756,7 @@ def run_game():
 
         # ---------------------------------------------------------
         # Left Panel Sub-Tabs: [ ⚔ Active Armies ]  [ 👥 Realm Vassals ]
-        #                      [ 👑 Royal Demesne (Crown Fiefs) ]
+        #                      [ 👑 Crown Demesne (Personal Fiefs) ]
         # ---------------------------------------------------------
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 233), (285, 233), 1)
         tab_y = 238
@@ -1775,9 +1781,41 @@ def run_game():
         pygame.draw.rect(screen, COLOR_GOLD if is_v_active else COLOR_PANEL_BORDER, tab_vassals, 1, border_radius=4)
         screen.blit(font_xs.render("👥 REALM VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD), (164, tab_y + 5))
 
-        # Row 2 Tab: Royal Demesne
-        player_crown_fiefs = [f for f in state.fiefs.values() if f.get("holder") == state.player["name"]]
-        d_title = f"👑 ROYAL DEMESNE ({len(player_crown_fiefs)} Crown Fiefs)"
+        # Row 2 Tab: Crown Demesne
+        # Auto-reconcile settlements held by the Crown so they always have an associated Crown Demesne fief
+        for h in get_all_settlement_holdings(state):
+            sdata = h["data"]
+            pid = h["province"]
+            if PROVINCES.get(pid, {}).get("owner") == state.player_id and (sdata.get("is_crown_demesne") or sdata.get("vassal_id") is None):
+                sdata["lord"] = f"{state.player['name']} (Crown Demesne)"
+                sdata["is_crown_demesne"] = True
+                in_fief = any(any(t in f.get("tiles", []) for t in h["tiles"]) for f in state.fiefs.values())
+                if not in_fief:
+                    state.fief_id_counter += 1
+                    fid = f"fief_{state.fief_id_counter}"
+                    clean_name = h["name"].replace("Royal Citadel of ", "").replace("Royal Castle of ", "").replace("Royal Borough of ", "").replace(" Burgh", "")
+                    state.fiefs[fid] = {
+                        "id": fid,
+                        "province": pid,
+                        "tiles": list(h["tiles"]),
+                        "name": f"Crown Demesne of {clean_name}",
+                        "holder": state.player["name"],
+                        "vassal_id": None,
+                        "is_crown_demesne": True
+                    }
+
+        player_crown_fiefs = [
+            f for f in state.fiefs.values()
+            if (f.get("vassal_id") is None and
+                PROVINCES.get(f.get("province"), {}).get("owner") == state.player_id and
+                (f.get("holder") == state.player["name"] or f.get("holder") is None or f.get("is_crown_demesne")))
+        ]
+        for f in player_crown_fiefs:
+            if f.get("holder") is None or "Royal Demesne" in str(f.get("holder")):
+                f["holder"] = state.player["name"]
+            f["is_crown_demesne"] = True
+
+        d_title = f"👑 CROWN DEMESNE ({len(player_crown_fiefs)} Fiefs)"
         pygame.draw.rect(screen, (60, 48, 20) if is_d_active else (COLOR_BUTTON_HOVER if is_hov_td else (35, 40, 52)), tab_demesne, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_d_active else (90, 140, 210), tab_demesne, 1, border_radius=4)
         d_lbl = font_xs.render(d_title, True, COLOR_GOLD if is_d_active else (210, 230, 255))
@@ -1841,13 +1879,40 @@ def run_game():
                 log_y += 24
 
         elif state.left_tab == "demesne":
-            # Royal Demesne View (Personal Crown Fiefs & Cities)
-            screen.blit(font_md.render(f"Royal Crown Demesne ({len(player_crown_fiefs)} Fiefs)", True, COLOR_GOLD), (25, 302))
-            screen.blit(font_xs.render("King Alfred's Personal Holdings & Cities:", True, COLOR_TEXT_MUTED), (25, 324))
+            # Crown Demesne View (Personal Crown Fiefs & Cities)
+            total_cf = len(player_crown_fiefs)
+            header_lbl = font_md.render(f"Crown Demesne ({total_cf} Fiefs)", True, COLOR_GOLD)
+            screen.blit(header_lbl, (25, 302))
 
-            fy = 345
-            for f in player_crown_fiefs[:3]:
-                f_rect = pygame.Rect(25, fy, 260, 46)
+            per_page = 5
+            max_pages = max(1, (total_cf + per_page - 1) // per_page)
+            state.demesne_page = max(0, min(state.demesne_page, max_pages - 1))
+
+            # Header Top Pagination Controls (< 1/2 >)
+            top_btn_prev = pygame.Rect(216, 302, 18, 18)
+            top_btn_next = pygame.Rect(268, 302, 18, 18)
+            is_top_prev_hov = top_btn_prev.collidepoint(mouse_pos)
+            is_top_next_hov = top_btn_next.collidepoint(mouse_pos)
+
+            p_top_prev_col = COLOR_TEXT_WHITE if (state.demesne_page > 0 and not is_top_prev_hov) else (COLOR_GOLD if is_top_prev_hov else (70, 75, 85))
+            p_top_next_col = COLOR_TEXT_WHITE if (state.demesne_page < max_pages - 1 and not is_top_next_hov) else (COLOR_GOLD if is_top_next_hov else (70, 75, 85))
+            screen.blit(font_xs.render("<", True, p_top_prev_col), (221, 304))
+            p_top_str = f"{state.demesne_page + 1}/{max_pages}"
+            p_top_lbl = font_xs.render(p_top_str, True, COLOR_TEXT_MUTED)
+            screen.blit(p_top_lbl, (244 - p_top_lbl.get_width() // 2, 304))
+            screen.blit(font_xs.render(">", True, p_top_next_col), (273, 304))
+
+            if mouse_clicked and is_top_prev_hov and state.demesne_page > 0:
+                state.demesne_page -= 1
+            elif mouse_clicked and is_top_next_hov and state.demesne_page < max_pages - 1:
+                state.demesne_page += 1
+
+            start_i = state.demesne_page * per_page
+            cur_page_fiefs = player_crown_fiefs[start_i:start_i + per_page]
+
+            fy = 328
+            for f in cur_page_fiefs:
+                f_rect = pygame.Rect(25, fy, 260, 50)
                 is_sel = (f["id"] == state.selected_fief_id)
                 b_hover_f = f_rect.collidepoint(mouse_pos)
                 
@@ -1858,7 +1923,7 @@ def run_game():
                 screen.blit(font_sm.render(f"🏰 {f['name']}", True, COLOR_GOLD), (34, fy + 4))
                 p_short = PROVINCES[f['province']]['name'].split()[0]
                 status_str = f"Province: {p_short}  •  {len(f['tiles'])} Tiles (+6g/m)"
-                screen.blit(font_xs.render(status_str, True, (210, 230, 255)), (34, fy + 24))
+                screen.blit(font_xs.render(status_str, True, (210, 230, 255)), (34, fy + 26))
 
                 if mouse_clicked and b_hover_f:
                     state.selected_fief_id = f["id"]
@@ -1867,22 +1932,36 @@ def run_game():
                         state.selected_settlement = f["tiles"][0]
                     state.selected_army_id = None
 
-                fy += 50
+                fy += 54
 
             if not player_crown_fiefs:
                 screen.blit(font_sm.render("No crown fiefs held directly.", True, COLOR_TEXT_MUTED), (25, 350))
                 screen.blit(font_xs.render("Revoke fiefs to expand royal land.", True, COLOR_TEXT_MUTED), (25, 370))
 
-            # Chronicle of Britain
-            pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 505), (285, 505), 1)
-            screen.blit(font_md.render("Chronicle of Britain", True, COLOR_GOLD), (25, 515))
-
-            log_y = 545
-            for log_msg in state.logs[-6:]:
-                disp = log_msg[:34] + "..." if len(log_msg) > 37 else log_msg
-                lm_surf = font_sm.render(f"• {disp}", True, COLOR_TEXT_MUTED)
-                screen.blit(lm_surf, (25, log_y))
-                log_y += 24
+            # Bottom Pagination Controls
+            py_btn = 645
+            btn_prev = pygame.Rect(25, py_btn, 80, 26)
+            btn_next = pygame.Rect(205, py_btn, 80, 26)
+            
+            is_prev_hov = btn_prev.collidepoint(mouse_pos)
+            is_next_hov = btn_next.collidepoint(mouse_pos)
+            
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
+            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.demesne_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
+            
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
+            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.demesne_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
+            
+            page_str = f"Page {state.demesne_page + 1}/{max_pages}"
+            p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
+            screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
+            
+            if mouse_clicked and is_prev_hov and state.demesne_page > 0:
+                state.demesne_page -= 1
+            elif mouse_clicked and is_next_hov and state.demesne_page < max_pages - 1:
+                state.demesne_page += 1
 
         else:
             # Realm Vassals Directory (All vassals across Kingdom of Wessex)
@@ -2664,7 +2743,8 @@ def run_game():
             h_matching_tiles = [coord for coord, s in state.settlements.items() if s.get("name") == s_data["name"] and s.get("province") == s_data["province"]]
             t_loc_str = ", ".join(f"({c},{r})" for c, r in h_matching_tiles)
             screen.blit(font_sm.render(f"Location: {t_loc_str} ({len(h_matching_tiles)} Tiles)", True, COLOR_TEXT_MUTED), (880, 175))
-            screen.blit(font_sm.render(f"Ruling Lord: {s_data.get('lord', 'Crown Fief')}", True, COLOR_GOLD), (880, 200))
+            lord_str = s_data.get('lord', 'Crown Demesne').replace("Royal Demesne", "Crown Demesne")
+            screen.blit(font_sm.render(f"Ruling Lord: {lord_str}", True, COLOR_GOLD), (880, 200))
             screen.blit(font_sm.render("Fortification Level: II (Stone Walls)", True, COLOR_TEXT_WHITE), (880, 225))
             screen.blit(font_sm.render("Economic Income: +6 Gold / month", True, COLOR_TEXT_GREEN), (880, 250))
             screen.blit(font_sm.render("Local Garrison: 300 Defenders", True, COLOR_TEXT_WHITE), (880, 275))
