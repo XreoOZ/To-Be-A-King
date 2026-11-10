@@ -1312,7 +1312,7 @@ class GameState:
         # AI Behavior
         self.ai_timer -= 1
         if self.ai_timer <= 0:
-            self.ai_timer = random.randint(35, 55)
+            self.ai_timer = random.randint(10, 20)
             self.ai_routine()
 
     def monthly_tick(self):
@@ -1642,53 +1642,155 @@ class GameState:
                 a.siege_progress = 0
 
     # ---------------------------------------------------------
-    # AI (Halfdan Ragnarsson)
+    # AI (Halfdan Ragnarsson) - Intelligent Border Awareness & Defense
     # ---------------------------------------------------------
     def ai_routine(self):
         danelaw_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.enemy_id]
         if not danelaw_provs:
             return
 
-        danelaw_armies = [a for a in self.armies if a.owner == self.enemy_id and not a.is_mustering and not a.in_battle]
+        # ---------------------------------------------------------
+        # 1. BORDER SENSING & THREAT RADAR
+        # Detect any foreign (player) armies sitting on or moving to adjacent border provinces
+        # BEFORE they enter Danelaw territory!
+        # ---------------------------------------------------------
+        player_armies = [a for a in self.armies if a.owner == self.player_id and a.troops > 0]
         
-        # 1. Raise Levies if none active
-        if not danelaw_armies and not any(a.owner == self.enemy_id for a in self.armies):
+        threatened_borders = {}  # Danelaw border pid -> list of threatening player armies
+        all_threat_armies = []
+        
+        for pa in player_armies:
+            pa_locations = [pa.province]
+            if pa.is_moving and pa.path:
+                pa_locations.append(pa.path[-1])
+            
+            for loc in pa_locations:
+                for dp in danelaw_provs:
+                    if loc != dp and loc in ADJACENCY.get(dp, []):
+                        threatened_borders.setdefault(dp, []).append(pa)
+                        if pa not in all_threat_armies:
+                            all_threat_armies.append(pa)
+
+        danelaw_armies = [a for a in self.armies if a.owner == self.enemy_id]
+        total_viking_field = sum(a.troops for a in danelaw_armies)
+        total_threat_troops = sum(pa.troops for pa in all_threat_armies)
+        has_border_threat = len(threatened_borders) > 0
+
+        # ---------------------------------------------------------
+        # 2. EMERGENCY MOBILIZATION (RAISE LEVIES)
+        # If threat at border, raise levies across all Danelaw provinces immediately!
+        # Or if no armies exist at all, mobilize standard levies.
+        # ---------------------------------------------------------
+        should_mobilize = False
+        if has_border_threat:
+            if total_viking_field < total_threat_troops * 1.15 or len(danelaw_armies) == 0:
+                should_mobilize = True
+        elif len(danelaw_armies) == 0:
+            should_mobilize = True
+
+        if should_mobilize:
+            newly_raised = 0
             for pid in danelaw_provs:
                 p = PROVINCES[pid]
-                if p["levies_current"] > 500:
+                min_threshold = 200 if has_border_threat else 500
+                if p["levies_current"] > min_threshold:
                     army_id = f"army_{self.army_id_counter}"
                     self.army_id_counter += 1
-                    host = Army(army_id, self.enemy_id, pid, p["levies_current"], "Viking Warband")
+                    host_troops = p["levies_current"]
+                    host = Army(army_id, self.enemy_id, pid, host_troops, "Viking Warband")
                     host.is_mustering = True
-                    host.muster_days = 20
+                    # Faster emergency muster if foreign army is already at the border!
+                    host.muster_days = 12 if has_border_threat else 20
                     self.armies.append(host)
                     p["levies_current"] = 0
-            self.logs.append("Ravens squawk! The Danelaw has summoned their Viking hosts (Mustering)!")
-            return
+                    newly_raised += host_troops
 
-        # 2. Rally Viking armies into Jorvik or a border province
-        rally_point = "jorvik" if "jorvik" in danelaw_provs else random.choice(danelaw_provs)
-        for a in danelaw_armies:
-            if a.province != rally_point and not a.is_moving and not a.in_battle:
-                path = find_shortest_path(a.province, rally_point)
+            if newly_raised > 0:
+                if has_border_threat:
+                    t_names = ", ".join([PROVINCES[dp]['name'].split()[0] for dp in threatened_borders.keys()])
+                    self.logs.append(f"🦅 Raven Warning! Saxon armies massing near {t_names}! Danelaw sounds emergency war horns (+{newly_raised:,} men)!")
+                else:
+                    self.logs.append(f"Ravens squawk! The Danelaw has summoned their Viking hosts (+{newly_raised:,} men)!")
+                return
+
+        # ---------------------------------------------------------
+        # 3. IDENTIFY SAFEST STAGING POINT (Titik Kumpul Paling Aman)
+        # Gather all Viking hosts at a safe interior/unthreatened province to merge
+        # ---------------------------------------------------------
+        if has_border_threat:
+            # Safe interior provinces: Danelaw provinces that are NOT threatened borders
+            safe_provs = [pid for pid in danelaw_provs if pid not in threatened_borders]
+            if safe_provs:
+                # Pick the safe province closest to the primary threatened border to minimize transit time
+                primary_border = list(threatened_borders.keys())[0]
+                safe_rally = min(safe_provs, key=lambda sp: len(find_shortest_path(sp, primary_border) or [0]*99))
+            else:
+                # If all border the threat, pick capital or highest garrison province
+                safe_rally = "jorvik" if "jorvik" in danelaw_provs else danelaw_provs[0]
+        else:
+            safe_rally = "jorvik" if "jorvik" in danelaw_provs else danelaw_provs[0]
+
+        # ---------------------------------------------------------
+        # 4. RALLY & MARCH TO SAFE STAGING POINT
+        # ---------------------------------------------------------
+        active_viking_armies = [a for a in self.armies if a.owner == self.enemy_id and not a.in_battle]
+        for a in active_viking_armies:
+            if a.is_mustering:
+                continue
+            if a.province != safe_rally and not a.is_moving:
+                # If already at a threatened border and sufficiently strong, hold ground!
+                if a.province in threatened_borders and a.troops >= total_threat_troops * 0.9:
+                    continue
+                path = find_shortest_path(a.province, safe_rally)
                 if path and len(path) > 1:
                     a.path = path[1:]
                     a.move_progress = 0.0
 
-        # 3. If armies gathered in rally point, march to attack player border province!
-        gathered = [a for a in danelaw_armies if a.province == rally_point and not a.is_moving and not a.in_battle]
-        if gathered:
-            self.merge_armies_in_province(rally_point, self.enemy_id)
-            main_host = [a for a in self.armies if a.province == rally_point and a.owner == self.enemy_id and not a.in_battle and not a.is_mustering]
-            if main_host and main_host[0].troops >= 2000:
-                player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.player_id]
-                if player_provs:
-                    target = random.choice(player_provs)
-                    path = find_shortest_path(rally_point, target)
+        # Merge Viking armies at the safe rally point
+        self.merge_armies_in_province(safe_rally, self.enemy_id)
+
+        # ---------------------------------------------------------
+        # 5. ADVANCE TO BORDER TO BLOCK INVASION OR COUNTER-ATTACK
+        # ---------------------------------------------------------
+        staging_hosts = [a for a in self.armies if a.province == safe_rally and a.owner == self.enemy_id and not a.is_mustering and not a.in_battle and not a.is_moving]
+        if staging_hosts:
+            main_host = staging_hosts[0]
+
+            if has_border_threat:
+                # Target the primary threatened border
+                target_border = list(threatened_borders.keys())[0]
+                already_guarding = any(a.province == target_border and a.owner == self.enemy_id for a in self.armies)
+
+                if safe_rally != target_border and not already_guarding:
+                    path = find_shortest_path(safe_rally, target_border)
                     if path and len(path) > 1:
-                        main_host[0].path = path[1:]
-                        main_host[0].move_progress = 0.0
-                        self.logs.append(f"Alarm! Halfdan's Great Host marches towards {PROVINCES[target]['name']}!")
+                        main_host.path = path[1:]
+                        main_host.move_progress = 0.0
+                        self.logs.append(f"🛡 Halfdan advances his Great Host ({main_host.troops:,} men) to {PROVINCES[target_border]['name']} to block Saxon invasion!")
+
+                elif (safe_rally == target_border or already_guarding):
+                    # Host is AT the border! Check if superior in numbers to counter-attack!
+                    opposing_armies = threatened_borders.get(target_border, [])
+                    opp_troops = sum(oa.troops for oa in opposing_armies)
+                    if main_host.troops >= opp_troops * 1.35 and opposing_armies:
+                        target_enemy_prov = opposing_armies[0].province
+                        path = find_shortest_path(target_border, target_enemy_prov)
+                        if path and len(path) > 1:
+                            main_host.path = path[1:]
+                            main_host.move_progress = 0.0
+                            self.logs.append(f"⚔ Halfdan sally-outs from {PROVINCES[target_border]['name']} to strike the Saxon army in {PROVINCES[target_enemy_prov]['name']}!")
+
+            else:
+                # No immediate border threat -> Standard offensive campaign
+                if main_host.troops >= 2000:
+                    player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.player_id]
+                    if player_provs:
+                        target = random.choice(player_provs)
+                        path = find_shortest_path(safe_rally, target)
+                        if path and len(path) > 1:
+                            main_host.path = path[1:]
+                            main_host.move_progress = 0.0
+                            self.logs.append(f"Alarm! Halfdan's Great Host marches towards {PROVINCES[target]['name']}!")
 
 # -------------------------------------------------------------
 # Main Game Loop
