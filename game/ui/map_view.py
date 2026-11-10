@@ -1041,11 +1041,11 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     pygame.draw.rect(screen, COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=4)
     
     if getattr(state, "player_liege", None) == state.enemy_id:
-        w_lbl = font_sm.render(f"WESSEX (Vassal Duchy): {wessex_count} Shire", True, (255, 230, 230))
-        d_lbl = font_sm.render(f"DANELAW (High Kingdom): {danelaw_count} Shires", True, (230, 240, 255))
+        w_lbl = font_sm.render(f"WESSEX (Vassal Duchy)", True, (255, 230, 230))
+        d_lbl = font_sm.render(f"DANELAW (High Kingdom): 12 Shires", True, (230, 240, 255))
     elif getattr(state, "enemy_liege", None) == state.player_id:
-        w_lbl = font_sm.render(f"BRITAIN (High Kingdom): {wessex_count} Shires", True, COLOR_GOLD)
-        d_lbl = font_sm.render(f"JORVIK (Vassal Jarl): {danelaw_count} Shire", True, (230, 240, 255))
+        w_lbl = font_sm.render(f"BRITAIN (High Kingdom): 12 Shires", True, COLOR_GOLD)
+        d_lbl = font_sm.render(f"JORVIK (Vassal Jarl)", True, (230, 240, 255))
     else:
         w_lbl = font_sm.render(f"WESSEX: {wessex_count} Provinces", True, (255, 230, 230))
         d_lbl = font_sm.render(f"DANELAW: {danelaw_count} Provinces", True, (230, 240, 255))

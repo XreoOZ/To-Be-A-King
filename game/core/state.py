@@ -337,25 +337,28 @@ class GameState:
         CHARACTERS[self.enemy_id]["realm"] = "The Danelaw (High Kingdom of Britain)"
         CHARACTERS[self.enemy_id]["title"] = "High King of the Danelaw & All Britain"
 
-        # Restore ancestral seat of Wessex as Alfred's hereditary vassal duchy
-        PROVINCES["wessex"]["owner"] = self.player_id
-        PROVINCES["wessex"]["color"] = list(PROVINCE_FACTION_COLORS.get(self.player_id, {}).get("wessex", COLOR_WESSEX))
-        PROVINCES["wessex"]["levies_current"] = min(PROVINCES["wessex"].get("levies_max", 500), 250)
+        # Realm falls under Danelaw sovereign authority (no magical free capital or bonus troops)
+        PROVINCES["wessex"]["owner"] = self.enemy_id
+        PROVINCES["wessex"]["color"] = list(PROVINCE_FACTION_COLORS.get(self.enemy_id, {}).get("wessex", COLOR_DANELAW))
         self.player_capital = "wessex"
         self.player_primary_capital = "wessex"
         self.player_capital_was_lost = False
 
-        # Clear enemy occupation in Wessex
+        # Clear enemy occupation in Wessex so Alfred's demesne holdings are directly held by Alfred
         for t, s in self.settlements.items():
             if s.get("province") == "wessex":
                 s["occupied_by"] = None
 
-        # Stand down wartime offensive armies & remove enemy invaders from Wessex
+        # Stand down all wartime armies & cancel all ongoing sieges completely
         for a in list(self.armies):
+            a.is_sieging = False
+            a.target_city = None
+            a.siege_progress = 0
+            a.tile_path = []
             if a.owner == self.player_id:
                 self.disband_army(a)
             elif a.owner == self.enemy_id:
-                # If army is in Wessex, return troops immediately to origin garrison and vacate Wessex
+                # Return troops immediately to home garrison and clear out
                 if a.province == "wessex" or (getattr(a, "tile", None) and CELL_TO_PROV.get(a.tile) == "wessex"):
                     prov = PROVINCES.get(a.flag_origin)
                     if prov:
@@ -375,11 +378,10 @@ class GameState:
                 "Yet King Alfred survives! Meeting High King Halfdan at the Stone of Fealty,",
                 "Alfred places his hands between Halfdan's and swears the ancient Oath of Vassalage.",
                 "",
-                "Halfdan confirms Wessex as your hereditary vassal duchy. You must pay 20% feudal",
+                "Halfdan confirms your ancestral demesne under Danelaw suzerainty. You must pay 20% feudal",
                 "tax to York every month, but your court, your laws, and your dynasty endure.",
                 "",
-                "Bide your time, enrich your baronies, muster a secret host, and when",
-                "the Vikings are vulnerable—DECLARE REBELLION and reclaim the High Crown!"
+                "Bide your time and enrich your baronies under the sovereign peace of the realm."
             ],
             "button_text": "ACCEPT VASSALAGE & BIDE TIME"
         }
@@ -396,21 +398,24 @@ class GameState:
         CHARACTERS[self.enemy_id]["realm"] = "Jarlhood of Jorvik (Vassal of Wessex)"
         CHARACTERS[self.enemy_id]["title"] = "Jarl of Jorvik & Northern Marcher Lord"
 
-        # Restore Jorvik as Halfdan's hereditary vassal fiefdom
-        PROVINCES["jorvik"]["owner"] = self.enemy_id
-        PROVINCES["jorvik"]["color"] = list(PROVINCE_FACTION_COLORS.get(self.enemy_id, {}).get("jorvik", COLOR_DANELAW))
-        PROVINCES["jorvik"]["levies_current"] = min(PROVINCES["jorvik"].get("levies_max", 500), 250)
+        # Realm falls under Saxon High Kingdom suzerainty
+        PROVINCES["jorvik"]["owner"] = self.player_id
+        PROVINCES["jorvik"]["color"] = list(PROVINCE_FACTION_COLORS.get(self.player_id, {}).get("jorvik", COLOR_WESSEX))
         self.enemy_capital = "jorvik"
         self.enemy_primary_capital = "jorvik"
         self.enemy_capital_was_lost = False
 
-        # Clear enemy occupation in Jorvik
+        # Clear occupation in Jorvik
         for t, s in self.settlements.items():
             if s.get("province") == "jorvik":
                 s["occupied_by"] = None
 
-        # Stand down enemy armies & clear invaders from Jorvik
+        # Stand down all wartime armies & cancel sieges
         for a in list(self.armies):
+            a.is_sieging = False
+            a.target_city = None
+            a.siege_progress = 0
+            a.tile_path = []
             if a.owner == self.enemy_id:
                 self.disband_army(a)
             elif a.owner == self.player_id:
@@ -443,16 +448,6 @@ class GameState:
         }
         self.logs.append("DANELAW SUBMISSION: Halfdan has bent the knee! Danelaw has accepted Saxon suzerainty. Alfred is High King of All Britain!")
 
-    def declare_independence(self):
-        """Duke Alfred casts off the Viking yoke and declares War of Independence!"""
-        if self.player_liege != self.enemy_id:
-            return
-        self.player_liege = None
-        self.war_status = "war"
-        CHARACTERS[self.player_id]["realm"] = "Kingdom of Wessex"
-        CHARACTERS[self.player_id]["title"] = "King of Wessex & the Anglo-Saxons"
-        self.ai_timer = 0
-        self.logs.append("⚔ WAR OF INDEPENDENCE! Duke Alfred casts off the Viking yoke and declares Sovereign Independence! Saxon war horns sound across Wessex!")
 
     # ---------------------------------------------------------
     # Army Operations
