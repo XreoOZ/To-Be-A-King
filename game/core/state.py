@@ -738,8 +738,8 @@ class GameState:
                 for v in self.vassals.get(pid, []):
                     st = get_vassal_landed_status(self, v, pid)
                     if st["is_landed"]:
-                        owner["gold"] += st["tax_paid"]
-                        v["gold"] = v.get("gold", 150) + st["net_savings"]
+                        owner["gold"] = round(owner["gold"] + st["tax_paid"], 1)
+                        v["gold"] = round(v.get("gold", 25) + st["net_savings"], 1)
                         v["tax_contribution"] = st["tax_paid"]
                         v["levy_contribution"] = st["levy_contribution"]
                     else:

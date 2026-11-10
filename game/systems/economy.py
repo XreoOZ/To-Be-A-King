@@ -5,6 +5,15 @@ from game.data.provinces import PROVINCES
 from game.data.characters import CHARACTERS
 from game.data.buildings import get_barrack_stats
 
+def fmt_gold(val):
+    """Formats gold into a clean string, showing 1 decimal place only if fractional (e.g. 1.8g, 0.2g, 5g)."""
+    if val is None:
+        return "0"
+    v = round(float(val), 1)
+    if v == int(v):
+        return f"{int(v)}"
+    return f"{v:.1f}"
+
 def sync_province_holdings_stats(state, pid=None, is_init=False):
     """
     Synchronizes province tax revenue and maximum garrison/levies strictly with its physical holdings:
@@ -151,11 +160,11 @@ def get_vassal_landed_status(state, v_dict, prov_id=None):
         total_garrison = len(held_tiles) * 35
 
     if gross > 0 and tax_rate > 0:
-        tax_paid = max(1, int(round(gross * (tax_rate / 100.0))))
-        tax_paid = min(tax_paid, gross)
+        tax_paid = round(gross * (tax_rate / 100.0), 1)
+        tax_paid = min(tax_paid, float(gross))
     else:
-        tax_paid = 0
-    net_savings = max(0, gross - tax_paid)
+        tax_paid = 0.0
+    net_savings = round(gross - tax_paid, 1)
 
     levy_contribution = max(0, int(round(total_garrison * (levy_rate / 100.0))))
     household_guard = max(0, total_garrison - levy_contribution)
@@ -345,7 +354,8 @@ def get_realm_finances(state, char_id=None):
                 "val": val
             })
 
-    total_income = total_prov_tax + total_vassal_tax + total_crown_income
+    total_vassal_tax = round(total_vassal_tax, 1)
+    total_income = round(total_prov_tax + total_vassal_tax + total_crown_income, 1)
 
     army_expenses = []
     total_army_upkeep = 0
@@ -381,7 +391,7 @@ def get_realm_finances(state, char_id=None):
                 })
 
     total_expense = total_army_upkeep + total_facility_upkeep
-    net_monthly = total_income - total_expense
+    net_monthly = round(total_income - total_expense, 1)
 
     return {
         "treasury": r_char.get("gold", 0),

@@ -14,7 +14,7 @@ from game.data.provinces import PROVINCES
 from game.core.map import PROV_CAPITAL_TILES, CELL_TO_PROV
 from game.data.buildings import BUILDING_SPECS
 from game.core.assets import prov_flag_cache
-from game.systems.economy import get_vassal_landed_status, sync_province_holdings_stats
+from game.systems.economy import get_vassal_landed_status, sync_province_holdings_stats, fmt_gold
 
 def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait_cache, coa_cache):
     font_xs = fonts["xs"]
@@ -349,7 +349,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         oath_sub = "(Enemy Vassal)" if is_enemy else "(Faithful Subject)"
         stats_list = [
             ("⚔ Martial", f"{10 + (levies_contrib // 30)}" if is_landed else "8", "(Commands Fyrd)"),
-            ("◆ Stewardship", f"{11 + (tax_paid * 2)}" if is_landed else "9", "(Manages Estates)"),
+            ("◆ Stewardship", f"{11 + int(round(tax_paid * 2))}" if is_landed else "9", "(Manages Estates)"),
             ("◆ Diplomacy", "11" if is_enemy else "13", "(Foreign Court)" if is_enemy else "(Royal Harmony)"),
             ("⚔ Feudal Oath", oath_val, oath_sub)
         ]
@@ -375,13 +375,13 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         screen.blit(font_md.render("◆ Vassal Finances & Revenue", True, COLOR_GOLD), (pop_x + 35, col_y + 10))
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 35, col_y + 32), (pop_x + 35 + col_w - 20, col_y + 32), 1)
     
-        screen.blit(font_sm.render(f"Treasury: {v_obj['gold']} Gold", True, COLOR_GOLD), (pop_x + 40, col_y + 40))
+        screen.blit(font_sm.render(f"Treasury: {fmt_gold(v_obj['gold'])} Gold", True, COLOR_GOLD), (pop_x + 40, col_y + 40))
         
         # Breakdown of monthly finances
         if is_landed:
-            screen.blit(font_xs.render(f"• Gross Domain Income: +{monthly_gross}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 68))
+            screen.blit(font_xs.render(f"• Gross Domain Income: +{fmt_gold(monthly_gross)}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 68))
             screen.blit(font_xs.render("  (From tenant rents, tolls & agricultural yield)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 84))
-            screen.blit(font_xs.render(f"• Feudal Royal Tax ({tax_rate}%): -{tax_paid}g / month", True, COLOR_TEXT_RED), (pop_x + 40, col_y + 104))
+            screen.blit(font_xs.render(f"• Feudal Royal Tax ({tax_rate}%): -{fmt_gold(tax_paid)}g / month", True, COLOR_TEXT_RED), (pop_x + 40, col_y + 104))
             
             # Interactive Tax Controls in Dossier (Player only)
             if not is_enemy:
@@ -429,7 +429,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                         state.logs.append(f"Increased {v_obj['name']}'s tax obligation to {v_obj['tax_rate']}%.")
     
             screen.blit(font_xs.render(f"  (Directly enriches {liege_char['name']}'s treasury)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
-            screen.blit(font_xs.render(f"• Net Monthly Savings: +{net_profit}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 140))
+            screen.blit(font_xs.render(f"• Net Monthly Savings: +{fmt_gold(net_profit)}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 140))
         else:
             screen.blit(font_xs.render("• Gross Domain Income: 0g / month", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 68))
             screen.blit(font_xs.render("  (Landless noble holds no estates or tolls)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 84))

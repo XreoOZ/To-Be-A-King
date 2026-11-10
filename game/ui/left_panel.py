@@ -13,7 +13,7 @@ from game.data.provinces import PROVINCES
 from game.data.buildings import BUILDING_SPECS, BARRACK_UPGRADE_COSTS, get_barrack_stats
 from game.systems.economy import (
     get_all_settlement_holdings, get_realm_finances,
-    get_vassal_landed_status, sync_province_holdings_stats
+    get_vassal_landed_status, sync_province_holdings_stats, fmt_gold
 )
 
 def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_cache, coa_cache):
@@ -481,8 +481,8 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 17))
             
             levy_txt = f"+{st['levy_contribution']}" if st["is_landed"] else "0"
-            tax_txt = f"+{st['tax_paid']}g/m" if st["is_landed"] else "0g/m"
-            screen.blit(font_xs.render(f"Gold: {v_data['gold']}g  •  Levy: {levy_txt}  •  Tax: {tax_txt}", True, COLOR_TEXT_MUTED), (32, vy + 30))
+            tax_txt = f"+{fmt_gold(st['tax_paid'])}g/m" if st["is_landed"] else "0g/m"
+            screen.blit(font_xs.render(f"Gold: {fmt_gold(v_data['gold'])}g  •  Levy: {levy_txt}  •  Tax: {tax_txt}", True, COLOR_TEXT_MUTED), (32, vy + 30))
             
             if mouse_clicked and is_vc_hov:
                 state.selected_province = v_pid
@@ -718,7 +718,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_t_inc, 1, border_radius=3)
             screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE), (133, vy + 36))
     
-            tax_info = f"+{st['tax_paid']}g/m" if st["is_landed"] else "0g"
+            tax_info = f"+{fmt_gold(st['tax_paid'])}g/m" if st["is_landed"] else "0g"
             screen.blit(font_xs.render(tax_info, True, COLOR_TEXT_GREEN if st['tax_paid'] > 0 else COLOR_TEXT_MUTED), (150, vy + 37))
     
             # Row 4: Levy Duty Controls [ ⚔ Levy: [-] [XX%] [+] (+X Men) ]
@@ -923,7 +923,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             pygame.draw.rect(screen, (80, 110, 150), card_v, 1, border_radius=5)
     
             screen.blit(font_xs.render("♚ Feudal Vassal Tithes", True, COLOR_GOLD), (32, 502))
-            v_tot_lbl = font_xs.render(f"+{fin['total_vassal_tax']}g/m", True, COLOR_TEXT_GREEN)
+            v_tot_lbl = font_xs.render(f"+{fmt_gold(fin['total_vassal_tax'])}g/m", True, COLOR_TEXT_GREEN)
             screen.blit(v_tot_lbl, (275 - v_tot_lbl.get_width(), 502))
     
             screen.blit(font_xs.render("Taxes levied from vassals under Realm Laws:", True, COLOR_TEXT_MUTED), (32, 518))
@@ -955,7 +955,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 for v_item in cur_v_slice:
                     v_short = v_item['name'].split()[1] if len(v_item['name'].split()) > 1 else v_item['name']
                     screen.blit(font_xs.render(f"• {v_short[:10]} ({v_item['prov']}):", True, (210, 220, 235)), (34, vy_item))
-                    screen.blit(font_xs.render(f"{v_item['tax_rate']}% -> +{v_item['tax_paid']}g/m", True, COLOR_TEXT_GREEN), (170, vy_item))
+                    screen.blit(font_xs.render(f"{v_item['tax_rate']}% -> +{fmt_gold(v_item['tax_paid'])}g/m", True, COLOR_TEXT_GREEN), (170, vy_item))
                     vy_item += 18
             else:
                 screen.blit(font_xs.render("• No landed vassals paying tithes yet", True, COLOR_TEXT_MUTED), (34, 545))
@@ -1038,9 +1038,9 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             pygame.draw.rect(screen, COLOR_GOLD, card_s, 1, border_radius=5)
     
             screen.blit(font_xs.render("⚖ Monthly Financial Bottom Line", True, COLOR_GOLD), (32, 610))
-            screen.blit(font_xs.render(f"Gross Inflow: +{fin['total_income']}g / month", True, (160, 225, 180)), (34, 626))
-            screen.blit(font_xs.render(f"Gross Outflow: -{fin['total_expense']}g / month", True, (255, 140, 140)), (34, 642))
+            screen.blit(font_xs.render(f"Gross Inflow: +{fmt_gold(fin['total_income'])}g / month", True, (160, 225, 180)), (34, 626))
+            screen.blit(font_xs.render(f"Gross Outflow: -{fmt_gold(fin['total_expense'])}g / month", True, (255, 140, 140)), (34, 642))
     
-            net_st_lbl = font_xs.render(f"Net Cash Flow: {net_sign}{fin['net_monthly']}g / month", True, net_col)
+            net_st_lbl = font_xs.render(f"Net Cash Flow: {net_sign}{fmt_gold(abs(fin['net_monthly']))}g / month", True, net_col)
             screen.blit(net_st_lbl, (34, 658))
     

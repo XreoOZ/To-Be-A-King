@@ -16,7 +16,7 @@ from game.core.map import CELL_TO_PROV
 from game.core.assets import load_image, portrait_cache
 from game.core.state import carve_new_fief
 from game.systems.economy import (
-    get_province_holdings, get_vassal_landed_status, sync_province_holdings_stats
+    get_province_holdings, get_vassal_landed_status, sync_province_holdings_stats, fmt_gold
 )
 from game.systems.military import is_province_contested
 
@@ -505,8 +505,8 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                 c_info = v.get('city_name') if st["is_landed"] else 'Landless Noble (Unlanded)'
                 screen.blit(font_xs.render(f"Fief: {c_info}", True, (200, 230, 255)), (888, vy + 17))
                 levy_txt = f"+{st['levy_contribution']}" if st["is_landed"] else "0"
-                tax_txt = f"+{st['tax_paid']}g/m" if st["is_landed"] else "0g/m"
-                screen.blit(font_xs.render(f"Gold: {v['gold']}g  •  Levies: {levy_txt}  •  Tax: {tax_txt}", True, COLOR_TEXT_MUTED), (888, vy + 29))
+                tax_txt = f"+{fmt_gold(st['tax_paid'])}g/m" if st["is_landed"] else "0g/m"
+                screen.blit(font_xs.render(f"Gold: {fmt_gold(v['gold'])}g  •  Levies: {levy_txt}  •  Tax: {tax_txt}", True, COLOR_TEXT_MUTED), (888, vy + 29))
     
                 if mouse_clicked and is_v_hov:
                     state.selected_vassal_idx = v_idx
