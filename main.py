@@ -482,6 +482,7 @@ class GameState:
         # Left Panel Sub-Tab System ('armies', 'vassals', or 'demesne')
         self.left_tab = "armies"
         self.vassal_page = 0
+        self.fief_page = 0
         
         # Camera & Map Viewport Zoom / Pan State
         self.zoom = 0.85                 # default initial zoom factor (0.85 frames whole Britain, 1.0 = standard, up to 2.4 = zoomed in)
@@ -1409,7 +1410,19 @@ def run_game():
                 running = False
 
             elif event.type == pygame.MOUSEWHEEL:
-                if map_viewport.collidepoint(mouse_pos):
+                r_panel_rect = pygame.Rect(860, 62, 330, WINDOW_HEIGHT - 72)
+                l_panel_rect = pygame.Rect(10, 62, 290, WINDOW_HEIGHT - 72)
+                if r_panel_rect.collidepoint(mouse_pos) and state.right_tab == "fiefs":
+                    if event.y > 0:
+                        state.fief_page = max(0, state.fief_page - 1)
+                    elif event.y < 0:
+                        state.fief_page += 1
+                elif l_panel_rect.collidepoint(mouse_pos) and state.left_tab == "vassals":
+                    if event.y > 0:
+                        state.vassal_page = max(0, state.vassal_page - 1)
+                    elif event.y < 0:
+                        state.vassal_page += 1
+                elif map_viewport.collidepoint(mouse_pos):
                     old_zoom = state.zoom
                     zoom_delta = 0.12 * event.y
                     new_zoom = max(state.min_zoom, min(state.max_zoom, round(state.zoom + zoom_delta, 2)))
@@ -2057,6 +2070,7 @@ def run_game():
                         state.selected_army_ids = []
                         state.selected_settlement = None
                         state.selected_vassal_idx = None
+                        state.fief_page = 0
 
         # -----------------------------------------------------------
         # PASS 2: Draw borders ONLY on edges between different PROVINCES
@@ -2827,7 +2841,7 @@ def run_game():
                             prov_cities[c_name] = {"lord": sdata.get("lord", "None"), "tile": coord}
 
                 cy = 190
-                for c_name, c_info in list(prov_cities.items())[:4]:
+                for c_name, c_info in list(prov_cities.items())[:7]:
                     c_box = pygame.Rect(880, cy, 290, 42)
                     is_c_hov = c_box.collidepoint(mouse_pos)
                     pygame.draw.rect(screen, (45, 52, 68) if is_c_hov else (32, 38, 50), c_box, border_radius=4)
@@ -2892,7 +2906,9 @@ def run_game():
             # TAB 4: FIEFS (Fiefs Management, Redrawing, Granting, Revoking)
             # -------------------------------------------------------------
             elif state.right_tab == "fiefs":
-                screen.blit(font_md.render("Provincial Fiefs & Baronies", True, COLOR_GOLD), (880, 155))
+                prov_fiefs = [f for f in state.fiefs.values() if f.get("province") == state.selected_province]
+                total_fiefs = len(prov_fiefs)
+                screen.blit(font_md.render(f"Provincial Fiefs & Baronies ({total_fiefs})", True, COLOR_GOLD), (880, 155))
 
                 # Header action: Edit banner or Carve New Fief button
                 if state.editing_fief_id:
@@ -2912,7 +2928,7 @@ def run_game():
                     if mouse_clicked and d_hov:
                         state.editing_fief_id = None
                         state.logs.append(f"Saved boundaries for {f_name}!")
-                    fy = 230
+                    fy = 228
                 else:
                     # Carve New Fief Button
                     carve_btn = pygame.Rect(880, 182, 290, 28)
@@ -2922,10 +2938,17 @@ def run_game():
                     screen.blit(font_xs.render("+ CARVE NEW FIEF (Partition Land)", True, COLOR_TEXT_WHITE), (935, 188))
                     if mouse_clicked and c_hov:
                         carve_new_fief(state, state.selected_province)
-                    fy = 218
+                    fy = 216
 
-                prov_fiefs = [f for f in state.fiefs.values() if f.get("province") == state.selected_province]
-                for f_data in prov_fiefs[:4]:
+                # Pagination setup (5 fiefs per page, or 4 when editing)
+                per_page = 5 if not state.editing_fief_id else 4
+                total_pages = max(1, (total_fiefs + per_page - 1) // per_page)
+                state.fief_page = max(0, min(getattr(state, "fief_page", 0), total_pages - 1))
+
+                start_i = state.fief_page * per_page
+                page_fiefs = prov_fiefs[start_i:start_i + per_page]
+
+                for f_data in page_fiefs:
                     f_box = pygame.Rect(880, fy, 290, 64)
                     is_f_hov = f_box.collidepoint(mouse_pos)
                     is_f_sel = (state.selected_fief_id == f_data["id"])
@@ -2936,8 +2959,18 @@ def run_game():
                     b_color = COLOR_GOLD if is_f_editing else ((100, 255, 120) if is_f_sel else COLOR_PANEL_BORDER)
                     pygame.draw.rect(screen, b_color, f_box, 2 if (is_f_sel or is_f_editing) else 1, border_radius=4)
 
-                    holder_str = f"Lord: {f_data['holder']}" if f_data["holder"] else "Status: UNASSIGNED CROWN FIEF"
-                    h_col = (180, 255, 180) if f_data["holder"] else (255, 180, 80)
+                    is_crown_owned = (f_data["holder"] is None or f_data["holder"] == state.player["name"] or f_data.get("is_crown_demesne"))
+                    
+                    if f_data["holder"] == state.player["name"] or f_data.get("is_crown_demesne"):
+                        holder_str = f"Lord: {state.player['name']} (Crown Demesne)"
+                        h_col = COLOR_GOLD
+                    elif f_data["holder"] is None:
+                        holder_str = "Status: UNASSIGNED CROWN FIEF"
+                        h_col = (255, 180, 80)
+                    else:
+                        holder_str = f"Lord: {f_data['holder']}"
+                        h_col = (180, 255, 180)
+
                     screen.blit(font_xs.render(f"🛡 {f_data['name']} ({len(f_data['tiles'])} Tiles)", True, COLOR_GOLD), (888, fy + 4))
                     screen.blit(font_xs.render(holder_str, True, h_col), (888, fy + 18))
 
@@ -2957,8 +2990,8 @@ def run_game():
                         state.editing_fief_id = None if is_f_editing else f_data["id"]
                         state.selected_fief_id = f_data["id"]
 
-                    # 2. Grant or Revoke Button
-                    if f_data["holder"] is None:
+                    # 2. Grant / Revoke Buttons
+                    if is_crown_owned:
                         # Grant Fief Button (Opens Vassal Selection Modal)
                         b_grant = pygame.Rect(970, fy + 36, 120, 20)
                         g_hov = b_grant.collidepoint(mouse_pos)
@@ -2984,7 +3017,7 @@ def run_game():
                             state.logs.append(f"Dissolved {f_data['name']}. Land returned to province.")
                             break
                     else:
-                        # Revoke Fief Button (Returns ownership to King Alfred)
+                        # Revoke Fief Button (Transfers vassal ownership to Crown Demesne)
                         b_revoke = pygame.Rect(970, fy + 36, 194, 20)
                         r_hov = b_revoke.collidepoint(mouse_pos)
                         pygame.draw.rect(screen, (100, 45, 45) if r_hov else (70, 30, 30), b_revoke, border_radius=3)
@@ -2993,8 +3026,9 @@ def run_game():
                         if mouse_clicked and r_hov:
                             v_prev = f_data["holder"]
                             v_prev_id = f_data.get("vassal_id")
-                            f_data["holder"] = None
+                            f_data["holder"] = state.player["name"]
                             f_data["vassal_id"] = None
+                            f_data["is_crown_demesne"] = True
                             p_short = PROVINCES[f_data['province']]['name'].split()[0]
                             f_data["name"] = f"Crown Fief of {p_short}"
 
@@ -3003,6 +3037,7 @@ def run_game():
                                 if t in state.settlements:
                                     state.settlements[t]["lord"] = f"{state.player['name']} (Crown Demesne)"
                                     state.settlements[t]["vassal_id"] = None
+                                    state.settlements[t]["is_crown_demesne"] = True
                                     state.settlements[t]["is_crown_fief"] = True
 
                             # 2. Update former vassal's held tiles
@@ -3018,7 +3053,31 @@ def run_game():
                     if mouse_clicked and is_f_hov and not (e_hov or g_hov or d_hov or r_hov):
                         state.selected_fief_id = f_data["id"]
 
-                    fy += 70
+                    fy += 68
+
+                # Pagination Controls for Fiefs list
+                if total_pages > 1:
+                    py_bar = 700
+                    prev_btn = pygame.Rect(880, py_bar, 80, 26)
+                    next_btn = pygame.Rect(1090, py_bar, 80, 26)
+                    p_hov = prev_btn.collidepoint(mouse_pos)
+                    n_hov = next_btn.collidepoint(mouse_pos)
+
+                    pygame.draw.rect(screen, COLOR_BUTTON_HOVER if p_hov else COLOR_BUTTON_NORMAL, prev_btn, border_radius=4)
+                    pygame.draw.rect(screen, COLOR_PANEL_BORDER, prev_btn, 1, border_radius=4)
+                    screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.fief_page > 0 else COLOR_TEXT_MUTED), (898, py_bar + 5))
+
+                    pygame.draw.rect(screen, COLOR_BUTTON_HOVER if n_hov else COLOR_BUTTON_NORMAL, next_btn, border_radius=4)
+                    pygame.draw.rect(screen, COLOR_PANEL_BORDER, next_btn, 1, border_radius=4)
+                    screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.fief_page < total_pages - 1 else COLOR_TEXT_MUTED), (1108, py_bar + 5))
+
+                    pg_lbl = font_xs.render(f"Page {state.fief_page + 1}/{total_pages} ({total_fiefs} Fiefs)", True, COLOR_TEXT_MUTED)
+                    screen.blit(pg_lbl, (965 + (120 - pg_lbl.get_width()) // 2, py_bar + 5))
+
+                    if mouse_clicked and p_hov and state.fief_page > 0:
+                        state.fief_page -= 1
+                    elif mouse_clicked and n_hov and state.fief_page < total_pages - 1:
+                        state.fief_page += 1
             else:
                 # Enemy Province Instructions
                 screen.blit(font_md.render("Viking Controlled Territory", True, COLOR_TEXT_RED), (880, 415))
