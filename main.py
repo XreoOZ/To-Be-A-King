@@ -346,16 +346,60 @@ class Army:
 # City Siege & Contested Province Helpers
 # -------------------------------------------------------------
 def get_province_holdings(state, pid):
-    """Return dict of holding_name -> list of (c, r) tiles in that province."""
+    """Return dict of holding_key -> list of (c, r) tiles in that province."""
     holdings = {}
     for (c, r), s in state.settlements.items():
         if s.get("province") == pid:
-            h_name = s.get("name", "Unknown Holding")
-            holdings.setdefault(h_name, []).append((c, r))
+            h_key = s.get("id") or s.get("name", "Unknown Holding")
+            holdings.setdefault(h_key, []).append((c, r))
     return holdings
 
 def get_all_settlement_holdings(state):
-    """Groups settlement tiles into unified multi-tile holding objects."""
+    """Groups settlement tiles into unified multi-tile holding objects strictly per holding/settlement ID."""
+    has_ids = any("id" in s for s in state.settlements.values())
+    
+    if has_ids:
+        holdings_by_id = {}
+        for coord, sdata in state.settlements.items():
+            s_id = sdata.get("id") or coord
+            if s_id not in holdings_by_id:
+                holdings_by_id[s_id] = {
+                    "id": s_id,
+                    "name": sdata.get("name", "Holding"),
+                    "province": sdata.get("province"),
+                    "tiles": [],
+                    "primary_tile": coord,
+                    "data": sdata,
+                    "occupied_by": sdata.get("occupied_by")
+                }
+            holdings_by_id[s_id]["tiles"].append(coord)
+
+        holdings = []
+        for s_id, h in holdings_by_id.items():
+            comp = sorted(h["tiles"])
+            min_c = min(c for c, r in comp)
+            max_c = max(c for c, r in comp)
+            min_r = min(r for c, r in comp)
+            max_r = max(r for c, r in comp)
+            orient = "single"
+            if len(comp) == 2:
+                if min_r == max_r:
+                    orient = "H"
+                elif min_c == max_c:
+                    orient = "V"
+                else:
+                    orient = "H"
+            elif len(comp) > 2:
+                orient = "H" if (max_c - min_c) >= (max_r - min_r) else "V"
+            h["min_c"] = min_c
+            h["max_c"] = max_c
+            h["min_r"] = min_r
+            h["max_r"] = max_r
+            h["orient"] = orient
+            holdings.append(h)
+        return holdings
+
+    # Fallback for legacy state without 'id' (strictly limit to at most 2 contiguous tiles per holding)
     visited = set()
     holdings = []
     for coord, sdata in state.settlements.items():
@@ -367,13 +411,19 @@ def get_all_settlement_holdings(state):
         while queue:
             curr = queue.pop(0)
             comp.append(curr)
+            if len(comp) >= 2:
+                break
             cx, cy = curr
             for nxt in [(cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)]:
                 if nxt in state.settlements and nxt not in visited:
                     n_data = state.settlements[nxt]
-                    if n_data.get("province") == sdata.get("province") and n_data.get("name") == sdata.get("name"):
+                    if (n_data.get("province") == sdata.get("province") and
+                        n_data.get("name") == sdata.get("name") and
+                        n_data.get("vassal_id") == sdata.get("vassal_id") and
+                        n_data.get("is_crown_demesne") == sdata.get("is_crown_demesne")):
                         visited.add(nxt)
                         queue.append(nxt)
+                        break
         comp.sort()
         min_c = min(c for c, r in comp)
         max_c = max(c for c, r in comp)
@@ -458,6 +508,7 @@ class GameState:
         self.build_orientation = "H"     # "H" (Horizontal) or "V" (Vertical) for 2-tile
         self.settlements = {}            # (c, r) -> {"province": pid, "type": "town", "name": str}
         self.selected_settlement = None  # (c, r) coordinate if a city is clicked
+        self.settlement_id_counter = 1
         
         # Vassal System State
         self.vassals = {}                # pid -> list of Vassal dicts
@@ -1162,6 +1213,7 @@ def run_game():
         target_state.settlements = {}
         target_state.fiefs = {}
         fief_counter = 1
+        settlement_counter = 1
         used_tiles_by_prov = {pid: set() for pid in prov_tile_list.keys()}
 
         # -------------------------------------------------------------
@@ -1200,9 +1252,12 @@ def run_game():
                         pair = [(c, r)]
                         break
             if pair:
+                s_id = f"settlement_{settlement_counter}"
+                settlement_counter += 1
                 for t in pair:
                     used.add(t)
                     target_state.settlements[t] = {
+                        "id": s_id,
                         "province": pid,
                         "type": "town",
                         "name": spec["city"],
@@ -1250,9 +1305,12 @@ def run_game():
                             break
 
                 if pair:
+                    s_id = f"settlement_{settlement_counter}"
+                    settlement_counter += 1
                     for t in pair:
                         used.add(t)
                         target_state.settlements[t] = {
+                            "id": s_id,
                             "province": pid,
                             "type": "town",
                             "name": city_name,
@@ -1279,6 +1337,7 @@ def run_game():
 
         # Synchronize target_state's counter so newly carved fiefs never collide with starter fiefs!
         target_state.fief_id_counter = max(target_state.fief_id_counter, fief_counter + 10)
+        target_state.settlement_id_counter = max(target_state.settlement_id_counter, settlement_counter + 10)
 
     # Setup starter cities and fiefs matching each vassal exactly
     setup_province_starter_cities(state)
@@ -1298,15 +1357,15 @@ def run_game():
             target_state.logs.append(f"Cannot carve fief: Only {len(free_tiles)} unclaimed tile(s) left in {pname} (Min 2 required). Dissolve an existing fief first.")
             return None
 
-        # Prefer adjacent pair of free tiles
+        # Prefer adjacent pair of free tiles in all 4 cardinal directions
         new_tiles = []
         free_set = set(free_tiles)
         for (fc, fr) in free_tiles:
-            if (fc + 1, fr) in free_set:
-                new_tiles = [(fc, fr), (fc + 1, fr)]
-                break
-            elif (fc, fr + 1) in free_set:
-                new_tiles = [(fc, fr), (fc, fr + 1)]
+            for (nfc, nfr) in [(fc + 1, fr), (fc - 1, fr), (fc, fr + 1), (fc, fr - 1)]:
+                if (nfc, nfr) in free_set:
+                    new_tiles = [(fc, fr), (nfc, nfr)]
+                    break
+            if new_tiles:
                 break
                 
         if not new_tiles:
@@ -2043,47 +2102,7 @@ def run_game():
                         state.fief_page = 0
 
         # -----------------------------------------------------------
-        # PASS 2: Draw borders ONLY on edges between different PROVINCES
-        #         (tiles of same province = seamless; different province = border)
-        # -----------------------------------------------------------
-        BORDER_COL   = (0, 0, 0)      # black line between provinces
-        BORDER_W     = 2
-
-        def get_prov(col_i, row_i):
-            """Return province id for tile, or None if ocean."""
-            return cell_to_prov.get((col_i, row_i))
-
-        for r, row in enumerate(raw_grid):
-            for c, ch in enumerate(row):
-                if ch == ".":
-                    continue
-                cell_x = origin_x + (c * curr_tile_w)
-                cell_y = origin_y + (r * curr_tile_h)
-                prov_id    = get_prov(c, r)
-                is_selected = (prov_id == state.selected_province)
-                border_col = COLOR_GOLD if is_selected else BORDER_COL
-
-                # Right edge — draw if neighbor is different province (or ocean)
-                if get_prov(c + 1, r) != prov_id:
-                    ex = cell_x + curr_tile_w - 1
-                    pygame.draw.line(screen, border_col,
-                                     (ex, cell_y), (ex, cell_y + curr_tile_h - 1), BORDER_W)
-                # Bottom edge
-                if get_prov(c, r + 1) != prov_id:
-                    ey = cell_y + curr_tile_h - 1
-                    pygame.draw.line(screen, border_col,
-                                     (cell_x, ey), (cell_x + curr_tile_w - 1, ey), BORDER_W)
-                # Left edge
-                if get_prov(c - 1, r) != prov_id:
-                    pygame.draw.line(screen, border_col,
-                                     (cell_x, cell_y), (cell_x, cell_y + curr_tile_h - 1), BORDER_W)
-                # Top edge
-                if get_prov(c, r - 1) != prov_id:
-                    pygame.draw.line(screen, border_col,
-                                     (cell_x, cell_y), (cell_x + curr_tile_w - 1, cell_y), BORDER_W)
-
-        # -----------------------------------------------------------
-        # PASS 2.5: Draw Fiefdom Sub-divisions & Borders
+        # PASS 2: Draw Fiefdom Sub-divisions & Interior Borders
         # -----------------------------------------------------------
         fief_palette = [(120, 200, 255), (255, 175, 90), (190, 130, 255), (90, 255, 190), (255, 120, 150), (240, 220, 90)]
         for f_idx, (fid, fdata) in enumerate(state.fiefs.items()):
@@ -2132,6 +2151,45 @@ def run_game():
                 # Top edge
                 if (fc, fr - 1) not in f_tiles_set:
                     pygame.draw.line(screen, edge_col, (fx, fy), (fx + curr_tile_w - 1, fy), edge_w)
+
+        # -----------------------------------------------------------
+        # PASS 2.5: Draw Outer Province Boundaries Framing All Land
+        #           (Drawn on top of fiefs so province perimeter is solid & crisp!)
+        # -----------------------------------------------------------
+        BORDER_COL   = (0, 0, 0)      # black line between provinces
+        def get_prov(col_i, row_i):
+            """Return province id for tile, or None if ocean."""
+            return cell_to_prov.get((col_i, row_i))
+
+        for r, row in enumerate(raw_grid):
+            for c, ch in enumerate(row):
+                if ch == ".":
+                    continue
+                cell_x = origin_x + (c * curr_tile_w)
+                cell_y = origin_y + (r * curr_tile_h)
+                prov_id    = get_prov(c, r)
+                is_selected = (prov_id == state.selected_province)
+                border_col = COLOR_GOLD if is_selected else BORDER_COL
+                border_w = 3 if is_selected else 2
+
+                # Right edge — draw if neighbor is different province (or ocean)
+                if get_prov(c + 1, r) != prov_id:
+                    ex = cell_x + curr_tile_w - 1
+                    pygame.draw.line(screen, border_col,
+                                     (ex, cell_y), (ex, cell_y + curr_tile_h - 1), border_w)
+                # Bottom edge
+                if get_prov(c, r + 1) != prov_id:
+                    ey = cell_y + curr_tile_h - 1
+                    pygame.draw.line(screen, border_col,
+                                     (cell_x, ey), (cell_x + curr_tile_w - 1, ey), border_w)
+                # Left edge
+                if get_prov(c - 1, r) != prov_id:
+                    pygame.draw.line(screen, border_col,
+                                     (cell_x, cell_y), (cell_x, cell_y + curr_tile_h - 1), border_w)
+                # Top edge
+                if get_prov(c, r - 1) != prov_id:
+                    pygame.draw.line(screen, border_col,
+                                     (cell_x, cell_y), (cell_x + curr_tile_w - 1, cell_y), border_w)
 
         # -----------------------------------------------------------
         # PASS 3: Draw Built Settlements / Cities (Unified Holdings)
@@ -2326,12 +2384,31 @@ def run_game():
                 prov_obj["tax"] += 10
                 prov_obj["levies_max"] += 500
                 prov_obj["levies_current"] += 500
+                state.settlement_id_counter += 1
+                s_id = f"settlement_{state.settlement_id_counter}"
                 for tc, tr in target_tiles:
                     state.settlements[(tc, tr)] = {
+                        "id": s_id,
                         "province": state.selected_province,
                         "type": "town",
                         "name": f"{prov_obj['name'].split()[0]} Burgh",
                         "lord": f"{state.player['name']} (Crown Demesne)",
+                        "vassal_id": None,
+                        "is_crown_demesne": True
+                    }
+                # Ensure these tiles belong to a Crown Fief if not already claimed
+                claimed_f = any((tc, tr) in f.get("tiles", []) for f in state.fiefs.values())
+                if not claimed_f:
+                    state.fief_id_counter += 1
+                    fid = f"fief_{state.fief_id_counter}"
+                    p_short = prov_obj['name'].split()[0]
+                    state.fiefs[fid] = {
+                        "id": fid,
+                        "province": state.selected_province,
+                        "tiles": list(target_tiles),
+                        "name": f"Crown Fief of {p_short}",
+                        "holder": state.player["name"],
+                        "vassal_id": None,
                         "is_crown_demesne": True
                     }
                 state.logs.append(f"Founded Grand City in {prov_obj['name']} (-1000g, +10 Tax, +500 Levies)!")
@@ -3134,8 +3211,11 @@ def run_game():
                     # Construct town strictly on free tiles within this vassal's owned fief!
                     b_tiles = req.get("build_tiles", [])
                     city_title = f"{req['vassal'].split()[1]}'s {random.choice(['Borough', 'Castle', 'Burgh', 'Keep'])}"
+                    state.settlement_id_counter += 1
+                    s_id = f"settlement_{state.settlement_id_counter}"
                     for t in b_tiles:
                         state.settlements[t] = {
+                            "id": s_id,
                             "province": pid,
                             "type": "town",
                             "name": city_title,
