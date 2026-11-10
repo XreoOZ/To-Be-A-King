@@ -3,7 +3,7 @@ Vassal Finances, Province Holdings Stats, Royal Ledger, and Domain Revenue
 """
 from game.data.provinces import PROVINCES
 from game.data.characters import CHARACTERS
-from game.data.buildings import get_barrack_stats
+from game.data.buildings import BUILDING_SPECS, get_barrack_stats
 
 def fmt_gold(val):
     """Formats gold into a clean string, showing 1 decimal place only if fractional (e.g. 1.8g, 0.2g, 5g)."""
@@ -145,19 +145,17 @@ def get_vassal_landed_status(state, v_dict, prov_id=None):
     if held_settlements:
         for s in held_settlements:
             stype = s.get("type", "city")
-            if stype in ("city", "town"):
-                gross += 5
-                total_garrison += 100
-            elif stype == "fort":
-                gross += 2
-                total_garrison += 300
-            elif stype == "barrack":
-                gross += 1
+            spec = BUILDING_SPECS.get(stype, {})
+            gross += spec.get("income", 0)
+            if stype == "barrack":
                 lvl = s.get("level", 0)
-                total_garrison += (100 + min(400, lvl * 100))
+                bstats = get_barrack_stats(lvl)
+                total_garrison += bstats.get("garrison", 100)
+            else:
+                total_garrison += spec.get("garrison", 100)
     else:
-        gross = len(held_tiles) * 1
-        total_garrison = len(held_tiles) * 35
+        gross = 0
+        total_garrison = len(held_tiles) * 20
 
     if gross > 0 and tax_rate > 0:
         tax_paid = round(gross * (tax_rate / 100.0), 1)
