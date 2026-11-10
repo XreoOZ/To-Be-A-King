@@ -1146,6 +1146,30 @@ class GameState:
         else:
             self.logs.append("All available levies are already raised.")
 
+    def raise_all_enemy_levies(self, is_emergency=False):
+        """Mobilizes ALL available levies across 100% of Danelaw provinces (All-In)."""
+        raised_count = 0
+        total_men = 0
+        danelaw_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.enemy_id]
+        for pid in danelaw_provs:
+            prov = PROVINCES[pid]
+            available = prov.get("levies_current", 0)
+            if available > 0:
+                army_id = f"army_{self.army_id_counter}"
+                self.army_id_counter += 1
+                p_short = prov["name"].split()[0]
+                army_name = f"{p_short} Warband"
+                is_royal = (pid == "jorvik")
+                new_army = Army(army_id, self.enemy_id, pid, available, army_name,
+                                flag_origin=pid, rank=3 if is_royal else 1)
+                new_army.is_mustering = True
+                new_army.muster_days = 12 if is_emergency else 20
+                self.armies.append(new_army)
+                prov["levies_current"] = 0
+                raised_count += 1
+                total_men += available
+        return raised_count, total_men
+
     def rally_all_armies_to(self, target_province_id):
         player_armies = [a for a in self.armies if a.owner == self.player_id]
         if not player_armies:
@@ -1677,40 +1701,25 @@ class GameState:
         has_border_threat = len(threatened_borders) > 0
 
         # ---------------------------------------------------------
-        # 2. EMERGENCY MOBILIZATION (RAISE LEVIES)
-        # If threat at border, raise levies across all Danelaw provinces immediately!
-        # Or if no armies exist at all, mobilize standard levies.
+        # 2. EMERGENCY ALL-IN MOBILIZATION (RAISE ALL LEVIES)
+        # If threat at border or AI has no field forces, mobilize ALL Danelaw provinces!
         # ---------------------------------------------------------
+        unraised_enemy_levies = sum(PROVINCES[pid].get("levies_current", 0) for pid in danelaw_provs)
+
         should_mobilize = False
-        if has_border_threat:
-            if total_viking_field < total_threat_troops * 1.15 or len(danelaw_armies) == 0:
-                should_mobilize = True
-        elif len(danelaw_armies) == 0:
+        if has_border_threat and unraised_enemy_levies > 0:
+            should_mobilize = True
+        elif len(danelaw_armies) == 0 and unraised_enemy_levies > 0:
             should_mobilize = True
 
         if should_mobilize:
-            newly_raised = 0
-            for pid in danelaw_provs:
-                p = PROVINCES[pid]
-                min_threshold = 200 if has_border_threat else 500
-                if p["levies_current"] > min_threshold:
-                    army_id = f"army_{self.army_id_counter}"
-                    self.army_id_counter += 1
-                    host_troops = p["levies_current"]
-                    host = Army(army_id, self.enemy_id, pid, host_troops, "Viking Warband")
-                    host.is_mustering = True
-                    # Faster emergency muster if foreign army is already at the border!
-                    host.muster_days = 12 if has_border_threat else 20
-                    self.armies.append(host)
-                    p["levies_current"] = 0
-                    newly_raised += host_troops
-
-            if newly_raised > 0:
+            count, men = self.raise_all_enemy_levies(is_emergency=has_border_threat)
+            if count > 0:
                 if has_border_threat:
                     t_names = ", ".join([PROVINCES[dp]['name'].split()[0] for dp in threatened_borders.keys()])
-                    self.logs.append(f"🦅 Raven Warning! Saxon armies massing near {t_names}! Danelaw sounds emergency war horns (+{newly_raised:,} men)!")
+                    self.logs.append(f"🦅 Raven Warning! Saxon armies massing near {t_names}! Danelaw sounds ALL-IN war horns (+{men:,} men in {count} hosts)!")
                 else:
-                    self.logs.append(f"Ravens squawk! The Danelaw has summoned their Viking hosts (+{newly_raised:,} men)!")
+                    self.logs.append(f"Ravens squawk! The Danelaw has summoned ALL realm warbands (+{men:,} men in {count} hosts)!")
                 return
 
         # ---------------------------------------------------------
