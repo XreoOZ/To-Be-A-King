@@ -29,91 +29,103 @@ from game.systems.military import is_province_contested
 
 _HORSE_SPRITE_CACHE = {}
 
-def get_horse_courier_sprite(owner_id, is_player, facing_left, frame_idx):
-    key = (owner_id, is_player, facing_left, frame_idx)
+def get_horse_courier_sprite(owner_id, is_player, facing_left, frame_idx, target_w=32, target_h=24):
+    key = (owner_id, is_player, facing_left, frame_idx, target_w, target_h)
     if key in _HORSE_SPRITE_CACHE:
         return _HORSE_SPRITE_CACHE[key]
 
-    w, h = 32, 24
-    surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    anim_phase = (frame_idx / 12.0) * (math.pi * 2)
-    bob = int(math.sin(anim_phase * 2) * 1.5)
-
-    # Realm & faction palette
-    if is_player:
-        col_horse = (175, 125, 75)      # Chestnut
-        col_mane = (75, 45, 20)
-        col_rider = (215, 45, 45)       # Crimson Solaris
-        col_trim = (245, 210, 60)       # Gold
-    elif owner_id == "ruler_ironpeak":
-        col_horse = (130, 135, 145)     # Steel-grey
-        col_mane = (50, 55, 65)
-        col_rider = (45, 75, 115)       # Navy / Steel
-        col_trim = (190, 205, 225)      # Silver
-    elif owner_id == "ruler_sylvandell":
-        col_horse = (150, 115, 75)      # Bay
-        col_mane = (45, 65, 40)
-        col_rider = (35, 115, 60)       # Forest Green
-        col_trim = (215, 185, 95)       # Bronze
+    base_key = (owner_id, is_player, facing_left, frame_idx, 32, 24)
+    if base_key in _HORSE_SPRITE_CACHE:
+        base_surf = _HORSE_SPRITE_CACHE[base_key]
     else:
-        col_horse = (140, 130, 120)
-        col_mane = (60, 55, 50)
-        col_rider = (90, 85, 100)
-        col_trim = (200, 200, 200)
+        w, h = 32, 24
+        surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        anim_phase = (frame_idx / 12.0) * (math.pi * 2)
+        bob = int(math.sin(anim_phase * 2) * 1.5)
 
-    col_skin = (235, 190, 150)
-    cx = 16
-    cy = 13 + bob
+        # Realm & faction palette
+        if is_player:
+            col_horse = (175, 125, 75)      # Chestnut
+            col_mane = (75, 45, 20)
+            col_rider = (215, 45, 45)       # Crimson Solaris
+            col_trim = (245, 210, 60)       # Gold
+        elif owner_id == "ruler_ironpeak":
+            col_horse = (130, 135, 145)     # Steel-grey
+            col_mane = (50, 55, 65)
+            col_rider = (45, 75, 115)       # Navy / Steel
+            col_trim = (190, 205, 225)      # Silver
+        elif owner_id == "ruler_sylvandell":
+            col_horse = (150, 115, 75)      # Bay
+            col_mane = (45, 65, 40)
+            col_rider = (35, 115, 60)       # Forest Green
+            col_trim = (215, 185, 95)       # Bronze
+        else:
+            col_horse = (140, 130, 120)
+            col_mane = (60, 55, 50)
+            col_rider = (90, 85, 100)
+            col_trim = (200, 200, 200)
 
-    # Galloping leg swings
-    f_leg = math.sin(anim_phase) * 5
-    b_leg = -math.sin(anim_phase) * 5
+        col_skin = (235, 190, 150)
+        cx = 16
+        cy = 13 + bob
 
-    # 1. Back legs (shadowed behind body)
-    dark_horse = (max(0, col_horse[0] - 40), max(0, col_horse[1] - 40), max(0, col_horse[2] - 30))
-    pygame.draw.line(surf, dark_horse, (cx - 7, cy + 2), (cx - 10 + int(b_leg), cy + 8), 2)
-    pygame.draw.line(surf, dark_horse, (cx + 5, cy + 2), (cx + 9 + int(f_leg), cy + 8), 2)
+        # Galloping leg swings
+        f_leg = math.sin(anim_phase) * 5
+        b_leg = -math.sin(anim_phase) * 5
 
-    # 2. Tail (flowing back)
-    tail_wave = math.sin(anim_phase + 1.0) * 2.5
-    pygame.draw.line(surf, col_mane, (cx - 9, cy - 1), (cx - 14, cy + int(tail_wave)), 2)
-    pygame.draw.line(surf, col_mane, (cx - 9, cy), (cx - 15, cy + 3 + int(tail_wave)), 2)
+        # 1. Back legs (shadowed behind body)
+        dark_horse = (max(0, col_horse[0] - 40), max(0, col_horse[1] - 40), max(0, col_horse[2] - 30))
+        pygame.draw.line(surf, dark_horse, (cx - 7, cy + 2), (cx - 10 + int(b_leg), cy + 8), 2)
+        pygame.draw.line(surf, dark_horse, (cx + 5, cy + 2), (cx + 9 + int(f_leg), cy + 8), 2)
 
-    # 3. Horse torso
-    pygame.draw.ellipse(surf, col_horse, (cx - 9, cy - 4, 16, 9))
+        # 2. Tail (flowing back)
+        tail_wave = math.sin(anim_phase + 1.0) * 2.5
+        pygame.draw.line(surf, col_mane, (cx - 9, cy - 1), (cx - 14, cy + int(tail_wave)), 2)
+        pygame.draw.line(surf, col_mane, (cx - 9, cy), (cx - 15, cy + 3 + int(tail_wave)), 2)
 
-    # 4. Neck & head
-    pygame.draw.polygon(surf, col_horse, [
-        (cx + 3, cy - 2),
-        (cx + 7, cy - 8),
-        (cx + 12, cy - 7),
-        (cx + 13, cy - 4),
-        (cx + 8, cy + 1)
-    ])
-    # Ears & mane
-    pygame.draw.polygon(surf, col_horse, [(cx + 9, cy - 8), (cx + 11, cy - 12), (cx + 12, cy - 8)])
-    pygame.draw.line(surf, col_mane, (cx + 4, cy - 4), (cx + 6, cy - 7), 2)
-    pygame.draw.line(surf, col_mane, (cx + 6, cy - 6), (cx + 8, cy - 9), 2)
+        # 3. Horse torso
+        pygame.draw.ellipse(surf, col_horse, (cx - 9, cy - 4, 16, 9))
 
-    # 5. Front legs
-    pygame.draw.line(surf, col_horse, (cx - 6, cy + 2), (cx - 11 - int(b_leg), cy + 9), 2)
-    pygame.draw.line(surf, col_horse, (cx + 6, cy + 2), (cx + 12 - int(f_leg), cy + 9), 2)
+        # 4. Neck & head
+        pygame.draw.polygon(surf, col_horse, [
+            (cx + 3, cy - 2),
+            (cx + 7, cy - 8),
+            (cx + 12, cy - 7),
+            (cx + 13, cy - 4),
+            (cx + 8, cy + 1)
+        ])
+        # Ears & mane
+        pygame.draw.polygon(surf, col_horse, [(cx + 9, cy - 8), (cx + 11, cy - 12), (cx + 12, cy - 8)])
+        pygame.draw.line(surf, col_mane, (cx + 4, cy - 4), (cx + 6, cy - 7), 2)
+        pygame.draw.line(surf, col_mane, (cx + 6, cy - 6), (cx + 8, cy - 9), 2)
 
-    # 6. Courier Rider
-    pygame.draw.ellipse(surf, col_rider, (cx - 4, cy - 9, 8, 8))
-    # Cape flutter
-    pygame.draw.polygon(surf, col_rider, [(cx - 4, cy - 7), (cx - 9, cy - 4 + int(tail_wave)), (cx - 3, cy - 3)])
-    # Helmet & face
-    pygame.draw.circle(surf, col_skin, (cx + 1, cy - 10), 3)
-    pygame.draw.circle(surf, col_trim, (cx + 1, cy - 11), 3)
-    # Reins
-    pygame.draw.line(surf, (60, 40, 20), (cx + 2, cy - 6), (cx + 11, cy - 4), 1)
+        # 5. Front legs
+        pygame.draw.line(surf, col_horse, (cx - 6, cy + 2), (cx - 11 - int(b_leg), cy + 9), 2)
+        pygame.draw.line(surf, col_horse, (cx + 6, cy + 2), (cx + 12 - int(f_leg), cy + 9), 2)
 
-    if facing_left:
-        surf = pygame.transform.flip(surf, True, False)
+        # 6. Courier Rider
+        pygame.draw.ellipse(surf, col_rider, (cx - 4, cy - 9, 8, 8))
+        # Cape flutter
+        pygame.draw.polygon(surf, col_rider, [(cx - 4, cy - 7), (cx - 9, cy - 4 + int(tail_wave)), (cx - 3, cy - 3)])
+        # Helmet & face
+        pygame.draw.circle(surf, col_skin, (cx + 1, cy - 10), 3)
+        pygame.draw.circle(surf, col_trim, (cx + 1, cy - 11), 3)
+        # Reins
+        pygame.draw.line(surf, (60, 40, 20), (cx + 2, cy - 6), (cx + 11, cy - 4), 1)
 
-    _HORSE_SPRITE_CACHE[key] = surf
-    return surf
+        if facing_left:
+            surf = pygame.transform.flip(surf, True, False)
+
+        base_surf = surf
+        _HORSE_SPRITE_CACHE[base_key] = base_surf
+
+    if (target_w, target_h) != (32, 24):
+        final_surf = pygame.transform.smoothscale(base_surf, (target_w, target_h))
+    else:
+        final_surf = base_surf
+
+    _HORSE_SPRITE_CACHE[key] = final_surf
+    return final_surf
 
 def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mouse_down, fonts, banner_cloth_large, banner_cloth_small, ticks=0):
     raw_grid = RAW_GRID
@@ -1046,6 +1058,12 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     frame_idx = int((anim_ticks // 70) % 12)
     hop_courier_counts = {}
 
+    tile_scale = curr_tile_w / BASE_TILE_W
+    hw = max(14, int(28 * tile_scale))
+    hh = max(10, int(21 * tile_scale))
+    spacing_step = max(16.0, 32.0 * tile_scale)
+    stagger_step = max(3, int(6 * tile_scale))
+
     for army in state.armies:
         if army.courier_en_route and army.courier_current_prov and army.courier_next_prov:
             c_pos = province_anchors.get(army.courier_current_prov)
@@ -1073,9 +1091,8 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                     ny = dx / dist
                     tx = dx / dist
                     ty = dy / dist
-                    spacing_step = 38.0
                     offset_mag = ((c_idx + 1) // 2) * spacing_step * (1 if c_idx % 2 == 1 else -1)
-                    stagger = (c_idx % 2) * 8
+                    stagger = (c_idx % 2) * stagger_step
                     mx = int(base_x + nx * offset_mag + tx * stagger)
                     my = int(base_y + ny * offset_mag + ty * stagger)
                 else:
@@ -1091,22 +1108,24 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                     pygame.draw.line(guide_surf, (250, 215, 80, 50) if is_player else (120, 180, 255, 50), (mx, my), dest_pos, 1)
                     screen.blit(guide_surf, (0, 0))
 
-                # Animated Galloping Horse Sprite
-                horse_surf = get_horse_courier_sprite(army.owner, is_player, facing_left, frame_idx)
-                hw, hh = horse_surf.get_size()
-                screen.blit(horse_surf, (mx - hw // 2, my - hh + 4))
+                # Dynamically Scaled Galloping Horse Sprite (Tracks Zoom Level)
+                horse_surf = get_horse_courier_sprite(army.owner, is_player, facing_left, frame_idx, hw, hh)
+                screen.blit(horse_surf, (mx - hw // 2, my - hh + 2))
 
-                # Compact Days Left Badge: "Xd left"
-                b_text = f"{army.courier_days_left}d left"
+                # Compact Days Left Badge: "Xd left" (or "Xd" if zoomed far out)
+                if tile_scale < 0.78:
+                    b_text = f"{army.courier_days_left}d"
+                else:
+                    b_text = f"{army.courier_days_left}d left"
                 b_lbl = font_xs.render(b_text, True, (255, 235, 170) if is_player else (220, 235, 255))
-                bw = b_lbl.get_width() + 8
-                bh = 14
-                badge_y = my + 4
+                bw = b_lbl.get_width() + max(4, int(6 * tile_scale))
+                bh = max(11, int(14 * tile_scale))
+                badge_y = my + 2
 
                 badge_surf = pygame.Surface((bw, bh), pygame.SRCALPHA)
                 badge_surf.fill((16, 18, 24, 225))
-                pygame.draw.rect(badge_surf, COLOR_GOLD if is_player else (100, 160, 240), (0, 0, bw, bh), 1, border_radius=4)
-                badge_surf.blit(b_lbl, (4, 0))
+                pygame.draw.rect(badge_surf, COLOR_GOLD if is_player else (100, 160, 240), (0, 0, bw, bh), 1, border_radius=3)
+                badge_surf.blit(b_lbl, ((bw - b_lbl.get_width()) // 2, (bh - b_lbl.get_height()) // 2))
                 screen.blit(badge_surf, (mx - bw // 2, badge_y))
     
     # (No hard victory / defeat banners: dynamic feudal subjugation replaces game over)
