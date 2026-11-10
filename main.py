@@ -30,9 +30,22 @@ WINDOW_WIDTH = 1200
 WINDOW_HEIGHT = 720
 FPS = 60
 
-# Set display mode immediately
-screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+# Maximize Window helper for Windows OS
+def maximize_window():
+    try:
+        import ctypes
+        info = pygame.display.get_wm_info()
+        hwnd = info.get("window")
+        if hwnd:
+            # 3 = SW_MAXIMIZE
+            ctypes.windll.user32.ShowWindow(hwnd, 3)
+    except Exception:
+        pass
+
+# Set display mode immediately with SCALED & RESIZABLE for hardware-accelerated scaling
+screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SCALED | pygame.RESIZABLE)
 pygame.display.set_caption("CK2-Lite: The War for Britain (Army Raising & Rally Edition)")
+maximize_window()
 
 # Palette
 # Added constant for travel days per tile
@@ -1218,7 +1231,8 @@ class GameState:
 def run_game():
     global screen
     if screen is None:
-        screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+        screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SCALED | pygame.RESIZABLE)
+    maximize_window()
     clock = pygame.time.Clock()
 
     reset_global_world_data()
@@ -1633,6 +1647,11 @@ def run_game():
                             # Clear selection
                             state.selected_army_ids = []
                             state.selected_army_id  = None
+                    elif event.key == pygame.K_F11:
+                        pygame.display.toggle_fullscreen()
+
+            elif event.type == pygame.VIDEORESIZE:
+                pass
 
         # -------------------------------------------------------------
         # POPUP MODAL AUTO-PAUSE & AUTO-RESUME SYSTEM
