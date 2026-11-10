@@ -342,6 +342,52 @@ def get_province_holdings(state, pid):
             holdings.setdefault(h_name, []).append((c, r))
     return holdings
 
+def get_all_settlement_holdings(state):
+    """Groups settlement tiles into unified multi-tile holding objects."""
+    visited = set()
+    holdings = []
+    for coord, sdata in state.settlements.items():
+        if coord in visited:
+            continue
+        comp = []
+        queue = [coord]
+        visited.add(coord)
+        while queue:
+            curr = queue.pop(0)
+            comp.append(curr)
+            cx, cy = curr
+            for nxt in [(cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)]:
+                if nxt in state.settlements and nxt not in visited:
+                    n_data = state.settlements[nxt]
+                    if n_data.get("province") == sdata.get("province") and n_data.get("name") == sdata.get("name"):
+                        visited.add(nxt)
+                        queue.append(nxt)
+        comp.sort()
+        min_c = min(c for c, r in comp)
+        max_c = max(c for c, r in comp)
+        min_r = min(r for c, r in comp)
+        max_r = max(r for c, r in comp)
+        orient = "single"
+        if len(comp) > 1:
+            if min_r == max_r:
+                orient = "H"
+            elif min_c == max_c:
+                orient = "V"
+            else:
+                orient = "H"
+        holdings.append({
+            "name": sdata.get("name", "Holding"),
+            "province": sdata.get("province"),
+            "tiles": comp,
+            "primary_tile": comp[0],
+            "data": sdata,
+            "occupied_by": sdata.get("occupied_by"),
+            "min_c": min_c, "max_c": max_c,
+            "min_r": min_r, "max_r": max_r,
+            "orient": orient
+        })
+    return holdings
+
 def get_siegeable_holdings(state, province_id, army_owner):
     prov = PROVINCES.get(province_id)
     if not prov:
@@ -1724,77 +1770,132 @@ def run_game():
         for f_idx, (fid, fdata) in enumerate(state.fiefs.items()):
             f_color = fief_palette[f_idx % len(fief_palette)]
             is_f_sel = (state.selected_fief_id == fid)
+            is_f_edit = (state.editing_fief_id == fid)
+            f_tiles_set = set(fdata["tiles"])
             
             for (fc, fr) in fdata["tiles"]:
                 fx = map_origin_x + (fc * tile_w)
                 fy = map_origin_y + 45 + (fr * tile_h)
                 
-                # Fief border / outline
-                is_f_edit = (state.editing_fief_id == fid)
+                # Fief fill tint if editing or selected
                 if is_f_edit:
                     f_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
                     f_surf.fill((240, 205, 50, 90))
                     screen.blit(f_surf, (fx, fy))
-                    pygame.draw.rect(screen, COLOR_GOLD, (fx, fy, tile_w, tile_h), 2)
                 elif is_f_sel:
                     f_surf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
                     f_surf.fill((100, 255, 120, 75))
                     screen.blit(f_surf, (fx, fy))
-                    pygame.draw.rect(screen, (100, 255, 120), (fx, fy, tile_w, tile_h), 2)
-                elif fdata["holder"] is None:
-                    # Unclaimed / empty fief: dashed subtle pattern
-                    pygame.draw.rect(screen, (170, 180, 200), (fx + 1, fy + 1, tile_w - 2, tile_h - 2), 1)
-                else:
-                    # Claimed barony fief: delicate sub-border
-                    pygame.draw.rect(screen, (*f_color,), (fx + 1, fy + 1, tile_w - 2, tile_h - 2), 1)
+                
+                # Draw fief border ONLY on outer boundary edges (no internal seam line between tiles of same fief!)
+                edge_col = COLOR_GOLD if is_f_edit else ((100, 255, 120) if is_f_sel else (f_color if fdata["holder"] else (170, 180, 200)))
+                edge_w = 2 if (is_f_edit or is_f_sel) else 1
+                
+                # Right edge
+                if (fc + 1, fr) not in f_tiles_set:
+                    pygame.draw.line(screen, edge_col, (fx + tile_w - 1, fy), (fx + tile_w - 1, fy + tile_h - 1), edge_w)
+                # Left edge
+                if (fc - 1, fr) not in f_tiles_set:
+                    pygame.draw.line(screen, edge_col, (fx, fy), (fx, fy + tile_h - 1), edge_w)
+                # Bottom edge
+                if (fc, fr + 1) not in f_tiles_set:
+                    pygame.draw.line(screen, edge_col, (fx, fy + tile_h - 1), (fx + tile_w - 1, fy + tile_h - 1), edge_w)
+                # Top edge
+                if (fc, fr - 1) not in f_tiles_set:
+                    pygame.draw.line(screen, edge_col, (fx, fy), (fx + tile_w - 1, fy), edge_w)
 
         # -----------------------------------------------------------
-        # PASS 3: Draw Built Settlements / Cities
+        # PASS 3: Draw Built Settlements / Cities (Unified Holdings)
         # -----------------------------------------------------------
-        for (sc, sr), sdata in state.settlements.items():
-            sx = map_origin_x + (sc * tile_w)
-            sy = map_origin_y + 45 + (sr * tile_h)
-            
-            # City Foundation Block with Stone Walls
-            base_rect = pygame.Rect(sx + 2, sy + 2, tile_w - 4, tile_h - 4)
+        unified_holdings = get_all_settlement_holdings(state)
+        for h in unified_holdings:
+            min_c, max_c = h["min_c"], h["max_c"]
+            min_r, max_r = h["min_r"], h["max_r"]
+            orient = h["orient"]
+            h_tiles = h["tiles"]
+            sdata = h["data"]
+
+            sx = map_origin_x + (min_c * tile_w)
+            sy = map_origin_y + 45 + (min_r * tile_h)
+            total_w = (max_c - min_c + 1) * tile_w
+            total_h = (max_r - min_r + 1) * tile_h
+
+            base_rect = pygame.Rect(sx + 2, sy + 2, total_w - 4, total_h - 4)
             is_city_hover = base_rect.collidepoint(mouse_pos)
-            is_city_sel = (state.selected_settlement == (sc, sr))
-            
+            is_city_sel = (state.selected_settlement in h_tiles)
+
+            # Unified City Foundation Block with Stone Ramparts
             pygame.draw.rect(screen, (55, 60, 75) if is_city_hover else (38, 42, 54), base_rect, border_radius=4)
             border_city_col = (100, 255, 120) if is_city_sel else COLOR_GOLD
             pygame.draw.rect(screen, border_city_col, base_rect, 2 if is_city_sel else 1, border_radius=4)
-            
-            # Castle Tower graphic drawn using geometric shapes (Clear & sharp, no broken font glyphs)
-            tw, th = tile_w - 8, tile_h - 8
+
+            tw, th = total_w - 8, total_h - 8
             tx, ty = sx + 4, sy + 4
-            # Keep wall
-            pygame.draw.rect(screen, (85, 95, 115), (tx + 2, ty + 4, tw - 4, th - 4))
-            # Left turret
-            pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty + 1, 4, 6))
-            # Right turret
-            pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 5, ty + 1, 4, 6))
-            # Center battlements
-            pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty + 2, 4, 3))
-            # Arch gate
-            pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 2, ty + th - 5, 4, 5))
+
+            if orient == "H":
+                # Grand Castle / Fortified Burgh spanning across 2 horizontal tiles
+                # Continuous stone curtain wall
+                pygame.draw.rect(screen, (75, 85, 105), (tx + 2, ty + 5, tw - 4, th - 5))
+                # Left defensive tower
+                pygame.draw.rect(screen, (85, 95, 115), (tx + 2, ty + 2, 8, th - 2))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty, 10, 4))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + 5, ty + 6, 2, 4))
+                # Right defensive tower
+                pygame.draw.rect(screen, (85, 95, 115), (tx + tw - 10, ty + 2, 8, th - 2))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 11, ty, 10, 4))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tw - 7, ty + 6, 2, 4))
+                # Mid curtain wall crenellations
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + 12, ty + 3, 4, 3))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 16, ty + 3, 4, 3))
+                # Central Great Keep (stands high and proud in center)
+                pygame.draw.rect(screen, (100, 112, 134), (tx + tw // 2 - 8, ty + 1, 16, th - 1))
+                # Central Grand Crown Battlements
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 8, ty - 2, 4, 4))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty - 3, 4, 5))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 + 4, ty - 2, 4, 4))
+                # Grand Arch Gatehouse
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 4, ty + th - 6, 8, 6))
+                pygame.draw.line(screen, (60, 68, 80), (tx + tw // 2, ty + th - 6), (tx + tw // 2, ty + th - 1))
+
+            elif orient == "V":
+                # High Citadel Tower spanning across 2 vertical tiles
+                # Upper High Keep
+                pygame.draw.rect(screen, (100, 112, 134), (tx + 2, ty + 2, tw - 4, 18))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty, 4, 5))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 5, ty, 4, 5))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty + 1, 4, 3))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 1, ty + 8, 3, 4))
+                # Mid battlements
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty + 20, tw - 2, 2))
+                # Lower Bailey & Gatehouse
+                pygame.draw.rect(screen, (85, 95, 115), (tx + 1, ty + 22, tw - 2, th - 22))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 3, ty + th - 7, 6, 7))
+
+            else:
+                # Compact single tile keep
+                pygame.draw.rect(screen, (85, 95, 115), (tx + 2, ty + 4, tw - 4, th - 4))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + 1, ty + 1, 4, 6))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw - 5, ty + 1, 4, 6))
+                pygame.draw.rect(screen, COLOR_GOLD, (tx + tw // 2 - 2, ty + 2, 4, 3))
+                pygame.draw.rect(screen, (20, 24, 32), (tx + tw // 2 - 2, ty + th - 5, 4, 5))
 
             # If holding is occupied by enemy, display conqueror's miniature banner on keep turret!
-            if sdata.get("occupied_by"):
-                occ_id = sdata["occupied_by"]
+            if h.get("occupied_by"):
+                occ_id = h["occupied_by"]
                 occ_key = "wessex" if occ_id == state.player_id else "jorvik"
                 occ_flag = prov_flag_cache.get(occ_key)
                 if occ_flag:
                     mini_f = pygame.transform.smoothscale(occ_flag, (12, 14))
-                    screen.blit(mini_f, (sx + tile_w - 14, sy - 8))
+                    screen.blit(mini_f, (sx + total_w - 14, sy - 8))
 
             # Click city to inspect settlement details!
             if mouse_clicked and is_city_hover and not state.build_mode:
-                state.selected_settlement = (sc, sr)
-                state.selected_province = sdata["province"]
+                state.selected_settlement = h["primary_tile"]
+                state.selected_province = h["province"]
                 state.selected_army_id = None
 
         # -----------------------------------------------------------
-        # PASS 4: Build Mode Hover & Placement Ghost
+        # PASS 4: Build Mode Hover & Placement Ghost (Unified Preview)
         # -----------------------------------------------------------
         if state.build_mode and state.selected_province:
             # Determine tile hovered
@@ -1824,16 +1925,22 @@ def run_game():
                         is_valid = False
                         break
 
-            # Draw Ghost Tiles
+            # Draw Ghost Box (Continuous 2-tile preview)
             ghost_col = (50, 220, 80, 140) if is_valid else (220, 50, 50, 140)
             border_c = (80, 255, 110) if is_valid else (255, 80, 80)
-            for tc, tr in target_tiles:
-                gx = map_origin_x + (tc * tile_w)
-                gy = map_origin_y + 45 + (tr * tile_h)
-                gsurf = pygame.Surface((tile_w, tile_h), pygame.SRCALPHA)
-                gsurf.fill(ghost_col)
-                screen.blit(gsurf, (gx, gy))
-                pygame.draw.rect(screen, border_c, (gx, gy, tile_w, tile_h), 2)
+            min_gc = min(tc for tc, tr in target_tiles)
+            max_gc = max(tc for tc, tr in target_tiles)
+            min_gr = min(tr for tc, tr in target_tiles)
+            max_gr = max(tr for tc, tr in target_tiles)
+            gx = map_origin_x + (min_gc * tile_w)
+            gy = map_origin_y + 45 + (min_gr * tile_h)
+            gw = (max_gc - min_gc + 1) * tile_w
+            gh = (max_gr - min_gr + 1) * tile_h
+            
+            gsurf = pygame.Surface((gw, gh), pygame.SRCALPHA)
+            gsurf.fill(ghost_col)
+            screen.blit(gsurf, (gx, gy))
+            pygame.draw.rect(screen, border_c, (gx, gy, gw, gh), 2, border_radius=4)
 
             # Left click to place
             if mouse_clicked and is_valid:
@@ -2085,7 +2192,9 @@ def run_game():
             
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (880, 135), (1170, 135), 1)
             screen.blit(font_md.render("Holding Overview", True, COLOR_GOLD), (880, 145))
-            screen.blit(font_sm.render(f"Location Tile: ({s_coord[0]}, {s_coord[1]})", True, COLOR_TEXT_MUTED), (880, 175))
+            h_matching_tiles = [coord for coord, s in state.settlements.items() if s.get("name") == s_data["name"] and s.get("province") == s_data["province"]]
+            t_loc_str = ", ".join(f"({c},{r})" for c, r in h_matching_tiles)
+            screen.blit(font_sm.render(f"Location: {t_loc_str} ({len(h_matching_tiles)} Tiles)", True, COLOR_TEXT_MUTED), (880, 175))
             screen.blit(font_sm.render(f"Ruling Lord: {s_data.get('lord', 'Crown Fief')}", True, COLOR_GOLD), (880, 200))
             screen.blit(font_sm.render("Fortification Level: II (Stone Walls)", True, COLOR_TEXT_WHITE), (880, 225))
             screen.blit(font_sm.render("Economic Income: +6 Gold / month", True, COLOR_TEXT_GREEN), (880, 250))
