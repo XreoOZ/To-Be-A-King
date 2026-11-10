@@ -754,7 +754,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 if len(dv_name_disp) > 15: dv_name_disp = dv_name_disp[:13] + ".."
                 screen.blit(font_xs.render(dv_name_disp, True, COLOR_TEXT_WHITE), (34 + p_name_w + 10 + pw + 6, vy + 5))
 
-                fief_seat = direct_v.get("city_name") if direct_v else "Capital Citadel"
+                fief_seat = (direct_v.get("city_name") if direct_v else None) or "Capital Citadel"
                 if len(fief_seat) > 22: fief_seat = fief_seat[:20] + ".."
                 desc_str = f"Seat: {fief_seat} • 👥 {dv_subs} Barons • Fyrd: +{total_levy} • Tax: +{fmt_gold(total_tax)}g/m"
                 screen.blit(font_xs.render(desc_str, True, (210, 230, 255)), (34, vy + 28))
