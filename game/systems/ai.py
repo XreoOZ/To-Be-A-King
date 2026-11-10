@@ -178,18 +178,50 @@ def run_realm_ai(state, ruler_id):
                 if pair_key in getattr(state, "ai_standoff_cooldown", {}):
                     continue
                 fa_loc = fa.province
+                is_direct = False
                 for rp in realm_provs:
                     if fa_loc in ADJACENCY.get(rp, []):
                         border_standoff_provs.add(rp)
                         total_neutral_border_troops += fa.troops
+                        is_direct = True
+
+                # 2-hop extended radar (detects staging foreign hosts up to 2 provinces away)
+                if not is_direct and fa.troops >= 80:
+                    for rp in realm_provs:
+                        neighbors = ADJACENCY.get(rp, [])
+                        if any(fa_loc in ADJACENCY.get(nb, []) for nb in neighbors):
+                            border_standoff_provs.add(rp)
+                            total_neutral_border_troops += int(fa.troops * 0.7)
+
+            if not hasattr(state, "ai_border_vigilance"):
+                state.ai_border_vigilance = {}
+            if not hasattr(state, "ai_vigilance_provs"):
+                state.ai_vigilance_provs = {}
+
+            if border_standoff_provs:
+                # Active foreign host in radar: maintain / reset vigilance timer to 20 days
+                state.ai_border_vigilance[ruler_id] = 20
+                state.ai_vigilance_provs[ruler_id] = set(border_standoff_provs)
+            else:
+                # No forces in radar, check if still within sustained 20-day vigilance countdown
+                vigilance_remaining = state.ai_border_vigilance.get(ruler_id, 0)
+                if vigilance_remaining > 0:
+                    state.ai_border_vigilance[ruler_id] = vigilance_remaining - 1
+                    saved_provs = state.ai_vigilance_provs.get(ruler_id, set())
+                    border_standoff_provs = set(p for p in saved_provs if p in realm_provs)
+                    if not border_standoff_provs:
+                        border_standoff_provs = set(realm_provs)
+
+                    if vigilance_remaining == 20:
+                        state.logs.append(f"👁 High Alert: Foreign troops withdrew from sight, but {r_name} maintains border vigilance (20d countdown)...")
 
             if not border_standoff_provs:
-                # Stand Down: Frontier quiet, no standoff active. Demobilize!
+                # Stand Down: Frontier quiet, 20-day vigilance expired. Demobilize!
                 if my_armies:
                     for a in list(my_armies):
                         if not getattr(a, "is_demobilizing", False) and not a.in_battle:
                             state.disband_army(a)
-                    state.logs.append(f"🕊 Stand Down: Frontier peaceful. {r_name} demobilizes border guards.")
+                    state.logs.append(f"🕊 Stand Down: Frontier peaceful for 20 days. {r_name} demobilizes border guards.")
                 return
 
             # SIAGA Alert: Foreign hosts sighted near border. Mobilize and hold border line ("diam membeku")

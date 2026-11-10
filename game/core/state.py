@@ -124,6 +124,8 @@ class GameState:
         self.active_diplomacy_target = "char_ironpeak"
         self.ai_standoff_days = {}         # frozenset({ai_1, ai_2}) -> days facing each other
         self.ai_standoff_cooldown = {}     # frozenset({ai_1, ai_2}) -> cooldown days before re-escalating
+        self.ai_border_vigilance = {}      # ruler_id -> remaining vigilance countdown days (e.g. 20)
+        self.ai_vigilance_provs = {}       # ruler_id -> set of border provinces being guarded
         self.subjugation_event = None    # Feudal treaty story modal event
         
         # AI decision timer
