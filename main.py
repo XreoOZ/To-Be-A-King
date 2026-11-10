@@ -1357,20 +1357,6 @@ def run_game():
             target_state.logs.append(f"Cannot carve fief: Only {len(free_tiles)} unclaimed tile(s) left in {pname} (Min 2 required). Dissolve an existing fief first.")
             return None
 
-        # Prefer adjacent pair of free tiles in all 4 cardinal directions
-        new_tiles = []
-        free_set = set(free_tiles)
-        for (fc, fr) in free_tiles:
-            for (nfc, nfr) in [(fc + 1, fr), (fc - 1, fr), (fc, fr + 1), (fc, fr - 1)]:
-                if (nfc, nfr) in free_set:
-                    new_tiles = [(fc, fr), (nfc, nfr)]
-                    break
-            if new_tiles:
-                break
-                
-        if not new_tiles:
-            new_tiles = free_tiles[:2]
-
         target_state.fief_id_counter += 1
         fid = f"fief_{target_state.fief_id_counter}"
         pname = PROVINCES[province_id]["name"].split()[0]
@@ -1378,14 +1364,16 @@ def run_game():
         target_state.fiefs[fid] = {
             "id": fid,
             "province": province_id,
-            "tiles": new_tiles,
+            "tiles": [],
             "holder": None,
             "name": f"{pname} Fief #{cur_prov_fief_count + 1}",
-            "vassal_id": None
+            "vassal_id": None,
+            "is_newly_carved": True
         }
         target_state.selected_fief_id = fid
         target_state.editing_fief_id = fid
-        target_state.logs.append(f"Carved new fief '{target_state.fiefs[fid]['name']}' ({len(new_tiles)} tiles)! Click green tiles on map to customize.")
+        target_state.selected_settlement = None
+        target_state.logs.append(f"Partition Mode: Click at least 2 green unclaimed tiles on map for '{target_state.fiefs[fid]['name']}', then click DONE.")
         return fid
 
     # Build reverse lookup: pixel -> province (for accurate click detection)
@@ -2074,11 +2062,8 @@ def run_game():
                         if f_edit:
                             t_coord = (c, r)
                             if t_coord in f_edit["tiles"]:
-                                if len(f_edit["tiles"]) > 2:
-                                    f_edit["tiles"].remove(t_coord)
-                                    state.logs.append(f"Removed tile {t_coord} from {f_edit['name']}.")
-                                else:
-                                    state.logs.append(f"{f_edit['name']} must retain at least 2 tiles!")
+                                f_edit["tiles"].remove(t_coord)
+                                state.logs.append(f"Removed tile {t_coord} from {f_edit['name']} ({len(f_edit['tiles'])} tiles remaining).")
                             else:
                                 # Check if tile already belongs to another fief in this province!
                                 claimed_by = None
@@ -2091,7 +2076,7 @@ def run_game():
                                     state.logs.append(f"Cannot claim tile {t_coord}: Already belongs to '{claimed_by['name']}'! Fiefs cannot overlap.")
                                 else:
                                     f_edit["tiles"].append(t_coord)
-                                    state.logs.append(f"Assigned unclaimed tile {t_coord} to {f_edit['name']}!")
+                                    state.logs.append(f"Assigned unclaimed tile {t_coord} to {f_edit['name']} ({len(f_edit['tiles'])} tiles)!")
                     elif not state.build_mode:
                         # CK2 style: Left-clicking a province inspects that province and unselects armies!
                         state.selected_province = prov_id
@@ -2316,8 +2301,8 @@ def run_game():
                     mini_f = pygame.transform.smoothscale(occ_flag, (12, 14))
                     screen.blit(mini_f, (cx + cw - 12, cy - 8))
 
-            # Click city to inspect settlement details!
-            if mouse_clicked and is_city_hover and not state.build_mode:
+            # Click city to inspect settlement details (only when not building or editing fiefs)!
+            if mouse_clicked and is_city_hover and not state.build_mode and not state.editing_fief_id:
                 state.selected_settlement = h["primary_tile"]
                 state.selected_province = h["province"]
                 state.selected_army_id = None
@@ -2961,21 +2946,48 @@ def run_game():
                 if state.editing_fief_id:
                     edit_f = state.fiefs.get(state.editing_fief_id)
                     f_name = edit_f["name"] if edit_f else "Fief"
-                    eb_rect = pygame.Rect(880, 180, 290, 42)
+                    num_tiles = len(edit_f.get("tiles", [])) if edit_f else 0
+                    eb_rect = pygame.Rect(880, 180, 290, 46)
                     pygame.draw.rect(screen, (70, 50, 15), eb_rect, border_radius=4)
                     pygame.draw.rect(screen, COLOR_GOLD, eb_rect, 2, border_radius=4)
-                    screen.blit(font_xs.render(f"🖌 EDITING: {f_name}", True, COLOR_GOLD), (888, 184))
-                    screen.blit(font_xs.render("Click tiles on map to Add/Remove (Min 2)", True, (240, 240, 240)), (888, 198))
+                    screen.blit(font_xs.render(f"🖌 CARVING: {f_name} ({num_tiles} tiles)", True, COLOR_GOLD), (886, 184))
+                    screen.blit(font_xs.render("Click green tiles on map (Min 2)", True, (240, 240, 240)), (886, 202))
                     
-                    done_btn = pygame.Rect(1075, 186, 85, 28)
+                    # DONE button
+                    done_btn = pygame.Rect(1028, 186, 68, 28)
                     d_hov = done_btn.collidepoint(mouse_pos)
                     pygame.draw.rect(screen, (35, 100, 50) if d_hov else (25, 75, 40), done_btn, border_radius=4)
                     pygame.draw.rect(screen, COLOR_TEXT_GREEN, done_btn, 1, border_radius=4)
-                    screen.blit(font_xs.render("DONE ✓", True, COLOR_TEXT_WHITE), (1095, 193))
+                    screen.blit(font_xs.render("DONE ✓", True, COLOR_TEXT_WHITE), (1038, 193))
+
+                    # CANCEL button
+                    can_btn = pygame.Rect(1100, 186, 65, 28)
+                    can_hov = can_btn.collidepoint(mouse_pos)
+                    pygame.draw.rect(screen, (100, 35, 35) if can_hov else (75, 25, 25), can_btn, border_radius=4)
+                    pygame.draw.rect(screen, COLOR_TEXT_RED, can_btn, 1, border_radius=4)
+                    screen.blit(font_xs.render("CANCEL", True, COLOR_TEXT_WHITE), (1108, 193))
+
                     if mouse_clicked and d_hov:
+                        if edit_f and len(edit_f.get("tiles", [])) < 2:
+                            if len(edit_f.get("tiles", [])) == 0:
+                                del state.fiefs[state.editing_fief_id]
+                                state.editing_fief_id = None
+                                state.logs.append(f"Cancelled carving {f_name}: No tiles were selected.")
+                            else:
+                                state.logs.append(f"Fief requires at least 2 tiles (currently has {len(edit_f['tiles'])}). Click more green tiles or click CANCEL.")
+                        else:
+                            state.editing_fief_id = None
+                            state.logs.append(f"Successfully established boundaries for {f_name} ({len(edit_f['tiles'])} tiles)!")
+
+                    elif mouse_clicked and can_hov:
+                        if edit_f and (edit_f.get("is_newly_carved") or len(edit_f.get("tiles", [])) == 0):
+                            del state.fiefs[state.editing_fief_id]
+                            state.logs.append(f"Cancelled carving: {f_name} removed.")
+                        else:
+                            state.logs.append(f"Cancelled editing boundaries for {f_name}.")
                         state.editing_fief_id = None
-                        state.logs.append(f"Saved boundaries for {f_name}!")
-                    fy = 228
+
+                    fy = 232
                 else:
                     # Carve New Fief Button
                     carve_btn = pygame.Rect(880, 182, 290, 28)
@@ -3036,6 +3048,8 @@ def run_game():
                     if mouse_clicked and e_hov:
                         state.editing_fief_id = None if is_f_editing else f_data["id"]
                         state.selected_fief_id = f_data["id"]
+                        if state.editing_fief_id:
+                            state.selected_settlement = None
 
                     # 2. Grant / Revoke Buttons
                     if is_crown_owned:
