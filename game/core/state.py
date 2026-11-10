@@ -384,7 +384,7 @@ class GameState:
         CHARACTERS[self.enemy_id]["title"] = "High King of the Danelaw & All Britain"
 
         # Realm falls under sovereign authority
-        p_cap = self.players.get(self.player_id, {}).get("capital", "solaris_prime")
+        p_cap = self.get_realm_capital(self.player_id)
         if p_cap in PROVINCES:
             PROVINCES[p_cap]["owner"] = self.enemy_id
             PROVINCES[p_cap]["color"] = list(PROVINCE_FACTION_COLORS.get(self.enemy_id, {}).get(p_cap, COLOR_DANELAW))
@@ -449,7 +449,7 @@ class GameState:
         CHARACTERS[self.enemy_id]["title"] = f"Vassal Lord {e_name}"
 
         # Realm falls under High Kingdom suzerainty
-        e_cap = self.players.get(self.enemy_id, {}).get("capital", "iron_citadel")
+        e_cap = self.get_realm_capital(self.enemy_id)
         if e_cap in PROVINCES:
             PROVINCES[e_cap]["owner"] = self.player_id
             PROVINCES[e_cap]["color"] = list(PROVINCE_FACTION_COLORS.get(self.player_id, {}).get(e_cap, COLOR_WESSEX))
@@ -1700,6 +1700,16 @@ class GameState:
                 a2.in_battle = False
                 a2.tile_path = []
                 a2.move_progress = 0.0
+                cur_set = self.settlements.get(a2.tile)
+                if cur_set and getattr(a2, "siege_intent", False) and getattr(a2, "siege_prep_days", 0) <= 0:
+                    a2.is_sieging = True
+                    h_target = cur_set.get("name", "Holding")
+                    self.logs.append(f"Threat Repelled! {a2.name} defended siege lines and resumes the siege of {h_target} ({a2.siege_progress}% progress preserved)!")
+                elif getattr(a2, "siege_prep_days", 0) > 0:
+                    h_target = cur_set.get("name", "Holding") if cur_set else "Holding"
+                    self.logs.append(f"Siege Camp Secured! {a2.name} defended camp and continues siege preparation ({a2.siege_prep_days}d left).")
+                elif getattr(a2, "siege_packup_days", 0) > 0:
+                    self.logs.append(f"Column Defended! {a2.name} repelled attackers and continues dismantling camp ({a2.siege_packup_days}d left).")
             elif a2.troops <= 0:
                 if a2.owner == self.player_id:
                     self.logs.append(f"Defeat! {a2.name} was wiped out by {a1.name} at tile {tile} in {p_name}!")
@@ -1712,6 +1722,16 @@ class GameState:
                 a1.in_battle = False
                 a1.tile_path = []
                 a1.move_progress = 0.0
+                cur_set = self.settlements.get(a1.tile)
+                if cur_set and getattr(a1, "siege_intent", False) and getattr(a1, "siege_prep_days", 0) <= 0:
+                    a1.is_sieging = True
+                    h_target = cur_set.get("name", "Holding")
+                    self.logs.append(f"Threat Repelled! {a1.name} defended siege lines and resumes the siege of {h_target} ({a1.siege_progress}% progress preserved)!")
+                elif getattr(a1, "siege_prep_days", 0) > 0:
+                    h_target = cur_set.get("name", "Holding") if cur_set else "Holding"
+                    self.logs.append(f"Siege Camp Secured! {a1.name} defended camp and continues siege preparation ({a1.siege_prep_days}d left).")
+                elif getattr(a1, "siege_packup_days", 0) > 0:
+                    self.logs.append(f"Column Defended! {a1.name} repelled attackers and continues dismantling camp ({a1.siege_packup_days}d left).")
 
         # 3. Check Sieges (City-by-City Siege in Enemy or Contested Province)
         for a in list(self.armies):
@@ -1758,7 +1778,8 @@ class GameState:
                         is_liberation = True
 
                 # Only siege if explicitly ordered (siege_intent == True) and prep is finished
-                if needs_siege and getattr(a, "siege_intent", False) and a.is_sieging and getattr(a, "siege_prep_days", 0) <= 0:
+                if needs_siege and getattr(a, "siege_intent", False) and getattr(a, "siege_prep_days", 0) <= 0:
+                    a.is_sieging = True
                     a.siege_target_name = h_name
                     a.target_city = a.tile
 
@@ -1794,12 +1815,13 @@ class GameState:
                                     self.player["prestige"] += 100
                                     conq_r = CHARACTERS.get(a.owner, {}).get("realm", "the Realm"); self.logs.append(f"TOTAL VICTORY! All strongholds in {prov['name']} have fallen! Conquered by {conq_r}!")
                                 else:
-                                    self.enemy["prestige"] += 100
+                                    r_char = CHARACTERS.get(a.owner)
+                                    if r_char: r_char["prestige"] = r_char.get("prestige", 100) + 100
                                     conq_r = CHARACTERS.get(a.owner, {}).get("realm", "the Realm"); self.logs.append(f"TERRITORY LOST! All strongholds in {prov['name']} have fallen to {conq_r}!")
 
                                 # Automatically relocate or restore capitals if needed
-                                self.get_realm_capital(self.player_id)
-                                self.get_realm_capital(self.enemy_id)
+                                for cid in [self.player_id] + getattr(self, "ai_rulers", []):
+                                    self.get_realm_capital(cid)
                         else:
                             # Friendly liberation of occupied holding!
                             for t in h_tiles:
@@ -1809,8 +1831,15 @@ class GameState:
                             remaining = get_siegeable_holdings(self, a.province, a.owner)
                             if not remaining:
                                 self.logs.append(f"Order Restored! {prov['name']} is fully liberated and no longer contested.")
-                else:
-                    # Settlement already friendly or already occupied by this army's owner: no siege
+                elif not needs_siege:
+                    # Settlement already friendly or already occupied: siege fulfilled!
+                    a.is_sieging = False
+                    a.siege_progress = 0
+                    a.siege_intent = False
+                    a.target_city = None
+                    a.siege_target_name = None
+                elif not getattr(a, "siege_intent", False):
+                    # Army has no intention to siege (just standing/passing)
                     a.is_sieging = False
                     a.siege_progress = 0
                     a.target_city = None
