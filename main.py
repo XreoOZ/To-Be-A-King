@@ -582,6 +582,7 @@ class GameState:
         self.granting_fief_id = None     # Fief currently being granted via modal
         self.grant_page = 0              # Pagination index for grant modal
         self.inspecting_vassal = None    # {"province": pid, "vassal": v_dict} when inspecting vassal profile
+        self.vassal_build_confirm = None # Pending confirmation modal to build on vassal fief
         self.pre_popup_speed = None      # Saved game speed before a popup paused the game
         self.popup_was_active = False    # Track whether a popup was active on previous frame
         
@@ -1599,13 +1600,15 @@ def run_game():
                     box_end   = None
 
             elif event.type == pygame.KEYDOWN:
-                is_popup_open = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal)
+                is_popup_open = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.vassal_build_confirm)
                 if is_popup_open:
                     if event.key == pygame.K_ESCAPE:
                         if state.inspecting_vassal:
                             state.inspecting_vassal = None
                         elif state.granting_fief_id:
                             state.granting_fief_id = None
+                        elif state.vassal_build_confirm:
+                            state.vassal_build_confirm = None
                     elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
                         # Queue intended speed to resume when popup is closed
                         state.pre_popup_speed = int(event.unicode)
@@ -1644,7 +1647,7 @@ def run_game():
         # -------------------------------------------------------------
         # POPUP MODAL AUTO-PAUSE & AUTO-RESUME SYSTEM
         # -------------------------------------------------------------
-        is_popup_active = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal)
+        is_popup_active = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.vassal_build_confirm)
         if is_popup_active:
             if not state.popup_was_active:
                 if state.speed > 0:
@@ -2517,22 +2520,60 @@ def run_game():
             # Check validity
             prov_obj = PROVINCES.get(state.selected_province)
             is_valid = True
+            invalid_reason = ""
             if prov_obj["owner"] != state.player_id:
                 is_valid = False
+                invalid_reason = "Not Player Territory"
             elif state.player["gold"] < 1000:
                 is_valid = False
+                invalid_reason = "Requires 1,000 Gold"
             else:
                 for tc, tr in target_tiles:
                     if cell_to_prov.get((tc, tr)) != state.selected_province:
                         is_valid = False
+                        invalid_reason = "Outside Province"
                         break
                     if (tc, tr) in state.settlements:
                         is_valid = False
+                        invalid_reason = "Tile Occupied"
                         break
 
+            # Fief jurisdiction check
+            target_fief = None
+            is_vassal_fief = False
+            if is_valid:
+                tile_fiefs = []
+                for tc, tr in target_tiles:
+                    tf = None
+                    for f in state.fiefs.values():
+                        if (tc, tr) in f.get("tiles", []):
+                            tf = f
+                            break
+                    tile_fiefs.append(tf)
+
+                if tile_fiefs[0] != tile_fiefs[1]:
+                    is_valid = False
+                    invalid_reason = "Across Fief Borders"
+                else:
+                    target_fief = tile_fiefs[0]
+                    if target_fief:
+                        is_crown = (target_fief.get("is_crown_demesne", False) and 
+                                    (target_fief.get("holder") == state.player["name"] or target_fief.get("holder") is None) and 
+                                    target_fief.get("vassal_id") is None)
+                        if not is_crown:
+                            is_vassal_fief = True
+
             # Draw Ghost Box (Continuous 2-tile preview)
-            ghost_col = (50, 220, 80, 140) if is_valid else (220, 50, 50, 140)
-            border_c = (80, 255, 110) if is_valid else (255, 80, 80)
+            if not is_valid:
+                ghost_col = (220, 50, 50, 140)
+                border_c = (255, 80, 80)
+            elif is_vassal_fief:
+                ghost_col = (235, 175, 45, 150)
+                border_c = (255, 215, 60)
+            else:
+                ghost_col = (50, 220, 80, 140)
+                border_c = (80, 255, 110)
+
             min_gc = min(tc for tc, tr in target_tiles)
             max_gc = max(tc for tc, tr in target_tiles)
             min_gr = min(tr for tc, tr in target_tiles)
@@ -2555,41 +2596,64 @@ def run_game():
             screen.blit(gsurf, (cx, cy))
             pygame.draw.rect(screen, border_c, (cx, cy, cw, ch), 2, border_radius=3)
 
+            # Contextual Ghost Tag / Hint
+            if is_valid and is_vassal_fief and target_fief:
+                v_holder = target_fief.get("holder", "Vassal")
+                v_hint = font_xs.render(f"⚠ Vassal Fief: {v_holder}", True, (255, 235, 120))
+                screen.blit(v_hint, (cx, max(0, cy - 16)))
+            elif not is_valid and invalid_reason:
+                r_hint = font_xs.render(f"✕ {invalid_reason}", True, (255, 140, 140))
+                screen.blit(r_hint, (cx, max(0, cy - 16)))
+
             # Left click to place
             if mouse_clicked and is_valid:
-                state.player["gold"] -= 1000
-                prov_obj["tax"] += 10
-                prov_obj["levies_max"] += 500
-                prov_obj["levies_current"] += 500
-                state.settlement_id_counter += 1
-                s_id = f"settlement_{state.settlement_id_counter}"
-                for tc, tr in target_tiles:
-                    state.settlements[(tc, tr)] = {
-                        "id": s_id,
-                        "province": state.selected_province,
-                        "type": "town",
-                        "name": f"{prov_obj['name'].split()[0]} Burgh",
-                        "lord": f"{state.player['name']} (Crown Demesne)",
-                        "vassal_id": None,
-                        "is_crown_demesne": True
+                if is_vassal_fief and target_fief:
+                    v_holder = target_fief.get("holder", "Vassal")
+                    state.vassal_build_confirm = {
+                        "target_tiles": list(target_tiles),
+                        "province_id": state.selected_province,
+                        "fief_id": target_fief["id"],
+                        "fief_name": target_fief.get("name", "Vassal Fief"),
+                        "vassal_id": target_fief.get("vassal_id"),
+                        "vassal_name": v_holder,
+                        "cost": 1000
                     }
-                # Ensure these tiles belong to a Crown Fief if not already claimed
-                claimed_f = any((tc, tr) in f.get("tiles", []) for f in state.fiefs.values())
-                if not claimed_f:
-                    state.fief_id_counter += 1
-                    fid = f"fief_{state.fief_id_counter}"
-                    p_short = prov_obj['name'].split()[0]
-                    state.fiefs[fid] = {
-                        "id": fid,
-                        "province": state.selected_province,
-                        "tiles": list(target_tiles),
-                        "name": f"Crown Fief of {p_short}",
-                        "holder": state.player["name"],
-                        "vassal_id": None,
-                        "is_crown_demesne": True
-                    }
-                state.logs.append(f"Founded Grand City in {prov_obj['name']} (-1000g, +10 Tax, +500 Levies)!")
-                state.build_mode = False
+                    state.build_mode = False
+                else:
+                    state.player["gold"] -= 1000
+                    prov_obj["tax"] += 10
+                    prov_obj["levies_max"] += 500
+                    prov_obj["levies_current"] += 500
+                    state.settlement_id_counter += 1
+                    s_id = f"settlement_{state.settlement_id_counter}"
+                    city_name = f"{prov_obj['name'].split()[0]} Burgh"
+                    for tc, tr in target_tiles:
+                        state.settlements[(tc, tr)] = {
+                            "id": s_id,
+                            "province": state.selected_province,
+                            "type": "town",
+                            "name": city_name,
+                            "lord": f"{state.player['name']} (Crown Demesne)",
+                            "vassal_id": None,
+                            "is_crown_demesne": True,
+                            "is_crown_fief": True
+                        }
+                    # Ensure these tiles belong to a Crown Fief if not already claimed
+                    if target_fief is None:
+                        state.fief_id_counter += 1
+                        fid = f"fief_{state.fief_id_counter}"
+                        p_short = prov_obj['name'].split()[0]
+                        state.fiefs[fid] = {
+                            "id": fid,
+                            "province": state.selected_province,
+                            "tiles": list(target_tiles),
+                            "name": f"Crown Demesne of {p_short}",
+                            "holder": state.player["name"],
+                            "vassal_id": None,
+                            "is_crown_demesne": True
+                        }
+                    state.logs.append(f"Founded Crown City in {prov_obj['name']} (-1000g, +10 Tax, +500 Levies)!")
+                    state.build_mode = False
 
         # Province Name Labels (Medieval Plaque / Banner)
         for pid, (lx, ly) in province_anchors.items():
@@ -3817,6 +3881,117 @@ def run_game():
             screen.blit(font_sm.render("CLOSE DOSSIER (ESC)", True, (255, 220, 220)), (pop_x + pop_w - 40 - btn_w + 70, pop_y + pop_h - 50))
             if modal_mouse_clicked and c_hov:
                 state.inspecting_vassal = None
+
+        # ---------------------------------------------------------
+        # 8. VASSAL FIEF CONSTRUCTION CONFIRMATION MODAL
+        # ---------------------------------------------------------
+        if state.vassal_build_confirm:
+            conf = state.vassal_build_confirm
+            dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+            dim_surf.fill((0, 0, 0, 180))
+            screen.blit(dim_surf, (0, 0))
+
+            pop_w, pop_h = 580, 275
+            pop_x = (WINDOW_WIDTH - pop_w) // 2
+            pop_y = (WINDOW_HEIGHT - pop_h) // 2
+            pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
+
+            pygame.draw.rect(screen, COLOR_PANEL_BG, pop_rect, border_radius=10)
+            pygame.draw.rect(screen, (255, 205, 50), pop_rect, 2, border_radius=10)
+
+            # Close 'X' Button at top right
+            x_btn = pygame.Rect(pop_x + pop_w - 36, pop_y + 12, 24, 24)
+            x_hov = x_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (85, 30, 30) if x_hov else (48, 22, 22), x_btn, border_radius=4)
+            pygame.draw.rect(screen, (225, 80, 80), x_btn, 1, border_radius=4)
+            screen.blit(font_xs.render("✕", True, COLOR_TEXT_WHITE), (x_btn.x + 6, x_btn.y + 4))
+            if modal_mouse_clicked and x_hov:
+                state.vassal_build_confirm = None
+
+            # Header
+            p_full = PROVINCES.get(conf["province_id"], {}).get("name", "Realm")
+            screen.blit(font_lg.render("⚠ BUILDING ON VASSAL FIEFDOM", True, (255, 215, 60)), (pop_x + 25, pop_y + 16))
+            screen.blit(font_xs.render(f"Feudal Investiture Notice • {p_full}", True, COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 44))
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 64), (pop_x + pop_w - 25, pop_y + 64), 1)
+
+            # Body Warning & Description
+            v_name = conf["vassal_name"]
+            f_name = conf["fief_name"]
+            t1 = font_sm.render(f"My Liege, you are establishing a settlement inside {f_name}.", True, COLOR_TEXT_WHITE)
+            t2 = font_sm.render(f"This land is legally held by your feudal subject, {v_name}.", True, (255, 235, 140))
+            t3 = font_xs.render("• Under Feudal Law, all cities founded on vassal fiefs belong to the Vassal.", True, (160, 210, 255))
+            t4 = font_xs.render(f"• Full Lordship and revenue of this city will be permanently granted to {v_name}.", True, COLOR_TEXT_GREEN)
+            t5 = font_xs.render("• Royal Treasury: -1,000 Gold  |  Province: +10 Tax, +500 Levies (Bolsters Realm).", True, COLOR_GOLD)
+
+            screen.blit(t1, (pop_x + 25, pop_y + 76))
+            screen.blit(t2, (pop_x + 25, pop_y + 98))
+            screen.blit(t3, (pop_x + 25, pop_y + 128))
+            screen.blit(t4, (pop_x + 25, pop_y + 148))
+            screen.blit(t5, (pop_x + 25, pop_y + 168))
+
+            # Buttons
+            btn_w, btn_h = 240, 38
+            # Confirm Button
+            c_btn = pygame.Rect(pop_x + 35, pop_y + 215, btn_w, btn_h)
+            c_hov = c_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (35, 115, 60) if c_hov else (25, 85, 42), c_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_TEXT_GREEN, c_btn, 1, border_radius=6)
+            screen.blit(font_sm.render("CONFIRM & BESTOW (YES)", True, COLOR_TEXT_WHITE), (pop_x + 55, pop_y + 225))
+
+            # Cancel Button
+            can_btn = pygame.Rect(pop_x + pop_w - 35 - btn_w, pop_y + 215, btn_w, btn_h)
+            can_hov = can_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (110, 35, 35) if can_hov else (80, 25, 25), can_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_TEXT_RED, can_btn, 1, border_radius=6)
+            screen.blit(font_sm.render("CANCEL (DO NOT BUILD)", True, COLOR_TEXT_WHITE), (pop_x + pop_w - 35 - btn_w + 42, pop_y + 225))
+
+            if modal_mouse_clicked and c_hov:
+                state.player["gold"] -= 1000
+                p_obj = PROVINCES.get(conf["province_id"])
+                if p_obj:
+                    p_obj["tax"] += 10
+                    p_obj["levies_max"] += 500
+                    p_obj["levies_current"] += 500
+
+                v_obj = None
+                for v in state.vassals.get(conf["province_id"], []):
+                    if v.get("id") == conf.get("vassal_id") or v.get("name") == conf.get("vassal_name"):
+                        v_obj = v
+                        break
+
+                v_short = v_name.split()[1] if len(v_name.split()) > 1 else v_name
+                city_name = f"{v_short}'s {random.choice(['Keep', 'Burgh', 'Castle', 'Borough'])}"
+                state.settlement_id_counter += 1
+                s_id = f"settlement_{state.settlement_id_counter}"
+
+                for tc, tr in conf["target_tiles"]:
+                    state.settlements[(tc, tr)] = {
+                        "id": s_id,
+                        "province": conf["province_id"],
+                        "type": "town",
+                        "name": city_name,
+                        "lord": v_name,
+                        "vassal_id": conf.get("vassal_id"),
+                        "is_crown_demesne": False,
+                        "is_crown_fief": False
+                    }
+                    if v_obj:
+                        if "tiles" not in v_obj:
+                            v_obj["tiles"] = []
+                        if (tc, tr) not in v_obj["tiles"]:
+                            v_obj["tiles"].append((tc, tr))
+
+                if v_obj:
+                    if not v_obj.get("city_name"):
+                        v_obj["city_name"] = city_name
+                    v_obj["gold"] = v_obj.get("gold", 150) + 100
+
+                state.logs.append(f"Invested 1,000g in {f_name}! Constructed {city_name} owned by {v_name}.")
+                state.vassal_build_confirm = None
+
+            elif modal_mouse_clicked and can_hov:
+                state.logs.append("Cancelled construction on vassal territory.")
+                state.vassal_build_confirm = None
 
         pygame.display.flip()
 
