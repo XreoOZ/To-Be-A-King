@@ -89,9 +89,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     da_lbl = font_sm.render("DISBAND ALL", True, COLOR_TEXT_WHITE)
     screen.blit(da_lbl, (btn_disband_all.x + (btn_disband_all.w - da_lbl.get_width()) // 2, 194))
     if mouse_clicked and b_hover_d:
-        for a in list(state.armies):
-            if a.owner == state.player_id:
-                state.disband_army(a)
+        state.disband_all_armies(state.player_id)
     
     # ---------------------------------------------------------
     # Left Panel Sub-Tabs: [ ⚔ Armies ]  [ ♟ Vassals ]  [ ♚ Demesne ]

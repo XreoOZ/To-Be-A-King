@@ -863,6 +863,8 @@ class GameState:
                 self.selected_army_id = None
             if army in self.armies:
                 self.armies.remove(army)
+            if army.owner == self.player_id:
+                self.check_reset_player_raise_cooldown()
             return
 
         # If merged host, split back into individual provincial contingents!
@@ -923,6 +925,30 @@ class GameState:
                     self.logs.append(f"{host.name} demobilized into garrison of {PROVINCES[host.flag_origin]['name']}.")
                     if host in self.armies:
                         self.armies.remove(host)
+        if army.owner == self.player_id:
+            self.check_reset_player_raise_cooldown()
+
+    def check_reset_player_raise_cooldown(self):
+        """Resets the player raise cooldown to zero immediately if no player armies remain on the map."""
+        has_player_army = any(a.owner == self.player_id for a in self.armies)
+        if not has_player_army:
+            cooldown_active = (self.player_raise_cooldown > 0)
+            self.player_raise_cooldown = 0
+            for p in PROVINCES.values():
+                if p.get("owner") == self.player_id:
+                    p["raise_cooldown_days"] = 0
+            if cooldown_active:
+                self.logs.append("All royal hosts stood down. Mobilization cooldown reset to 0.")
+
+    def disband_all_armies(self, ruler_id=None):
+        """Orders all armies belonging to ruler_id to disband or demobilize."""
+        if ruler_id is None:
+            ruler_id = self.player_id
+        for a in list(self.armies):
+            if a.owner == ruler_id:
+                self.disband_army(a)
+        if ruler_id == self.player_id:
+            self.check_reset_player_raise_cooldown()
 
     def cancel_army_siege(self, army, target_tile=None):
         if not army:
@@ -1057,6 +1083,14 @@ class GameState:
         for p in PROVINCES.values():
             if p.get("raise_cooldown_days", 0) > 0:
                 p["raise_cooldown_days"] = max(0, p["raise_cooldown_days"] - 1)
+
+        # If no player armies remain on the map, ensure raise cooldown resets to 0
+        if not any(a.owner == self.player_id for a in self.armies):
+            if self.player_raise_cooldown > 0:
+                self.player_raise_cooldown = 0
+            for p in PROVINCES.values():
+                if p.get("owner") == self.player_id:
+                    p["raise_cooldown_days"] = 0
 
         # 1. Update Royal Couriers En Route
         for a in list(self.armies):
@@ -1432,6 +1466,8 @@ class GameState:
                                 self.selected_army_id = None
                             if a in self.armies:
                                 self.armies.remove(a)
+                            if a.owner == self.player_id:
+                                self.check_reset_player_raise_cooldown()
                         elif not a.is_demobilizing:
                             self.merge_armies_on_tile(a.tile, a.owner)
 
@@ -1517,15 +1553,20 @@ class GameState:
                 self.logs.append(f"Both armies annihilated at tile {tile} in {p_name}!")
                 if a1 in self.armies: self.armies.remove(a1)
                 if a2 in self.armies: self.armies.remove(a2)
+                self.check_reset_player_raise_cooldown()
             elif a1.troops <= 0:
                 self.logs.append(f"Defeat! {a1.name} was wiped out at tile {tile} in {p_name}!")
                 if a1 in self.armies: self.armies.remove(a1)
+                if a1.owner == self.player_id:
+                    self.check_reset_player_raise_cooldown()
                 a2.in_battle = False
                 a2.tile_path = []
                 a2.move_progress = 0.0
             elif a2.troops <= 0:
                 self.logs.append(f"Glorious Victory! Destroyed the Viking host at tile {tile} in {p_name}!")
                 if a2 in self.armies: self.armies.remove(a2)
+                if a2.owner == self.player_id:
+                    self.check_reset_player_raise_cooldown()
                 a1.in_battle = False
                 a1.tile_path = []
                 a1.move_progress = 0.0
