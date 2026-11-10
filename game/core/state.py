@@ -122,6 +122,8 @@ class GameState:
         self.war_status = "peace"          # Default is PEACE across the continent!
         self.active_wars = set()           # Set of frozenset({char1, char2})
         self.active_diplomacy_target = "char_ironpeak"
+        self.ai_standoff_days = {}         # frozenset({ai_1, ai_2}) -> days facing each other
+        self.ai_standoff_cooldown = {}     # frozenset({ai_1, ai_2}) -> cooldown days before re-escalating
         self.subjugation_event = None    # Feudal treaty story modal event
         
         # AI decision timer
@@ -1099,6 +1101,83 @@ class GameState:
     # ---------------------------------------------------------
     # Game Loop Ticks
     # ---------------------------------------------------------
+    def update_ai_border_standoffs(self):
+        """
+        Monitors border standoff (SIAGA) between neutral AI realms.
+        If two AI hosts face each other at the frontier for 20 days without escalation:
+        AI A proposes 'DE-ESCALATE?', AI B agrees 'OK', and both simultaneously disband!
+        """
+        if not hasattr(self, "ai_standoff_days"):
+            self.ai_standoff_days = {}
+        if not hasattr(self, "ai_standoff_cooldown"):
+            self.ai_standoff_cooldown = {}
+
+        # Decrement cooldowns
+        for pair in list(self.ai_standoff_cooldown.keys()):
+            self.ai_standoff_cooldown[pair] -= 1
+            if self.ai_standoff_cooldown[pair] <= 0:
+                del self.ai_standoff_cooldown[pair]
+
+        ai_list = [cid for cid in getattr(self, "ai_rulers", []) if cid in CHARACTERS and CHARACTERS[cid].get("alive", True)]
+        if len(ai_list) < 2:
+            return
+
+        for i in range(len(ai_list)):
+            for j in range(i + 1, len(ai_list)):
+                r1 = ai_list[i]
+                r2 = ai_list[j]
+                pair_key = frozenset({r1, r2})
+
+                if self.are_hostile(r1, r2):
+                    self.ai_standoff_days[pair_key] = 0
+                    continue
+
+                if pair_key in self.ai_standoff_cooldown:
+                    self.ai_standoff_days[pair_key] = 0
+                    continue
+
+                r1_provs = set(p for p, pdata in PROVINCES.items() if pdata.get("owner") == r1)
+                r2_provs = set(p for p, pdata in PROVINCES.items() if pdata.get("owner") == r2)
+
+                r1_border_armies = []
+                for a in self.armies:
+                    if a.owner == r1 and a.troops > 0 and not a.is_demobilizing:
+                        if any(adj_p in r2_provs for adj_p in ADJACENCY.get(a.province, [])):
+                            r1_border_armies.append(a)
+
+                r2_border_armies = []
+                for a in self.armies:
+                    if a.owner == r2 and a.troops > 0 and not a.is_demobilizing:
+                        if any(adj_p in r1_provs for adj_p in ADJACENCY.get(a.province, [])):
+                            r2_border_armies.append(a)
+
+                if r1_border_armies and r2_border_armies:
+                    curr_days = self.ai_standoff_days.get(pair_key, 0) + 1
+                    self.ai_standoff_days[pair_key] = curr_days
+
+                    if curr_days >= 20:
+                        char1 = CHARACTERS.get(r1, {})
+                        char2 = CHARACTERS.get(r2, {})
+                        name1 = char1.get("name", "High Thane")
+                        name2 = char2.get("name", "Queen")
+                        short1 = name1.split()[0] + (" " + name1.split()[1] if len(name1.split()) > 1 and name1.split()[0] in ["King", "High", "Queen", "Grand"] else "")
+                        short2 = name2.split()[0] + (" " + name2.split()[1] if len(name2.split()) > 1 and name2.split()[0] in ["King", "High", "Queen", "Grand"] else "")
+                        realm1 = char1.get("realm", "Dominion")
+                        realm2 = char2.get("realm", "Sovereignty")
+
+                        self.logs.append(f"📜 Frontier Diplomacy (Day 20): {short1} sends envoy to {short2}: 'DE-ESCALATE?' -> {short2} responds: 'OK'.")
+                        self.logs.append(f"🕊 Treaty of De-escalation: {realm1} and {realm2} simultaneously stand down border hosts!")
+
+                        # Both AIs simultaneously disband border armies!
+                        for a in list(r1_border_armies + r2_border_armies):
+                            if a in self.armies and not getattr(a, "is_demobilizing", False) and not a.in_battle:
+                                self.disband_army(a)
+
+                        self.ai_standoff_days[pair_key] = 0
+                        self.ai_standoff_cooldown[pair_key] = 30
+                else:
+                    self.ai_standoff_days[pair_key] = 0
+
     def advance_day(self):
         self.day += 1
         max_d = self.month_days[self.month - 1]
@@ -1110,6 +1189,9 @@ class GameState:
                 self.month = 1
                 self.year += 1
                 self.yearly_tick()
+
+        # Update AI frontier standoff & mutual de-escalation protocol (20-day limit)
+        self.update_ai_border_standoffs()
 
         # Update Muster Cooldown Timers (3 months / 90 days cooldown)
         self.player_raise_cooldown = max(0, self.player_raise_cooldown - 1)
