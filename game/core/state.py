@@ -9,7 +9,7 @@ from game.config import DAYS_PER_TILE, DAYS_PER_KOTAK, LEVY_RAISE_COOLDOWN_DAYS,
 from game.data.characters import CHARACTERS, INITIAL_CHARACTERS
 from game.data.provinces import PROVINCES, INITIAL_PROVINCES, PROVINCE_FACTION_COLORS, ADJACENCY, find_shortest_path
 from game.data.buildings import BUILDING_SPECS, get_barrack_stats
-from game.core.map import CELL_TO_PROV, PROV_CAPITAL_TILES, get_province_capital_tile, find_shortest_tile_path, TILE_ADJACENCY
+from game.core.map import CELL_TO_PROV, PROV_TO_TILES, PROV_CAPITAL_TILES, get_province_capital_tile, find_shortest_tile_path, TILE_ADJACENCY
 from game.core.army import Army
 from game.systems.economy import (
     sync_province_holdings_stats,
