@@ -426,7 +426,7 @@ class GameState:
     # Army Operations
     # ---------------------------------------------------------
     def is_province_levy_in_field(self, province_id, owner_id=None):
-        """Checks if a province's levies are currently deployed in the field (active host or sub-flag)."""
+        """Checks if any active army originating from this province is currently in the field."""
         if owner_id is None:
             prov = PROVINCES.get(province_id)
             if not prov:
@@ -438,17 +438,62 @@ class GameState:
                     return True
         return False
 
+    def is_province_vassal_levy_in_field(self, province_id, owner_id=None):
+        """Checks if a province's FREE vassal levies are currently deployed in the field (1x Raise limit)."""
+        if owner_id is None:
+            prov = PROVINCES.get(province_id)
+            if not prov:
+                return False
+            owner_id = prov.get("owner")
+        for a in self.armies:
+            if a.owner == owner_id and a.troops > 0 and getattr(a, "vassal_levies", 0) > 0:
+                if a.flag_origin == province_id or (getattr(a, "sub_flags", None) and province_id in a.sub_flags):
+                    return True
+        return False
+
+    def get_available_province_levies(self, province_id, owner_id=None):
+        """
+        Calculates available levies to muster (total_available, crown_portion, vassal_portion):
+        - Personal / Royal Army (Crown Demesne): CAN ALWAYS be raised as they replenish (King pays upkeep).
+        - Feudal Vassal Levies (FREE): Strictly limited to 1x deployment; blocked while active in field!
+        """
+        prov = PROVINCES.get(province_id)
+        if not prov:
+            return 0, 0, 0
+        if owner_id is None:
+            owner_id = prov.get("owner")
+
+        current_men = prov.get("levies_current", 0)
+        if current_men <= 0:
+            return 0, 0, 0
+
+        c_max = prov.get("crown_levies_max", 0)
+        v_max = prov.get("vassal_levies_max", 0)
+        t_max = prov.get("levies_max", c_max + v_max)
+        if t_max <= 0:
+            t_max = current_men
+
+        vassal_in_field = self.is_province_vassal_levy_in_field(province_id, owner_id)
+        if vassal_in_field:
+            # Vassal fyrd already fighting in field: ALL available garrison troops up to c_max can be mobilized as Crown Troops!
+            c_avail = min(current_men, c_max)
+            v_avail = 0
+        else:
+            # Both Crown and Vassals at home: normal proportional split
+            if c_max > 0 and t_max > 0:
+                c_avail = min(current_men, int(round(current_men * (c_max / float(t_max)))))
+            else:
+                c_avail = 0
+            v_avail = max(0, current_men - c_avail)
+
+        total_avail = c_avail + v_avail
+        return total_avail, c_avail, v_avail
+
     def raise_province_levy(self, province_id):
         prov = PROVINCES.get(province_id)
         if not prov or prov["owner"] != self.player_id:
             return
         
-        # Anti-exploit: Feudal vassal levies cannot be re-raised while already active in the field!
-        if self.is_province_levy_in_field(province_id, prov["owner"]):
-            p_short = prov["name"].split()[0]
-            self.logs.append(f"Cannot muster {p_short}! Levies already deployed in the field. Disband active host first.")
-            return
-
         # 3-Month Cooldown Check
         cd = prov.get("raise_cooldown_days", 0)
         if cd > 0:
@@ -456,28 +501,32 @@ class GameState:
             self.logs.append(f"Muster Cooldown! {prov['name']} cannot raise levies for {cd}d (~{m_left}m)!")
             return
 
-        available = prov["levies_current"]
-        if available <= 0:
-            self.logs.append(f"No levies available to raise in {prov['name']}.")
+        tot_avail, c_troops, v_troops = self.get_available_province_levies(province_id, self.player_id)
+        vassal_in_field = self.is_province_vassal_levy_in_field(province_id, self.player_id)
+
+        if tot_avail <= 0:
+            p_short = prov["name"].split()[0]
+            if vassal_in_field:
+                self.logs.append(f"Cannot muster {p_short}! Vassal fyrd already deployed in the field and no Crown troops available.")
+            else:
+                self.logs.append(f"No levies available to raise in {prov['name']}.")
             return
 
         army_id = f"army_{self.army_id_counter}"
         self.army_id_counter += 1
         
-        army_name = f"{prov['name'].split()[0]} Fyrd"
+        p_short = prov['name'].split()[0]
         capital_pid = self.get_realm_capital(self.player_id)
         is_royal = (province_id == capital_pid)
-        new_army = Army(army_id, self.player_id, province_id, available, army_name,
+        
+        if v_troops == 0 and c_troops > 0:
+            army_name = f"{p_short} Royal Guard" if is_royal else f"{p_short} Crown Retinue"
+        else:
+            army_name = f"{p_short} Fyrd"
+
+        new_army = Army(army_id, self.player_id, province_id, tot_avail, army_name,
                         flag_origin=province_id, rank=3 if is_royal else 1)
         
-        # Partition into Crown Demesne troops (upkeep 1g/100) vs Feudal Vassal Levies (FREE)
-        c_max = prov.get("crown_levies_max", 0)
-        t_max = prov.get("levies_max", available)
-        if t_max > 0 and c_max > 0:
-            c_troops = min(available, int(round(available * (c_max / float(t_max)))))
-        else:
-            c_troops = 0
-        v_troops = max(0, available - c_troops)
         new_army.crown_troops = c_troops
         new_army.vassal_levies = v_troops
         
@@ -485,7 +534,10 @@ class GameState:
             new_army.is_mustering = True
             new_army.muster_days = 30
             new_army.courier_en_route = False
-            self.logs.append(f"Summoned {available:,} men in royal capital {prov['name']}! Mustering troops (30 days)...")
+            if v_troops == 0:
+                self.logs.append(f"Royal Call: Summoned {tot_avail:,} Personal Crown Troops in royal capital {prov['name']}! (Mustering 30 days)...")
+            else:
+                self.logs.append(f"Summoned {tot_avail:,} men in royal capital {prov['name']} ({c_troops:,} Crown, {v_troops:,} Vassal)! Mustering troops (30 days)...")
         else:
             full_route = find_shortest_path(capital_pid, province_id)
             if full_route and len(full_route) > 1:
@@ -501,15 +553,18 @@ class GameState:
                 new_army.muster_days = 30
                 p_short = prov["name"].split()[0]
                 cap_short = PROVINCES[capital_pid]["name"].split()[0]
-                self.logs.append(f"Royal Courier dispatched from {cap_short} to {p_short} ({hops} shires away, {total_days}d ride)! 30d muster begins upon arrival.")
+                if v_troops == 0:
+                    self.logs.append(f"Royal Order dispatched from {cap_short} to {p_short}: Mobilizing {tot_avail:,} Personal Crown Troops ({total_days}d ride).")
+                else:
+                    self.logs.append(f"Royal Courier dispatched from {cap_short} to {p_short} ({hops} shires away, {total_days}d ride)! 30d muster begins upon arrival.")
             else:
                 new_army.is_mustering = True
                 new_army.muster_days = 30
                 new_army.courier_en_route = False
-                self.logs.append(f"Summoned {available:,} men in {prov['name']}! Mustering troops (30 days)...")
+                self.logs.append(f"Summoned {tot_avail:,} men in {prov['name']}! Mustering troops (30 days)...")
 
         self.armies.append(new_army)
-        prov["levies_current"] = 0
+        prov["levies_current"] = max(0, prov["levies_current"] - tot_avail)
         prov["raise_cooldown_days"] = LEVY_RAISE_COOLDOWN_DAYS
         self.player_raise_cooldown = max(self.player_raise_cooldown, LEVY_RAISE_COOLDOWN_DAYS)
         self.selected_army_id = army_id
@@ -525,25 +580,23 @@ class GameState:
         capital_pid = self.get_realm_capital(self.player_id)
         courier_count = 0
         for pid, prov in PROVINCES.items():
-            if prov["owner"] == self.player_id and prov["levies_current"] > 0 and prov.get("raise_cooldown_days", 0) <= 0:
-                if self.is_province_levy_in_field(pid, self.player_id):
+            if prov["owner"] == self.player_id and prov.get("raise_cooldown_days", 0) <= 0:
+                tot_avail, c_troops, v_troops = self.get_available_province_levies(pid, self.player_id)
+                if tot_avail <= 0:
                     continue
-                available = prov["levies_current"]
+
                 army_id = f"army_{self.army_id_counter}"
                 self.army_id_counter += 1
-                army_name = f"{prov['name'].split()[0]} Fyrd"
+                p_short = prov["name"].split()[0]
                 is_royal = (pid == capital_pid)
-                new_army = Army(army_id, self.player_id, pid, available, army_name,
+                if v_troops == 0 and c_troops > 0:
+                    army_name = f"{p_short} Royal Guard" if is_royal else f"{p_short} Crown Retinue"
+                else:
+                    army_name = f"{p_short} Fyrd"
+
+                new_army = Army(army_id, self.player_id, pid, tot_avail, army_name,
                                 flag_origin=pid, rank=3 if is_royal else 1)
                 
-                # Partition into Crown Demesne troops (upkeep 1g/100) vs Feudal Vassal Levies (FREE)
-                c_max = prov.get("crown_levies_max", 0)
-                t_max = prov.get("levies_max", available)
-                if t_max > 0 and c_max > 0:
-                    c_troops = min(available, int(round(available * (c_max / float(t_max)))))
-                else:
-                    c_troops = 0
-                v_troops = max(0, available - c_troops)
                 new_army.crown_troops = c_troops
                 new_army.vassal_levies = v_troops
                 
@@ -571,10 +624,10 @@ class GameState:
                         new_army.courier_en_route = False
 
                 self.armies.append(new_army)
-                prov["levies_current"] = 0
+                prov["levies_current"] = max(0, prov["levies_current"] - tot_avail)
                 prov["raise_cooldown_days"] = LEVY_RAISE_COOLDOWN_DAYS
                 raised_count += 1
-                total_men += available
+                total_men += tot_avail
         
         if raised_count > 0:
             self.player_raise_cooldown = LEVY_RAISE_COOLDOWN_DAYS
@@ -584,11 +637,7 @@ class GameState:
             else:
                 self.logs.append(f"Mobilized royal capital levies: {total_men:,} men! (Mustering for 30 days)")
         else:
-            in_field = any(self.is_province_levy_in_field(pid, self.player_id) for pid, p in PROVINCES.items() if p["owner"] == self.player_id)
-            if in_field:
-                self.logs.append("All provincial levies are already deployed in the field! Disband active armies first.")
-            else:
-                self.logs.append("All available levies are already raised or recovering.")
+            self.logs.append("No levies currently available to muster (either on cooldown, recovering, or vassal fyrd already deployed in the field).")
 
     def raise_all_realm_levies(self, ruler_id, is_emergency=False):
         """Mobilizes ALL available levies across 100% of a ruler's realm provinces."""
@@ -610,57 +659,53 @@ class GameState:
             prov = PROVINCES[pid]
             if prov.get("raise_cooldown_days", 0) > 0:
                 continue
-            if self.is_province_levy_in_field(pid, ruler_id):
+            tot_avail, c_troops, v_troops = self.get_available_province_levies(pid, ruler_id)
+            if tot_avail < min_to_raise:
                 continue
-            available = prov.get("levies_current", 0)
-            if available >= min_to_raise:
-                army_id = f"army_{self.army_id_counter}"
-                self.army_id_counter += 1
-                p_short = prov["name"].split()[0]
+
+            army_id = f"army_{self.army_id_counter}"
+            self.army_id_counter += 1
+            p_short = prov["name"].split()[0]
+            is_royal = (pid == capital_pid)
+            if v_troops == 0 and c_troops > 0:
+                army_name = f"{p_short} Royal Guard" if is_royal else f"{p_short} Crown Retinue"
+            else:
                 army_name = f"{p_short} Host"
-                is_royal = (pid == capital_pid)
-                new_army = Army(army_id, ruler_id, pid, available, army_name,
-                                flag_origin=pid, rank=3 if is_royal else 1)
-                
-                # Partition into Crown Demesne troops vs Feudal Vassal Levies (FREE)
-                c_max = prov.get("crown_levies_max", 0)
-                t_max = prov.get("levies_max", available)
-                if t_max > 0 and c_max > 0:
-                    c_troops = min(available, int(round(available * (c_max / float(t_max)))))
+
+            new_army = Army(army_id, ruler_id, pid, tot_avail, army_name,
+                            flag_origin=pid, rank=3 if is_royal else 1)
+            
+            new_army.crown_troops = c_troops
+            new_army.vassal_levies = v_troops
+            
+            m_days = 15 if is_emergency else 30
+            if is_royal:
+                new_army.is_mustering = True
+                new_army.muster_days = m_days
+                new_army.courier_en_route = False
+            else:
+                full_route = find_shortest_path(capital_pid, pid)
+                if full_route and len(full_route) > 1:
+                    hops = len(full_route) - 1
+                    total_days = max(1, hops * 2) if is_emergency else (hops * DAYS_PER_TILE)
+                    new_army.courier_en_route = True
+                    new_army.courier_path = full_route[1:]
+                    new_army.courier_current_prov = full_route[0]
+                    new_army.courier_next_prov = full_route[1]
+                    new_army.courier_progress = 0.0
+                    new_army.courier_days_left = total_days
+                    new_army.is_mustering = False
+                    new_army.muster_days = m_days
                 else:
-                    c_troops = 0
-                v_troops = max(0, available - c_troops)
-                new_army.crown_troops = c_troops
-                new_army.vassal_levies = v_troops
-                
-                m_days = 15 if is_emergency else 30
-                if is_royal:
                     new_army.is_mustering = True
                     new_army.muster_days = m_days
                     new_army.courier_en_route = False
-                else:
-                    full_route = find_shortest_path(capital_pid, pid)
-                    if full_route and len(full_route) > 1:
-                        hops = len(full_route) - 1
-                        total_days = max(1, hops * 2) if is_emergency else (hops * DAYS_PER_TILE)
-                        new_army.courier_en_route = True
-                        new_army.courier_path = full_route[1:]
-                        new_army.courier_current_prov = full_route[0]
-                        new_army.courier_next_prov = full_route[1]
-                        new_army.courier_progress = 0.0
-                        new_army.courier_days_left = total_days
-                        new_army.is_mustering = False
-                        new_army.muster_days = m_days
-                    else:
-                        new_army.is_mustering = True
-                        new_army.muster_days = m_days
-                        new_army.courier_en_route = False
 
-                self.armies.append(new_army)
-                prov["levies_current"] = 0
-                prov["raise_cooldown_days"] = LEVY_RAISE_COOLDOWN_DAYS
-                raised_count += 1
-                total_men += available
+            self.armies.append(new_army)
+            prov["levies_current"] = max(0, prov["levies_current"] - tot_avail)
+            prov["raise_cooldown_days"] = LEVY_RAISE_COOLDOWN_DAYS
+            raised_count += 1
+            total_men += tot_avail
         if raised_count > 0:
             if ruler_id == self.enemy_id:
                 self.enemy_raise_cooldown = LEVY_RAISE_COOLDOWN_DAYS

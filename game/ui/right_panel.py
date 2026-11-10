@@ -365,28 +365,40 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                 screen.blit(font_md.render("Military Orders", True, COLOR_GOLD), (content_x, 320))
                 p_cd = sel_prov.get("raise_cooldown_days", 0)
                 is_p_cd = (p_cd > 0)
-                is_in_field = state.is_province_levy_in_field(state.selected_province, sel_prov["owner"])
+                tot_avail, c_avail, v_avail = state.get_available_province_levies(state.selected_province, sel_prov["owner"])
+                vassal_in_field = state.is_province_vassal_levy_in_field(state.selected_province, sel_prov["owner"])
+                can_raise = (tot_avail > 0 and not is_p_cd)
                 
                 raise_btn = pygame.Rect(content_x, 345, content_w, 40)
-                b_r_hov = raise_btn.collidepoint(mouse_pos) and not is_p_cd and not is_in_field
+                b_r_hov = raise_btn.collidepoint(mouse_pos) and can_raise
                 
-                if is_in_field:
-                    pygame.draw.rect(screen, (38, 42, 50), raise_btn, border_radius=6)
-                    pygame.draw.rect(screen, (60, 65, 78), raise_btn, 1, border_radius=6)
-                    p_short = sel_prov["name"].split()[0]
-                    f_lbl = font_sm.render(f"LEVIES IN FIELD ({p_short} Deployed)", True, (160, 170, 185))
-                    screen.blit(f_lbl, (raise_btn.x + (raise_btn.w - f_lbl.get_width()) // 2, 356))
-                elif is_p_cd:
+                if is_p_cd:
                     m_left = (p_cd + 29) // 30
                     pygame.draw.rect(screen, (38, 42, 50), raise_btn, border_radius=6)
                     pygame.draw.rect(screen, (60, 65, 78), raise_btn, 1, border_radius=6)
                     cd_txt = f"MUSTERING COOLDOWN ({p_cd}d / {m_left}m left)"
                     cd_surf = font_sm.render(cd_txt, True, (140, 150, 165))
                     screen.blit(cd_surf, (raise_btn.x + (raise_btn.w - cd_surf.get_width()) // 2, 356))
+                elif tot_avail <= 0:
+                    pygame.draw.rect(screen, (38, 42, 50), raise_btn, border_radius=6)
+                    pygame.draw.rect(screen, (60, 65, 78), raise_btn, 1, border_radius=6)
+                    p_short = sel_prov["name"].split()[0]
+                    if vassal_in_field:
+                        f_lbl = font_sm.render(f"VASSAL FYRD IN FIELD ({p_short} Deployed)", True, (160, 170, 185))
+                    else:
+                        f_lbl = font_sm.render("NO TROOPS AVAILABLE (0 Men)", True, (140, 150, 165))
+                    screen.blit(f_lbl, (raise_btn.x + (raise_btn.w - f_lbl.get_width()) // 2, 356))
                 else:
-                    pygame.draw.rect(screen, (35, 95, 50) if b_r_hov else (25, 70, 38), raise_btn, border_radius=6)
-                    pygame.draw.rect(screen, COLOR_TEXT_GREEN, raise_btn, 1, border_radius=6)
-                    r_lbl = font_md.render(f"RAISE LOCAL LEVY ({sel_prov['levies_current']} Men)", True, COLOR_TEXT_WHITE)
+                    is_pure_crown = (v_avail == 0 and c_avail > 0 and vassal_in_field)
+                    btn_bg = (40, 75, 110) if (b_r_hov and is_pure_crown) else ((28, 55, 85) if is_pure_crown else ((35, 95, 50) if b_r_hov else (25, 70, 38)))
+                    btn_border = (100, 180, 255) if is_pure_crown else COLOR_TEXT_GREEN
+                    pygame.draw.rect(screen, btn_bg, raise_btn, border_radius=6)
+                    pygame.draw.rect(screen, btn_border, raise_btn, 1, border_radius=6)
+                    if is_pure_crown:
+                        btn_txt = f"RAISE ROYAL GUARD ({c_avail} Men)"
+                    else:
+                        btn_txt = f"RAISE LOCAL LEVY ({tot_avail} Men)"
+                    r_lbl = font_md.render(btn_txt, True, COLOR_TEXT_WHITE)
                     screen.blit(r_lbl, (raise_btn.x + (raise_btn.w - r_lbl.get_width()) // 2, 354))
                     if mouse_clicked and b_r_hov:
                         state.raise_province_levy(state.selected_province)

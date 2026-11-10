@@ -134,7 +134,7 @@ def run_realm_ai(state, ruler_id):
 
     total_my_field = sum(a.troops for a in my_armies)
     total_threat_troops = sum(ha.troops for ha in all_threat_armies)
-    unraised_my_levies = sum(PROVINCES[pid].get("levies_current", 0) for pid in realm_provs if not state.is_province_levy_in_field(pid, ruler_id))
+    unraised_my_levies = sum(state.get_available_province_levies(pid, ruler_id)[0] for pid in realm_provs)
     has_invasion = len(invading_threats) > 0
     has_border_threat = len(threatened_borders) > 0
 
