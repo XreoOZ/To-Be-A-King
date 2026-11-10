@@ -56,35 +56,9 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     pygame.draw.rect(screen, COLOR_OCEAN, map_bg_rect, border_radius=6)
     pygame.draw.rect(screen, COLOR_PANEL_BORDER, map_bg_rect, 2, border_radius=6)
     
-    # Territory Control Bar (Wessex vs Danelaw)
-    wessex_count = state.get_provinces_count(state.player_id)
-    danelaw_count = state.get_provinces_count(state.enemy_id)
-    total_provs = 12
-    
-    bar_x = MAP_VIEWPORT_X + 26
-    bar_y = PANEL_Y + 12
-    bar_w = MAP_VIEWPORT_W - 52
-    bar_h = 24
-    
-    pygame.draw.rect(screen, (25, 30, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
-    wessex_pixel_w = int((wessex_count / total_provs) * bar_w)
-    pygame.draw.rect(screen, COLOR_WESSEX, (bar_x, bar_y, wessex_pixel_w, bar_h), border_radius=4)
-    pygame.draw.rect(screen, COLOR_DANELAW, (bar_x + wessex_pixel_w, bar_y, bar_w - wessex_pixel_w, bar_h), border_radius=4)
-    pygame.draw.rect(screen, COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=4)
-    
-    if getattr(state, "player_liege", None) == state.enemy_id:
-        w_lbl = font_sm.render(f"WESSEX (Vassal Duchy): {wessex_count} Shire", True, (255, 230, 230))
-        d_lbl = font_sm.render(f"DANELAW (High Kingdom): {danelaw_count} Shires", True, (230, 240, 255))
-    elif getattr(state, "enemy_liege", None) == state.player_id:
-        w_lbl = font_sm.render(f"BRITAIN (High Kingdom): {wessex_count} Shires", True, COLOR_GOLD)
-        d_lbl = font_sm.render(f"JORVIK (Vassal Jarl): {danelaw_count} Shire", True, (230, 240, 255))
-    else:
-        w_lbl = font_sm.render(f"WESSEX: {wessex_count} Provinces", True, (255, 230, 230))
-        d_lbl = font_sm.render(f"DANELAW: {danelaw_count} Provinces", True, (230, 240, 255))
-    screen.blit(w_lbl, (bar_x + 10, bar_y + 3))
-    screen.blit(d_lbl, (bar_x + bar_w - d_lbl.get_width() - 10, bar_y + 3))
-    
     # Floating Zoom HUD rect anchor
+    bar_y = PANEL_Y + 12
+    bar_h = 24
     hud_w, hud_h = 36, 118
     hud_x, hud_y = map_bg_rect.right - 48, bar_y + bar_h + 12
     hud_rect = pygame.Rect(hud_x, hud_y, hud_w, hud_h)
@@ -900,7 +874,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
             p_bg = (185, 35, 35)
             p_border = (255, 220, 50)
         elif army.courier_en_route:
-            txt_badge = f"✉ Summons ({army.courier_days_left}d + {army.muster_days}d)"
+            txt_badge = f"✉ Summons ({army.courier_days_left}d)"
             p_bg = (55, 42, 18)
             p_border = (245, 205, 70)
         elif army.is_mustering:
@@ -960,6 +934,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     # -------------------------------------------------------------
     # DRAW TRAVELLING ROYAL COURIERS (Riders Galloping Between Shires)
     # -------------------------------------------------------------
+    courier_drawn_positions = []
     for army in state.armies:
         if army.courier_en_route and army.courier_current_prov and army.courier_next_prov:
             c_pos = province_anchors.get(army.courier_current_prov)
@@ -979,17 +954,23 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                     pygame.draw.line(guide_surf, (250, 215, 80, 85) if is_player else (120, 180, 255, 85), (mx, my), dest_pos, 2)
                     screen.blit(guide_surf, (0, 0))
                 
-                # Galloping Courier Pill Badge
+                # Galloping Courier Pill Badge (with vertical collision offset)
                 c_text = f"✉ Courier -> {dest_name} ({army.courier_days_left}d left)"
                 c_lbl = font_xs.render(c_text, True, (255, 240, 180) if is_player else (220, 240, 255))
                 cw = c_lbl.get_width() + 16
                 ch = 18
                 
+                cur_y_offset = -24
+                for px, py in courier_drawn_positions:
+                    if abs(mx - px) < 90 and abs((my + cur_y_offset) - py) < 22:
+                        cur_y_offset -= 22
+                courier_drawn_positions.append((mx, my + cur_y_offset))
+
                 c_surf = pygame.Surface((cw, ch), pygame.SRCALPHA)
                 c_surf.fill((25, 20, 10, 230) if is_player else (15, 22, 35, 230))
                 pygame.draw.rect(c_surf, COLOR_GOLD if is_player else (100, 160, 240), (0, 0, cw, ch), 1, border_radius=9)
                 c_surf.blit(c_lbl, (8, 1))
-                screen.blit(c_surf, (mx - cw // 2, my - 24))
+                screen.blit(c_surf, (mx - cw // 2, my + cur_y_offset))
                 
                 # Gold / Blue courier marker pip
                 pygame.draw.circle(screen, COLOR_GOLD if is_player else (100, 160, 240), (mx, my), 5)
@@ -1041,6 +1022,36 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
         state.cam_pan_x = 0
         state.cam_pan_y = 0
     
+    # ---------------------------------------------------------
+    # TERRITORY CONTROL HUD BAR (Floating cleanly on top of map)
+    # ---------------------------------------------------------
+    wessex_count = state.get_provinces_count(state.player_id)
+    danelaw_count = state.get_provinces_count(state.enemy_id)
+    total_provs = 12
+    
+    bar_x = MAP_VIEWPORT_X + 26
+    bar_y = PANEL_Y + 12
+    bar_w = MAP_VIEWPORT_W - 52
+    bar_h = 24
+    
+    pygame.draw.rect(screen, (25, 30, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
+    wessex_pixel_w = int((wessex_count / total_provs) * bar_w)
+    pygame.draw.rect(screen, COLOR_WESSEX, (bar_x, bar_y, wessex_pixel_w, bar_h), border_radius=4)
+    pygame.draw.rect(screen, COLOR_DANELAW, (bar_x + wessex_pixel_w, bar_y, bar_w - wessex_pixel_w, bar_h), border_radius=4)
+    pygame.draw.rect(screen, COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=4)
+    
+    if getattr(state, "player_liege", None) == state.enemy_id:
+        w_lbl = font_sm.render(f"WESSEX (Vassal Duchy): {wessex_count} Shire", True, (255, 230, 230))
+        d_lbl = font_sm.render(f"DANELAW (High Kingdom): {danelaw_count} Shires", True, (230, 240, 255))
+    elif getattr(state, "enemy_liege", None) == state.player_id:
+        w_lbl = font_sm.render(f"BRITAIN (High Kingdom): {wessex_count} Shires", True, COLOR_GOLD)
+        d_lbl = font_sm.render(f"JORVIK (Vassal Jarl): {danelaw_count} Shire", True, (230, 240, 255))
+    else:
+        w_lbl = font_sm.render(f"WESSEX: {wessex_count} Provinces", True, (255, 230, 230))
+        d_lbl = font_sm.render(f"DANELAW: {danelaw_count} Provinces", True, (230, 240, 255))
+    screen.blit(w_lbl, (bar_x + 10, bar_y + 3))
+    screen.blit(d_lbl, (bar_x + bar_w - d_lbl.get_width() - 10, bar_y + 3))
+
     # Unclip screen so right panel and remaining UI render normally across the whole display
     screen.set_clip(None)
     

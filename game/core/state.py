@@ -18,7 +18,7 @@ from game.systems.economy import (
     get_all_settlement_holdings
 )
 from game.systems.military import get_siegeable_holdings, is_province_contested
-from game.systems.ai import standardize_enemy_ai_laws, run_viking_ai
+from game.systems.ai import standardize_enemy_ai_laws, run_viking_ai, run_realm_ai
 
 class GameState:
     def __init__(self):
@@ -590,32 +590,36 @@ class GameState:
             else:
                 self.logs.append("All available levies are already raised or recovering.")
 
-    def raise_all_enemy_levies(self, is_emergency=False):
-        """Mobilizes ALL available levies across 100% of Danelaw provinces (All-In with war couriers)."""
-        if self.enemy_raise_cooldown > 0:
+    def raise_all_realm_levies(self, ruler_id, is_emergency=False):
+        """Mobilizes ALL available levies across 100% of a ruler's realm provinces."""
+        if ruler_id == self.enemy_id and self.enemy_raise_cooldown > 0:
             return 0, 0
 
         raised_count = 0
         total_men = 0
-        capital_pid = self.get_realm_capital(self.enemy_id)
-        danelaw_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.enemy_id]
-        has_enemy_field = any(a.owner == self.enemy_id for a in self.armies)
-        min_to_raise = 25 if (is_emergency or not has_enemy_field) else 50
+        capital_pid = self.get_realm_capital(ruler_id)
+        realm_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == ruler_id]
+        has_field = any(a.owner == ruler_id for a in self.armies)
+        min_to_raise = 25 if (is_emergency or not has_field) else 50
 
-        for pid in danelaw_provs:
+        ruler = CHARACTERS.get(ruler_id, {})
+        r_name = ruler.get("name", "Ruler").split()[0]
+        realm_name = ruler.get("realm", "the realm")
+
+        for pid in realm_provs:
             prov = PROVINCES[pid]
             if prov.get("raise_cooldown_days", 0) > 0:
                 continue
-            if self.is_province_levy_in_field(pid, self.enemy_id):
+            if self.is_province_levy_in_field(pid, ruler_id):
                 continue
             available = prov.get("levies_current", 0)
             if available >= min_to_raise:
                 army_id = f"army_{self.army_id_counter}"
                 self.army_id_counter += 1
                 p_short = prov["name"].split()[0]
-                army_name = f"{p_short} Warband"
+                army_name = f"{p_short} Host"
                 is_royal = (pid == capital_pid)
-                new_army = Army(army_id, self.enemy_id, pid, available, army_name,
+                new_army = Army(army_id, ruler_id, pid, available, army_name,
                                 flag_origin=pid, rank=3 if is_royal else 1)
                 
                 # Partition into Crown Demesne troops vs Feudal Vassal Levies (FREE)
@@ -658,10 +662,14 @@ class GameState:
                 raised_count += 1
                 total_men += available
         if raised_count > 0:
-            self.enemy_raise_cooldown = LEVY_RAISE_COOLDOWN_DAYS
-            cap_short = PROVINCES[capital_pid]["name"].split()[0]
-            self.logs.append(f"War Summons! Halfdan mobilizes {total_men:,} warriors across Danelaw (Couriers dispatch from {cap_short})!")
+            if ruler_id == self.enemy_id:
+                self.enemy_raise_cooldown = LEVY_RAISE_COOLDOWN_DAYS
+            cap_short = PROVINCES[capital_pid]["name"].split()[0] if capital_pid in PROVINCES else "Capital"
+            self.logs.append(f"War Summons! {r_name} mobilizes {total_men:,} warriors across {realm_name} (Couriers dispatch from {cap_short})!")
         return raised_count, total_men
+
+    def raise_all_enemy_levies(self, is_emergency=False):
+        return self.raise_all_realm_levies(self.enemy_id, is_emergency=is_emergency)
 
     def rally_all_armies_to(self, target_province_id):
         player_armies = [a for a in self.armies if a.owner == self.player_id]
@@ -1353,8 +1361,10 @@ class GameState:
     # AI (Halfdan Ragnarsson) - Intelligent Border Awareness, Mobilization & Retaliation
     # ---------------------------------------------------------
     def ai_routine(self):
-        """Dispatches to modular Viking strategic AI system."""
-        run_viking_ai(self)
+        """Dispatches to modular strategic AI system for all active non-player AI realm rulers."""
+        ai_rulers = [cid for cid in CHARACTERS if cid != self.player_id and CHARACTERS[cid].get("alive", True)]
+        for r_id in ai_rulers:
+            run_realm_ai(self, r_id)
 
     # ---------------------------------------------------------
 prov_tile_list = {}

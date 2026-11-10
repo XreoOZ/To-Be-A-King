@@ -1,23 +1,25 @@
 """
-Danelaw Viking AI Systems - Intelligent Border Awareness, Strategic Cunning & Dynamic Maneuvers
+Modular, Generic Strategic AI System for Any Feudal Realm / Faction Ruler
+Scalable to multiple AI factions without hardcoded names or flavor strings.
 """
 import random
 from game.data.provinces import PROVINCES, ADJACENCY, find_shortest_path
+from game.data.characters import CHARACTERS
 from game.data.buildings import BUILDING_SPECS
 from game.core.map import CELL_TO_PROV, PROV_TO_TILES, get_province_capital_tile
 from game.systems.economy import get_vassal_landed_status, sync_province_holdings_stats
 from game.systems.military import get_siegeable_holdings
 
-def standardize_enemy_ai_laws(state):
+def standardize_realm_laws(state, ruler_id):
     """
-    Uniformly standardizes all Danelaw / Viking AI vassals' feudal obligations (Tax & Levies).
-    Ensures enemy AI forces maintain uniform 80% levies, 20% tax across all Norse Jarls.
+    Uniformly standardizes an AI ruler's vassals' feudal obligations (Tax & Levies).
+    Ensures AI forces maintain uniform 80% levies, 20% tax across their feudal subjects.
     """
-    danelaw_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == state.enemy_id]
-    for pid in danelaw_provs:
+    realm_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") == ruler_id]
+    for pid in realm_provs:
         for v in state.vassals.get(pid, []):
-            v["tax_rate"] = 20    # Uniform standard 20% tax
-            v["levy_rate"] = 80   # Uniform standard 80% levy obligation
+            v["tax_rate"] = 20
+            v["levy_rate"] = 80
             v["tax_locked"] = True
             v["levy_locked"] = True
             st = get_vassal_landed_status(state, v, pid)
@@ -25,196 +27,208 @@ def standardize_enemy_ai_laws(state):
             v["levy_contribution"] = st["levy_contribution"]
         sync_province_holdings_stats(state, pid)
 
-def evaluate_saxon_target(state, target_pid, danelaw_provs, player_armies):
+def standardize_enemy_ai_laws(state):
+    """Backwards-compatible wrapper for enemy ruler."""
+    standardize_realm_laws(state, state.enemy_id)
+
+def evaluate_target_province(state, target_pid, friendly_provs, hostile_armies, ruler_id):
     """
-    Calculates strategic value of invading a Saxon province:
-    - High priority for adjacent border shires (shorter march, safer lines).
-    - High priority for undefended shires (striking where the enemy is weak!).
+    Calculates strategic value of invading a target enemy province for ruler_id:
+    - High priority for adjacent border provinces (shorter march, safer supply lines).
+    - High priority for undefended provinces (opportunistic strike where enemy is weak).
     - Bonus for enemy capital (prestige blow and command disruption).
-    - Heavy penalty if defended by superior player forces.
+    - Heavy penalty if defended by superior hostile forces.
     """
-    prov = PROVINCES[target_pid]
+    prov = PROVINCES.get(target_pid)
+    if not prov:
+        return 0
     score = 100
 
-    # 1. Proximity bonus (adjacent to Danelaw frontier)
-    is_border = any(target_pid in ADJACENCY.get(dp, []) for dp in danelaw_provs)
+    # 1. Proximity bonus (adjacent to our realm frontier)
+    is_border = any(target_pid in ADJACENCY.get(fp, []) for fp in friendly_provs)
     if is_border:
         score += 50
     else:
-        # Distance penalty for interior shires
         score -= 20
 
-    # 2. Defenseless target evaluation (Cunning: attack where enemy armies are NOT!)
-    armies_in_target = [pa for pa in player_armies if pa.province == target_pid]
+    # 2. Defenseless target evaluation (Opportunistic: attack where hostile armies are NOT!)
+    armies_in_target = [ha for ha in hostile_armies if ha.province == target_pid]
     if not armies_in_target:
-        score += 60  # Ripe for the taking!
+        score += 60
     else:
-        # Defended: penalize based on garrison/army strength
-        defending_men = sum(pa.troops for pa in armies_in_target)
+        defending_men = sum(ha.troops for ha in armies_in_target)
         score -= min(120, defending_men // 10)
 
     # 3. Enemy capital bonus
-    player_cap = state.get_realm_capital(state.player_id)
-    if target_pid == player_cap:
-        score += 45
+    t_owner = prov.get("owner")
+    if t_owner:
+        t_cap = state.get_realm_capital(t_owner)
+        if target_pid == t_cap:
+            score += 45
 
     # 4. Target richness (number of unconquered holdings to flip province)
-    holdings = get_siegeable_holdings(state, target_pid, state.enemy_id)
+    holdings = get_siegeable_holdings(state, target_pid, ruler_id)
     score += len(holdings) * 15
 
     return score
 
-def run_viking_ai(state):
+def evaluate_saxon_target(state, target_pid, danelaw_provs, player_armies):
+    """Backwards-compatible wrapper."""
+    return evaluate_target_province(state, target_pid, danelaw_provs, player_armies, state.enemy_id)
+
+def run_realm_ai(state, ruler_id):
     """
-    Master Tactical & Strategic AI for Halfdan Ragnarsson (The Great Heathen Host).
-    Feudal Doctrine:
+    Master Tactical & Strategic AI for any AI Ruler (parameterized by ruler_id).
+    Scalable, flexible feudal doctrine:
     1. Raise Army: Mobilize fyrds when threatened or when an offensive window opens.
-    2. Kumpul di Titik Aman: All contingents assemble at safe fortress staging point before moving out.
-    3. Baru Mainin Siasat:
+    2. Safe Staging Point: All contingents assemble at a safe fortress before advancing.
+    3. Grand Strategic Maneuvers:
        - Force ratio awareness: Crush equal/weaker threats; avoid suicidal head-on attacks.
        - Flank maneuvers & counter-invasions when outnumbered (diversionary pressure).
        - Smart target selection: Prioritizes undefended, high-value border shires.
-       - Pounce on isolated player detachments before they can unite.
-       - Tactical regrouping when battered.
+       - Pounce on isolated enemy detachments before they can unite.
        - Demobilization during peacetime to preserve treasury.
     """
-    danelaw_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == state.enemy_id]
-    if not danelaw_provs:
+    ruler = CHARACTERS.get(ruler_id)
+    if not ruler or not ruler.get("alive", True):
         return
 
-    # If Danelaw is currently a peaceful vassal of player, do not launch unprovoked attacks
-    if getattr(state, "enemy_liege", None) == state.player_id:
+    # Check if this realm is a vassal of the player or another liege in peace
+    if ruler.get("liege") == state.player_id:
         return
 
-    # 1. Standardize AI realm laws
-    standardize_enemy_ai_laws(state)
+    realm_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") == ruler_id]
+    if not realm_provs:
+        return
 
-    # 2. Tactical Reconnaissance: Enemy (Player) & Danelaw Armies
-    player_armies = [a for a in state.armies if a.owner == state.player_id and a.troops > 0]
-    danelaw_armies = [a for a in state.armies if a.owner == state.enemy_id and a.troops > 0]
+    r_name = ruler["name"].split()[0]
+    realm_name = ruler.get("realm", "the realm")
 
-    invading_threats = {}    # Danelaw pid -> list of invading player armies
-    threatened_borders = {}  # Danelaw pid -> list of bordering player armies
+    # 1. Standardize AI realm feudal laws
+    standardize_realm_laws(state, ruler_id)
+
+    # 2. Tactical Reconnaissance: Hostile and Realm Armies
+    hostile_armies = [a for a in state.armies if a.owner != ruler_id and a.troops > 0]
+    my_armies = [a for a in state.armies if a.owner == ruler_id and a.troops > 0]
+
+    invading_threats = {}    # realm pid -> list of invading hostile armies
+    threatened_borders = {}  # realm pid -> list of bordering hostile armies
     all_threat_armies = []
 
-    for pa in player_armies:
-        pa_locations = [pa.province]
-        if pa.is_moving and pa.path:
-            pa_locations.append(pa.path[-1])
+    for ha in hostile_armies:
+        ha_locations = [ha.province]
+        if ha.is_moving and ha.path:
+            ha_locations.append(ha.path[-1])
 
-        for loc in pa_locations:
-            if loc in danelaw_provs:
-                invading_threats.setdefault(loc, []).append(pa)
-                if pa not in all_threat_armies:
-                    all_threat_armies.append(pa)
+        for loc in ha_locations:
+            if loc in realm_provs:
+                invading_threats.setdefault(loc, []).append(ha)
+                if ha not in all_threat_armies:
+                    all_threat_armies.append(ha)
             else:
-                for dp in danelaw_provs:
-                    if loc in ADJACENCY.get(dp, []):
-                        threatened_borders.setdefault(dp, []).append(pa)
-                        if pa not in all_threat_armies:
-                            all_threat_armies.append(pa)
+                for rp in realm_provs:
+                    if loc in ADJACENCY.get(rp, []):
+                        threatened_borders.setdefault(rp, []).append(ha)
+                        if ha not in all_threat_armies:
+                            all_threat_armies.append(ha)
 
-    total_viking_field = sum(a.troops for a in danelaw_armies)
-    total_threat_troops = sum(pa.troops for pa in all_threat_armies)
-    unraised_enemy_levies = sum(PROVINCES[pid].get("levies_current", 0) for pid in danelaw_provs if not state.is_province_levy_in_field(pid, state.enemy_id))
+    total_my_field = sum(a.troops for a in my_armies)
+    total_threat_troops = sum(ha.troops for ha in all_threat_armies)
+    unraised_my_levies = sum(PROVINCES[pid].get("levies_current", 0) for pid in realm_provs if not state.is_province_levy_in_field(pid, ruler_id))
     has_invasion = len(invading_threats) > 0
     has_border_threat = len(threatened_borders) > 0
 
-    # 3. Dynamic Demobilization & Peacetime Sense
-    # If no immediate invasion or border threats exist:
+    # 3. Dynamic Demobilization & Peacetime Economy
     if not has_invasion and not has_border_threat:
-        can_attack = (total_viking_field >= 200 and state.enemy.get("gold", 100) >= 30)
-        
-        # If not strong enough or too poor to attack, and realm is peaceful: demobilize idle remnants!
-        if not can_attack and not player_armies:
-            active_offensive = any(a.province not in danelaw_provs or a.is_sieging for a in danelaw_armies)
-            if not active_offensive and danelaw_armies:
-                for a in list(danelaw_armies):
+        can_attack = (total_my_field >= 200 and ruler.get("gold", 100) >= 30)
+        if not can_attack and not hostile_armies:
+            active_offensive = any(a.province not in realm_provs or a.is_sieging for a in my_armies)
+            if not active_offensive and my_armies:
+                for a in list(my_armies):
                     if not a.in_battle and not a.is_sieging and not a.is_mustering and not a.courier_en_route:
                         state.disband_army(a)
-                state.logs.append("Peace in Britain: Halfdan stands down his Viking warbands to replenish garrisons and save treasury.")
+                state.logs.append(f"⚔ Stand Down: {r_name} demobilizes idle warbands to replenish provincial garrisons and preserve treasury.")
                 return
 
     # 4. Smart Mobilization Logic
+    cooldown = getattr(state, "enemy_raise_cooldown", 0) if ruler_id == state.enemy_id else 0
     should_mobilize = False
-    if state.enemy_raise_cooldown <= 0:
-        if (has_invasion or has_border_threat) and unraised_enemy_levies >= 40:
+    if cooldown <= 0:
+        if (has_invasion or has_border_threat) and unraised_my_levies >= 40:
             should_mobilize = True
-        elif len(danelaw_armies) == 0 and len(player_armies) > 0 and unraised_enemy_levies >= 50:
+        elif len(my_armies) == 0 and len(hostile_armies) > 0 and unraised_my_levies >= 50:
             should_mobilize = True
-        elif len(danelaw_armies) == 0 and state.enemy.get("gold", 100) >= 40 and unraised_enemy_levies >= 150:
+        elif len(my_armies) == 0 and ruler.get("gold", 100) >= 40 and unraised_my_levies >= 150:
             should_mobilize = True
-        elif total_viking_field < total_threat_troops * 0.85 and unraised_enemy_levies >= 50:
+        elif total_my_field < total_threat_troops * 0.85 and unraised_my_levies >= 50:
             should_mobilize = True
 
     if should_mobilize:
         is_emerg = (has_invasion or has_border_threat)
-        count, men = state.raise_all_enemy_levies(is_emergency=is_emerg)
+        if hasattr(state, "raise_all_realm_levies"):
+            count, men = state.raise_all_realm_levies(ruler_id, is_emergency=is_emerg)
+        else:
+            count, men = state.raise_all_enemy_levies(is_emergency=is_emerg)
         if count > 0:
             if has_invasion:
-                inv_names = ", ".join([PROVINCES[dp]['name'].split()[0] for dp in invading_threats.keys()])
-                state.logs.append(f"⚔ INVASION ALERT! Saxon armies inside {inv_names}! Danelaw sounds war horns (+{men:,} men)!")
+                inv_names = ", ".join([PROVINCES[rp]['name'].split()[0] for rp in invading_threats.keys()])
+                state.logs.append(f"⚔ Frontier Breach! Hostile forces entered {inv_names}! {r_name} sounds the call to arms (+{men:,} men)!")
             elif has_border_threat:
-                t_names = ", ".join([PROVINCES[dp]['name'].split()[0] for dp in threatened_borders.keys()])
-                state.logs.append(f"⚔ Raven Warning! Saxon armies massing near {t_names}! Danelaw mobilizes (+{men:,} men)!")
+                t_names = ", ".join([PROVINCES[rp]['name'].split()[0] for rp in threatened_borders.keys()])
+                state.logs.append(f"⚔ Border Warning: Troops gathering near {t_names}! {r_name} mobilizes {count} hosts (+{men:,} men)!")
             else:
-                state.logs.append(f"⚔ The Great Heathen Army stirs! Halfdan summons Viking warbands (+{men:,} men in {count} hosts) for an invasion!")
+                state.logs.append(f"⚔ Campaign Mobilization: {r_name} summons {count} provincial hosts (+{men:,} men) for military maneuvers!")
 
-    # 5. Determine Safe Staging Point ("Titik Aman")
-    cap_pid = state.get_realm_capital(state.enemy_id)
-    if cap_pid in danelaw_provs and cap_pid not in invading_threats:
+    # 5. Determine Safe Staging Point
+    cap_pid = state.get_realm_capital(ruler_id)
+    if cap_pid in realm_provs and cap_pid not in invading_threats:
         rally_prov = cap_pid
     else:
-        unthreatened = [p for p in danelaw_provs if p not in invading_threats]
+        unthreatened = [p for p in realm_provs if p not in invading_threats]
         if unthreatened:
             rally_prov = max(unthreatened, key=lambda p: PROVINCES[p].get("levies_max", 0))
         else:
-            rally_prov = danelaw_provs[0]
+            rally_prov = realm_provs[0]
 
     safe_rally_tile = get_province_capital_tile(rally_prov)
 
     # 6. Merge Any Contingents on Same Tile
-    all_enemy_tiles = set(getattr(a, "tile", None) for a in danelaw_armies if getattr(a, "tile", None) is not None)
-    for t in all_enemy_tiles:
-        state.merge_armies_on_tile(t, state.enemy_id)
+    all_my_tiles = set(getattr(a, "tile", None) for a in my_armies if getattr(a, "tile", None) is not None)
+    for t in all_my_tiles:
+        state.merge_armies_on_tile(t, ruler_id)
 
     # Re-evaluate armies after tile merging
-    danelaw_armies = [a for a in state.armies if a.owner == state.enemy_id and a.troops > 0]
-    if not danelaw_armies:
+    my_armies = [a for a in state.armies if a.owner == ruler_id and a.troops > 0]
+    if not my_armies:
         return
 
-    ready_hosts = [a for a in danelaw_armies if not a.is_mustering and not a.courier_en_route and not a.in_battle]
+    ready_hosts = [a for a in my_armies if not a.is_mustering and not a.courier_en_route and not a.in_battle]
     if not ready_hosts:
         return
 
     ready_hosts.sort(key=lambda x: x.troops, reverse=True)
     main_host = ready_hosts[0]
-    total_field_troops = sum(a.troops for a in danelaw_armies)
+    total_field_troops = sum(a.troops for a in my_armies)
 
-    # 7. STAGING & ASSEMBLY PHASE ("KUMPUL DI TITIK AMAN")
-    # All dispersed or newly mustered warbands MUST assemble at safe_rally_tile before launching strategy.
+    # 7. Safe Rally & Concentration Phase
     hosts_away_from_rally = [a for a in ready_hosts if getattr(a, "tile", None) != safe_rally_tile and not a.is_sieging]
     
-    # Are we fully assembled into a unified host?
-    is_assembled = (len(danelaw_armies) == 1) or (
+    is_assembled = (len(my_armies) == 1) or (
         main_host.troops >= total_field_troops * 0.80 and not hosts_away_from_rally
     )
 
-    # Emergency Override: Only if enemy is actively invading/sieging a Danelaw holding right now
-    has_urgent_siege = any(pa.is_sieging for pa in all_threat_armies)
+    has_urgent_siege = any(ha.is_sieging for ha in all_threat_armies)
     can_sally_emergency = has_invasion and (main_host.troops >= total_threat_troops * 0.85 or has_urgent_siege)
 
     if not is_assembled and not can_sally_emergency:
-        # Mandatory Rally: All warbands converge on safe_rally_tile!
+        # Mandatory Rally: All warbands converge on safe_rally_tile before launching maneuvers
         for a in ready_hosts:
             a_tile = getattr(a, "tile", None)
             if a_tile != safe_rally_tile and not a.is_moving and not a.is_sieging:
                 state.order_army_march_to_tile(a, safe_rally_tile)
                 p_from = PROVINCES.get(a.province, {}).get("name", "Province").split()[0]
                 p_to = PROVINCES[rally_prov]["name"].split()[0]
-                state.logs.append(f"⚔ Danelaw Muster: {a.name} ({a.troops:,} men) marching from {p_from} to safe assembly point in {p_to}!")
-        
-        # Hosts already at safe_rally_tile HOLD POSITION and wait for comrades to arrive and merge!
+                state.logs.append(f"⚔ Feudal Muster: {a.name} ({a.troops:,} men) marching from {p_from} to safe staging point in {p_to}.")
         return
 
     # If assembled, any detached minor reinforcements continue marching towards main_host
@@ -223,18 +237,16 @@ def run_viking_ai(state):
         if getattr(sub_a, "tile", None) != target_follow_tile and not sub_a.is_moving and not sub_a.is_sieging:
             state.order_army_march_to_tile(sub_a, target_follow_tile)
 
-    # 8. STRATEGIC ACTION EXECUTION ("BARU MAININ SIASAT")
-    # Only the unified main_host executes grand maneuvers!
+    # 8. Grand Strategic Maneuvers
 
     # TACTICAL CHECK 1: AMBUSH ISOLATED ENEMY DETACHMENTS
-    # If the player has a small detached army (< 250 men) within reach and Halfdan has overwhelming numbers:
-    isolated_targets = [pa for pa in player_armies if pa.troops < 250 and main_host.troops >= pa.troops * 1.3]
+    isolated_targets = [ha for ha in hostile_armies if ha.troops < 250 and main_host.troops >= ha.troops * 1.3]
     if isolated_targets and not main_host.is_sieging and not has_invasion:
-        chosen_prey = min(isolated_targets, key=lambda pa: (getattr(pa, "tile", (0, 0))[0] - getattr(main_host, "tile", (0, 0))[0])**2 + (getattr(pa, "tile", (0, 0))[1] - getattr(main_host, "tile", (0, 0))[1])**2)
+        chosen_prey = min(isolated_targets, key=lambda ha: (getattr(ha, "tile", (0, 0))[0] - getattr(main_host, "tile", (0, 0))[0])**2 + (getattr(ha, "tile", (0, 0))[1] - getattr(main_host, "tile", (0, 0))[1])**2)
         prey_tile = getattr(chosen_prey, "tile", get_province_capital_tile(chosen_prey.province))
         if getattr(main_host, "tile", None) != prey_tile and not main_host.is_moving:
             state.order_army_march_to_tile(main_host, prey_tile)
-            state.logs.append(f"⚔ Ambush Stratagem! Halfdan marches {main_host.troops:,} warriors to destroy an isolated Saxon detachment ({chosen_prey.troops:,} men) in {PROVINCES[chosen_prey.province]['name']}!")
+            state.logs.append(f"⚔ Ambush Stratagem: {r_name} moves {main_host.troops:,} warriors to intercept isolated enemy detachment ({chosen_prey.troops:,} men) in {PROVINCES[chosen_prey.province]['name']}!")
             return
 
     # TACTICAL CHECK 2: INVASION DEFENSE & FLANKING COUNTER-ATTACK
@@ -243,29 +255,26 @@ def run_viking_ai(state):
         invading_armies = invading_threats[target_inv_prov]
         inv_troops = sum(ia.troops for ia in invading_armies)
 
-        # Force Ratio Siasat:
         if main_host.troops >= inv_troops * 0.75:
-            # Favorable or equal battle: march to crush invaders!
+            # Favorable or equal battle: march to confront invaders!
             target_tile = getattr(invading_armies[0], "tile", get_province_capital_tile(target_inv_prov))
             if not main_host.is_moving and getattr(main_host, "tile", None) != target_tile:
                 state.order_army_march_to_tile(main_host, target_tile)
-                state.logs.append(f"⚔ Halfdan leads the united Great Heathen Army ({main_host.troops:,} men) to crush Saxon invaders in {PROVINCES[target_inv_prov]['name']}!")
+                state.logs.append(f"⚔ Counter-Attack: {r_name} leads {main_host.troops:,} men to confront enemy forces in {PROVINCES[target_inv_prov]['name']}!")
         else:
-            # Severely Outnumbered!
-            # Diversionary Flank: If Saxon doomstack is sieging an outer province, Halfdan slips past to counter-invade player's homeland!
-            player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == state.player_id]
-            undefended_saxon = [pid for pid in player_provs if not any(pa.province == pid for pa in player_armies)]
-            if undefended_saxon and not main_host.is_moving:
-                flank_target = undefended_saxon[0]
+            # Severely Outnumbered: Diversionary Flank
+            hostile_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") != ruler_id and p.get("owner") is not None]
+            undefended_enemy = [pid for pid in hostile_provs if not any(ha.province == pid for ha in hostile_armies)]
+            if undefended_enemy and not main_host.is_moving:
+                flank_target = undefended_enemy[0]
                 flank_tile = get_province_capital_tile(flank_target)
                 state.order_army_march_to_tile(main_host, flank_tile)
-                state.logs.append(f"⚔ Diversionary Maneuver! Outnumbered at home, Halfdan flanks the Saxon host to strike undefended {PROVINCES[flank_target]['name']}!")
+                state.logs.append(f"⚔ Diversionary Maneuver: Outnumbered at home, {r_name} flanks the hostile host to strike undefended {PROVINCES[flank_target]['name']}!")
             else:
-                # Dig in at fortified capital
                 cap_tile = get_province_capital_tile(rally_prov)
                 if getattr(main_host, "tile", None) != cap_tile and not main_host.is_moving:
                     state.order_army_march_to_tile(main_host, cap_tile)
-                    state.logs.append(f"⚔ Defensive Stand: Outnumbered, Halfdan retreats to fortified {PROVINCES[rally_prov]['name']} to make his stand!")
+                    state.logs.append(f"⚔ Defensive Stand: {r_name} falls back to fortified {PROVINCES[rally_prov]['name']} to hold the stronghold.")
 
     # TACTICAL CHECK 3: BORDER MANEUVERS
     elif has_border_threat:
@@ -273,49 +282,45 @@ def run_viking_ai(state):
         opposing_armies = threatened_borders.get(target_border, [])
         opp_troops = sum(oa.troops for oa in opposing_armies)
 
-        if opposing_armies:
+        border_tiles = PROV_TO_TILES.get(target_border, [])
+        if opposing_armies and border_tiles:
             opp_tile = getattr(opposing_armies[0], "tile", get_province_capital_tile(opposing_armies[0].province))
-            closest_border_tile = min(PROV_TO_TILES[target_border], key=lambda t: (t[0]-opp_tile[0])**2 + (t[1]-opp_tile[1])**2)
+            closest_border_tile = min(border_tiles, key=lambda t: (t[0]-opp_tile[0])**2 + (t[1]-opp_tile[1])**2)
         else:
             closest_border_tile = get_province_capital_tile(target_border)
 
         if getattr(main_host, "tile", None) != closest_border_tile and not main_host.is_moving:
             state.order_army_march_to_tile(main_host, closest_border_tile)
-            state.logs.append(f"⚔ Border Maneuver: Halfdan moves his united host ({main_host.troops:,} men) to border tile {closest_border_tile} in {PROVINCES[target_border]['name']}!")
+            state.logs.append(f"⚔ Border Patrol: {r_name} moves {main_host.troops:,} warriors to border outpost in {PROVINCES[target_border]['name']}.")
         elif getattr(main_host, "tile", None) == closest_border_tile and not main_host.is_moving:
-            # Sally out aggressively if confident in battle!
             if opposing_armies and (main_host.troops >= opp_troops * 0.75 or main_host.troops >= 350):
                 target_enemy_tile = getattr(opposing_armies[0], "tile", get_province_capital_tile(opposing_armies[0].province))
                 target_enemy_prov = opposing_armies[0].province
                 state.order_army_march_to_tile(main_host, target_enemy_tile)
-                state.logs.append(f"⚔ Preemptive Strike! The Great Heathen Army ({main_host.troops:,} men) surges across the frontier to crush the Saxons in {PROVINCES[target_enemy_prov]['name']}!")
+                state.logs.append(f"⚔ Strategic Sally: {r_name} advances across the border into {PROVINCES[target_enemy_prov]['name']} to engage the enemy host!")
 
-    # TACTICAL CHECK 4: STRATEGIC OFFENSIVE CAMPAIGN (Conquest of Saxon Shires)
+    # TACTICAL CHECK 4: STRATEGIC OFFENSIVE CAMPAIGN
     else:
-        # If no immediate threat and Halfdan has >= 200 warriors gathered, launch strategic invasion!
         if main_host.troops >= 200 and not main_host.is_moving:
-            # If main_host is already standing on a siegeable holding in player territory, stay and siege!
-            if main_host.province not in danelaw_provs:
-                cur_unconquered = get_siegeable_holdings(state, main_host.province, state.enemy_id)
+            if main_host.province not in realm_provs:
+                cur_unconquered = get_siegeable_holdings(state, main_host.province, ruler_id)
                 matching_tiles = [h[1][0] for h in cur_unconquered]
                 if getattr(main_host, "tile", None) in matching_tiles:
-                    # Besieging holding, hold and complete siege!
                     return
                 elif cur_unconquered:
-                    # Move to next holding in this province
                     next_holding_tile = cur_unconquered[0][1][0]
                     state.order_army_march_to_tile(main_host, next_holding_tile)
-                    state.logs.append(f"⚔ Siege Advance: Halfdan moves to besiege {cur_unconquered[0][0]} in {PROVINCES[main_host.province]['name']}!")
+                    state.logs.append(f"⚔ Siege Advance: {r_name} moves to besiege {cur_unconquered[0][0]} in {PROVINCES[main_host.province]['name']}!")
                     return
 
-            # Cunning Target Selection: Evaluate all Saxon shires by strategic score!
-            player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == state.player_id]
-            if player_provs:
-                scored_targets = [(pid, evaluate_saxon_target(state, pid, danelaw_provs, player_armies)) for pid in player_provs]
+            # Cunning Target Selection: Evaluate all hostile provinces by strategic score!
+            hostile_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") != ruler_id and p.get("owner") is not None]
+            if hostile_provs:
+                scored_targets = [(pid, evaluate_target_province(state, pid, realm_provs, hostile_armies, ruler_id)) for pid in hostile_provs]
                 scored_targets.sort(key=lambda x: x[1], reverse=True)
                 chosen_target = scored_targets[0][0]
 
-                holdings = get_siegeable_holdings(state, chosen_target, state.enemy_id)
+                holdings = get_siegeable_holdings(state, chosen_target, ruler_id)
                 if holdings:
                     target_tile = holdings[0][1][0]
                     h_name = holdings[0][0]
@@ -324,4 +329,8 @@ def run_viking_ai(state):
                     h_name = f"{PROVINCES[chosen_target]['name']} Capital"
 
                 state.order_army_march_to_tile(main_host, target_tile)
-                state.logs.append(f"⚔ Strategic Campaign! Halfdan leads {main_host.troops:,} warriors into {PROVINCES[chosen_target]['name']} to capture {h_name}!")
+                state.logs.append(f"⚔ Strategic Advance: {r_name} leads {main_host.troops:,} warriors into {PROVINCES[chosen_target]['name']} to capture {h_name}!")
+
+def run_viking_ai(state):
+    """Backwards-compatible wrapper calling run_realm_ai for the enemy faction."""
+    run_realm_ai(state, state.enemy_id)
