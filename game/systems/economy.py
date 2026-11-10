@@ -392,24 +392,18 @@ def get_realm_finances(state, char_id=None):
 
     crown_holdings = []
     total_crown_income = 0
+    seen_crown_hids = set()
     for h in get_all_settlement_holdings(state):
         sdata = h["data"]
+        hid = sdata.get("id") or h.get("name")
+        if hid in seen_crown_hids:
+            continue
         pid = h["province"]
         prov_owner = PROVINCES.get(pid, {}).get("owner")
-        is_my_crown = False
-        # Holding belongs to char_id if explicitly owned or held by char_id
-        if sdata.get("owner") == char_id and sdata.get("is_crown_demesne"):
-            is_my_crown = True
-        elif char_id == state.player_id and sdata.get("lord") == f"{state.player['name']} (Crown Demesne)":
-            is_my_crown = True
-        elif prov_owner == char_id and sdata.get("is_crown_demesne") and not sdata.get("vassal_id"):
-            # Ensure AI's Jorvik holdings are never counted as player's
-            if char_id == state.player_id and pid == "jorvik":
-                is_my_crown = False
-            else:
-                is_my_crown = True
+        h_owner = sdata.get("owner") or prov_owner
 
-        if is_my_crown:
+        if h_owner == char_id and sdata.get("is_crown_demesne") and not sdata.get("vassal_id"):
+            seen_crown_hids.add(hid)
             htype = sdata.get("type", "city")
             if htype == "fort":
                 val = 1
@@ -450,12 +444,17 @@ def get_realm_finances(state, char_id=None):
 
     barrack_expenses = []
     total_facility_upkeep = 0
+    seen_barrack_ids = set()
     for coord, sdata in state.settlements.items():
         if sdata.get("is_crown_demesne") and sdata.get("type") == "barrack":
+            bid = sdata.get("id") or coord
+            if bid in seen_barrack_ids:
+                continue
+            seen_barrack_ids.add(bid)
             pid = sdata.get("province")
             prov_owner = PROVINCES.get(pid, {}).get("owner")
-            is_my_barrack = (prov_owner == char_id) or (char_id == state.player_id and not sdata.get("vassal_id"))
-            if is_my_barrack:
+            b_owner = sdata.get("owner") or prov_owner
+            if b_owner == char_id:
                 lvl = sdata.get("level", 0)
                 cost = 1 + lvl
                 total_facility_upkeep += cost
