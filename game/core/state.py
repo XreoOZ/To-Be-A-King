@@ -805,65 +805,103 @@ class GameState:
         self.player["piety"] += 1
         self.enemy["prestige"] += 1
 
-        # Vassal autonomous build request chance: ONLY IF Vassal has sufficient Gold AND owns a fief with free tiles!
-        if not self.vassal_build_requests:
-            player_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.player_id]
-            if player_provs and random.random() < 0.35:
-                eligible_petitions = []
-                for pid in player_provs:
-                    v_list = self.vassals.get(pid, [])
-                    for v in v_list:
-                        v_gold = v.get("gold", 0)
-                        if v_gold >= 250:
-                            v_fiefs = [f for f in self.fiefs.values() if f.get("province") == pid and (f.get("holder") == v["name"] or f.get("vassal_id") == v.get("id"))]
-                            for f in v_fiefs:
-                                free_tiles = [t for t in f.get("tiles", []) if t not in self.settlements]
-                                if not free_tiles:
-                                    continue
-                                
-                                # Try 2-tile fort if vassal has >= 400g
-                                pair = None
-                                if v_gold >= 400 and len(free_tiles) >= 2:
-                                    free_set = set(free_tiles)
-                                    for (c, r) in free_tiles:
-                                        if (c + 1, r) in free_set:
-                                            pair = [(c, r), (c + 1, r)]
-                                            break
-                                        elif (c, r + 1) in free_set:
-                                            pair = [(c, r), (c, r + 1)]
-                                            break
-                                
-                                if pair and v_gold >= 400:
-                                    eligible_petitions.append({
-                                        "vassal": v["name"],
-                                        "vassal_ref": v,
-                                        "province_id": pid,
-                                        "province_name": PROVINCES[pid]["name"],
-                                        "fief_id": f["id"],
-                                        "fief_name": f["name"],
-                                        "build_tiles": pair,
-                                        "build_type": "fort",
-                                        "cost": 400
-                                    })
-                                else:
-                                    # 1-tile city petition
-                                    eligible_petitions.append({
-                                        "vassal": v["name"],
-                                        "vassal_ref": v,
-                                        "province_id": pid,
-                                        "province_name": PROVINCES[pid]["name"],
-                                        "fief_id": f["id"],
-                                        "fief_name": f["name"],
-                                        "build_tiles": [free_tiles[0]],
-                                        "build_type": "city",
-                                        "cost": 250
-                                    })
+        # Vassal Feudal Autonomy: Vassals autonomously build whatever they want on their fiefs!
+        # If they have enough gold and free tiles in their territory, they erect Cities (600g), Barracks (800g), or Forts (1000g)!
+        for pid in PROVINCES:
+            v_list = self.vassals.get(pid, [])
+            for v in v_list:
+                v_gold = v.get("gold", 0)
+                city_cost = BUILDING_SPECS["city"]["cost"]       # 600
+                barrack_cost = BUILDING_SPECS["barrack"]["cost"] # 800
+                fort_cost = BUILDING_SPECS["fort"]["cost"]       # 1000
 
-                if eligible_petitions:
-                    req_choice = random.choice(eligible_petitions)
-                    self.vassal_build_requests.append(req_choice)
-                    b_title = "Fort (400g)" if req_choice["build_type"] == "fort" else "City (250g)"
-                    self.logs.append(f"Charter Petition: {req_choice['vassal']} petitions to build {b_title} inside {req_choice['fief_name']} ({req_choice['province_name']})!")
+                if v_gold < city_cost:
+                    continue
+
+                v_fiefs = [f for f in self.fiefs.values() if f.get("province") == pid and (f.get("holder") == v["name"] or f.get("vassal_id") == v.get("id"))]
+                if not v_fiefs:
+                    continue
+
+                # Find all available choices for this vassal
+                possible_builds = []
+                for f in v_fiefs:
+                    free_tiles = [t for t in f.get("tiles", []) if t not in self.settlements]
+                    if not free_tiles:
+                        continue
+
+                    # 1. Fort option (2 adjacent tiles, 1000g)
+                    if v_gold >= fort_cost and len(free_tiles) >= 2:
+                        free_set = set(free_tiles)
+                        pair = None
+                        for (c, r) in free_tiles:
+                            if (c + 1, r) in free_set:
+                                pair = [(c, r), (c + 1, r)]
+                                break
+                            elif (c, r + 1) in free_set:
+                                pair = [(c, r), (c, r + 1)]
+                                break
+                        if pair:
+                            possible_builds.append(("fort", fort_cost, pair, f))
+
+                    # 2. Barracks option (1 tile, 800g)
+                    if v_gold >= barrack_cost:
+                        possible_builds.append(("barrack", barrack_cost, [free_tiles[0]], f))
+
+                    # 3. Commercial City option (1 tile, 600g)
+                    if v_gold >= city_cost:
+                        possible_builds.append(("city", city_cost, [free_tiles[0]], f))
+
+                if not possible_builds:
+                    continue
+
+                # Autonomous Decision:
+                # If vassal has no city in this fief yet, they strongly prefer building a City to generate wealth!
+                has_city = any(self.settlements.get(t, {}).get("type") in ("city", "town") for f in v_fiefs for t in f.get("tiles", []))
+                if not has_city:
+                    city_choices = [b for b in possible_builds if b[0] == "city"]
+                    choice = city_choices[0] if city_choices else random.choice(possible_builds)
+                else:
+                    choice = random.choice(possible_builds)
+
+                b_type, b_cost, chosen_tiles, chosen_fief = choice
+                v["gold"] = round(v["gold"] - b_cost, 1)
+
+                self.settlement_id_counter += 1
+                s_id = f"settlement_{self.settlement_id_counter}"
+                v_first = v["name"].split()[1] if len(v["name"].split()) > 1 else v["name"]
+                if b_type == "city":
+                    s_name = f"{v_first}'s Borough"
+                elif b_type == "fort":
+                    s_name = f"{v_first}'s Stronghold"
+                else:
+                    s_name = f"{v_first}'s Barracks"
+
+                for t in chosen_tiles:
+                    self.settlements[t] = {
+                        "id": s_id,
+                        "province": pid,
+                        "type": b_type,
+                        "name": s_name,
+                        "lord": v["name"],
+                        "vassal_id": v["id"],
+                        "is_crown_demesne": False,
+                        "is_crown_fief": False,
+                        "level": 0
+                    }
+                    if t not in v.get("tiles", []):
+                        v.setdefault("tiles", []).append(t)
+
+                if not v.get("city_name"):
+                    v["city_name"] = s_name
+
+                # Synchronize province stats and vassal stats immediately
+                sync_province_holdings_stats(self, pid)
+                st_v = get_vassal_landed_status(self, v, pid)
+                v["tax_contribution"] = st_v["tax_paid"]
+                v["levy_contribution"] = st_v["levy_contribution"]
+
+                b_spec = BUILDING_SPECS[b_type]
+                self.logs.append(f"Feudal Autonomy: {v['name']} has autonomously constructed a {b_spec['name']} ({b_cost}g) in {chosen_fief['name']} ({PROVINCES[pid]['name']})!")
 
     def yearly_tick(self):
         self.player["age"] += 1

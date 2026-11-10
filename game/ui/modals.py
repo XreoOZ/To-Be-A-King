@@ -52,8 +52,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         fief_label = req.get("fief_name") or "their fief"
         b_tiles = req.get("build_tiles", [])
         req_type = req.get("build_type", "city")
-        req_cost = req.get("cost", 250 if req_type == "city" else 400)
-        req_name = "Commercial City" if req_type == "city" else "Fortress Keep"
+        req_cost = req.get("cost", BUILDING_SPECS.get(req_type, {}).get("cost", 600))
+        req_name = BUILDING_SPECS.get(req_type, {}).get("title", "Holding")
     
         t1 = font_sm.render(f"My Liege, {req['vassal']} humbly requests your royal charter", True, COLOR_TEXT_WHITE)
         t2 = font_sm.render(f"to construct a {req_name} inside {fief_label}.", True, COLOR_TEXT_WHITE)
@@ -437,23 +437,42 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             screen.blit(font_xs.render(f"  (No domain revenue subject to royal taxation)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
             screen.blit(font_xs.render("• Net Monthly Savings: 0g / month", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 140))
         
-        # Autonomous Charter Status Bar
-        screen.blit(font_xs.render("• Charter Fund (250g needed to build town):", True, COLOR_GOLD), (pop_x + 40, col_y + 168))
+        # Autonomous Feudal Construction Fund (City 600g, Barracks 800g, Fort 1000g)
+        v_gold_val = v_obj.get('gold', 0)
+        c_city = BUILDING_SPECS["city"]["cost"]       # 600
+        c_barrack = BUILDING_SPECS["barrack"]["cost"] # 800
+        c_fort = BUILDING_SPECS["fort"]["cost"]       # 1000
+
+        if v_gold_val >= c_fort:
+            target_cost = c_fort
+            target_name = "Fortress"
+        elif v_gold_val >= c_barrack:
+            target_cost = c_barrack
+            target_name = "Barracks"
+        else:
+            target_cost = c_city
+            target_name = "Commercial City"
+
+        screen.blit(font_xs.render(f"• Autonomy Construction Fund ({target_cost}g for {target_name}):", True, COLOR_GOLD), (pop_x + 40, col_y + 168))
         bar_w = col_w - 30
         bar_h = 16
         bx = pop_x + 40
         by = col_y + 188
         pygame.draw.rect(screen, (20, 24, 32), (bx, by, bar_w, bar_h), border_radius=3)
-        fill_pct = min(1.0, max(0.0, v_obj['gold'] / 250.0))
+        fill_pct = min(1.0, max(0.0, v_gold_val / float(target_cost)))
         if fill_pct > 0:
             pygame.draw.rect(screen, COLOR_GOLD if fill_pct >= 1.0 else (80, 150, 240), (bx, by, int(bar_w * fill_pct), bar_h), border_radius=3)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, (bx, by, bar_w, bar_h), 1, border_radius=3)
-        p_text = f"{v_obj['gold']} / 250g ({int(fill_pct * 100)}%)"
+        p_text = f"{fmt_gold(v_gold_val)} / {target_cost}g ({int(fill_pct * 100)}%)"
         p_lbl = font_xs.render(p_text, True, COLOR_TEXT_WHITE)
         screen.blit(p_lbl, (bx + (bar_w - p_lbl.get_width()) // 2, by + 1))
-    
-        status_str = "Eligible to petition charter!" if v_obj['gold'] >= 250 else f"Needs {250 - v_obj['gold']}g more to petition build"
-        screen.blit(font_xs.render(status_str, True, COLOR_GOLD if v_obj['gold'] >= 250 else (180, 190, 205)), (pop_x + 40, col_y + 212))
+
+        if v_gold_val >= target_cost:
+            status_str = f"Treasury ready to autonomously erect {target_name}!"
+        else:
+            rem = target_cost - v_gold_val
+            status_str = f"Needs {fmt_gold(rem)}g more to autonomously erect {target_name}"
+        screen.blit(font_xs.render(status_str, True, COLOR_GOLD if v_gold_val >= target_cost else (180, 190, 205)), (pop_x + 40, col_y + 212))
     
         # RIGHT COLUMN: MILITARY & DOMAIN ("keseluruhan kekuasaan dia")
         right_rect = pygame.Rect(pop_x + 350, col_y, col_w, 245)
