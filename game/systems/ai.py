@@ -13,13 +13,13 @@ from game.systems.military import get_siegeable_holdings
 def standardize_realm_laws(state, ruler_id):
     """
     Uniformly standardizes an AI ruler's vassals' feudal obligations (Tax & Levies).
-    Ensures AI forces maintain uniform 80% levies, 20% tax across their feudal subjects.
+    Ensures AI forces maintain uniform 20% levies, 20% tax across their feudal subjects (matching physical holdings).
     """
     realm_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") == ruler_id]
     for pid in realm_provs:
         for v in state.vassals.get(pid, []):
             v["tax_rate"] = 20
-            v["levy_rate"] = 80
+            v["levy_rate"] = 20
             v["tax_locked"] = True
             v["levy_locked"] = True
             st = get_vassal_landed_status(state, v, pid)

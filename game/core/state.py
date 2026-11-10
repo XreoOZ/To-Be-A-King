@@ -176,9 +176,9 @@ class GameState:
                 fn = random.choice(viking_first_names if is_norse else saxon_first_names)
                 ep = random.choice(viking_epithets if is_norse else saxon_epithets)
                 title = random.choice(["Jarl", "Hersir", "Gothi"] if is_norse else ["Thane", "Baron", "Ealdorman"])
-                # AI Danelaw vassals start with standardized 80% levy and 20% tax
+                # AI vassals start with standardized 20% levy and 20% tax (matching physical holdings)
                 t_rate = 20 if is_norse else 10
-                l_rate = 80 if is_norse else 20
+                l_rate = 20
                 v_list.append({
                     "id": f"{pid}_vassal_{i}",
                     "name": f"{title} {fn} '{ep}'",
