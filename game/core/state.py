@@ -383,17 +383,18 @@ class GameState:
         CHARACTERS[self.enemy_id]["realm"] = "The Danelaw (High Kingdom of Britain)"
         CHARACTERS[self.enemy_id]["title"] = "High King of the Danelaw & All Britain"
 
-        # Realm falls under Danelaw sovereign authority (no magical free capital or bonus troops)
-        PROVINCES["wessex"]["owner"] = self.enemy_id
-        PROVINCES["wessex"]["color"] = list(PROVINCE_FACTION_COLORS.get(self.enemy_id, {}).get("wessex", COLOR_DANELAW))
-        self.player_capital = "wessex"
-        self.player_primary_capital = "wessex"
-        self.player_capital_was_lost = False
+        # Realm falls under sovereign authority
+        p_cap = self.players.get(self.player_id, {}).get("capital", "solaris_prime")
+        if p_cap in PROVINCES:
+            PROVINCES[p_cap]["owner"] = self.enemy_id
+            PROVINCES[p_cap]["color"] = list(PROVINCE_FACTION_COLORS.get(self.enemy_id, {}).get(p_cap, COLOR_DANELAW))
+            self.player_capital = p_cap
+            self.player_primary_capital = p_cap
+            self.player_capital_was_lost = False
 
-        # Clear enemy occupation in Wessex so Alfred's demesne holdings are directly held by Alfred
-        for t, s in self.settlements.items():
-            if s.get("province") == "wessex":
-                s["occupied_by"] = None
+            for t, s in self.settlements.items():
+                if s.get("province") == p_cap:
+                    s["occupied_by"] = None
 
         # Stand down all wartime armies & cancel all ongoing sieges completely
         for a in list(self.armies):
@@ -447,17 +448,18 @@ class GameState:
         CHARACTERS[self.enemy_id]["realm"] = "Jarlhood of Jorvik (Vassal of Wessex)"
         CHARACTERS[self.enemy_id]["title"] = f"Vassal Lord {e_name}"
 
-        # Realm falls under Saxon High Kingdom suzerainty
-        PROVINCES["jorvik"]["owner"] = self.player_id
-        PROVINCES["jorvik"]["color"] = list(PROVINCE_FACTION_COLORS.get(self.player_id, {}).get("jorvik", COLOR_WESSEX))
-        self.enemy_capital = "jorvik"
-        self.enemy_primary_capital = "jorvik"
-        self.enemy_capital_was_lost = False
+        # Realm falls under High Kingdom suzerainty
+        e_cap = self.players.get(self.enemy_id, {}).get("capital", "iron_citadel")
+        if e_cap in PROVINCES:
+            PROVINCES[e_cap]["owner"] = self.player_id
+            PROVINCES[e_cap]["color"] = list(PROVINCE_FACTION_COLORS.get(self.player_id, {}).get(e_cap, COLOR_WESSEX))
+            self.enemy_capital = e_cap
+            self.enemy_primary_capital = e_cap
+            self.enemy_capital_was_lost = False
 
-        # Clear occupation in Jorvik
-        for t, s in self.settlements.items():
-            if s.get("province") == "jorvik":
-                s["occupied_by"] = None
+            for t, s in self.settlements.items():
+                if s.get("province") == e_cap:
+                    s["occupied_by"] = None
 
         # Stand down all wartime armies & cancel sieges completely
         for a in list(self.armies):
@@ -1498,9 +1500,17 @@ class GameState:
         self.logs.append(f"AD {self.year}: War rages across the lands of Britain.")
 
     def update_armies(self):
+        # 0. Co-location check: Ensure any opposing armies on the same tile are at war
+        for a in self.armies:
+            if getattr(a, "tile", None) is not None and not getattr(a, "is_demobilizing", False) and a.troops > 0:
+                opponents = [o for o in self.armies if getattr(o, "tile", None) == a.tile and o.owner != a.owner and o.troops > 0]
+                for o in opponents:
+                    if not self.are_hostile(a.owner, o.owner):
+                        self.declare_war(a.owner, o.owner, reason="Troop Clash")
+
         # Sanity check: Clear in_battle flag for any army that has no enemy on its tile
         for a in self.armies:
-            opponents = [o for o in self.armies if getattr(o, "tile", None) == getattr(a, "tile", None) and self.are_hostile(a.owner, o.owner)]
+            opponents = [o for o in self.armies if getattr(o, "tile", None) == getattr(a, "tile", None) and self.are_hostile(a.owner, o.owner) and o.troops > 0]
             if not opponents:
                 a.in_battle = False
 
@@ -1521,19 +1531,21 @@ class GameState:
                     if new_prov != a.province:
                         a.province = new_prov
                         prov_owner = PROVINCES.get(new_prov, {}).get("owner")
-                        if prov_owner and prov_owner != a.owner and getattr(self, "war_status", "war") == "peace" and not getattr(a, "is_demobilizing", False):
-                            self.declare_war(a.owner, prov_owner, reason="Border Incursion")
+                        if prov_owner and prov_owner != a.owner and not getattr(a, "is_demobilizing", False):
+                            if not self.are_hostile(a.owner, prov_owner):
+                                self.declare_war(a.owner, prov_owner, reason="Border Incursion")
                     a.move_progress = 0.0
 
                     # Check peace-break if stepping onto a foreign army's tile
-                    if getattr(self, "war_status", "war") == "peace" and not getattr(a, "is_demobilizing", False):
+                    if not getattr(a, "is_demobilizing", False):
                         other_armies = [e for e in self.armies if getattr(e, "tile", None) == a.tile and e.owner != a.owner and e.troops > 0]
-                        if other_armies:
-                            self.declare_war(a.owner, other_armies[0].owner, reason="Troop Clash")
+                        for other in other_armies:
+                            if not self.are_hostile(a.owner, other.owner):
+                                self.declare_war(a.owner, other.owner, reason="Troop Clash")
 
                     # INTERCEPTION CHECK: if enemy is on this tile, stop and fight
                     blockers = [e for e in self.armies
-                                if getattr(e, "tile", None) == a.tile and self.are_hostile(a.owner, e.owner)]
+                                if getattr(e, "tile", None) == a.tile and self.are_hostile(a.owner, e.owner) and e.troops > 0]
                     if blockers:
                         a.tile_path = []
                         a.move_progress = 0.0
@@ -1565,21 +1577,41 @@ class GameState:
         # 2. Check Battles (Opposing armies on same tile)
         all_army_tiles = set(getattr(a, "tile", None) for a in self.armies if getattr(a, "tile", None) is not None)
         for tile in all_army_tiles:
-            self.merge_armies_on_tile(tile, self.player_id)
-            self.merge_armies_on_tile(tile, self.enemy_id)
+            owners_here = set(a.owner for a in self.armies if getattr(a, "tile", None) == tile)
+            for o in owners_here:
+                self.merge_armies_on_tile(tile, o)
 
-            armies_on_tile = [a for a in self.armies if getattr(a, "tile", None) == tile]
-            p1_list = [a for a in armies_on_tile if a.owner == self.player_id]
-            p2_list = [a for a in armies_on_tile if a.owner == self.enemy_id]
-
-            if not (p1_list and p2_list) or not self.are_hostile(self.player_id, self.enemy_id):
+            armies_on_tile = [a for a in self.armies if getattr(a, "tile", None) == tile and a.troops > 0]
+            if len(armies_on_tile) < 2:
                 for a in armies_on_tile:
                     a.in_battle = False
                 continue
 
-            a1 = p1_list[0]
-            a2 = p2_list[0]
-            
+            # Ensure any co-located armies from different owners declare war
+            for i, a1_cand in enumerate(armies_on_tile):
+                for a2_cand in armies_on_tile[i+1:]:
+                    if a1_cand.owner != a2_cand.owner and not self.are_hostile(a1_cand.owner, a2_cand.owner):
+                        self.declare_war(a1_cand.owner, a2_cand.owner, reason="Troop Clash")
+
+            # Find hostile pair
+            hostile_pair = None
+            for i, a1_cand in enumerate(armies_on_tile):
+                for a2_cand in armies_on_tile[i+1:]:
+                    if a1_cand.owner != a2_cand.owner and self.are_hostile(a1_cand.owner, a2_cand.owner):
+                        hostile_pair = (a1_cand, a2_cand)
+                        break
+                if hostile_pair:
+                    break
+
+            if not hostile_pair:
+                for a in armies_on_tile:
+                    a.in_battle = False
+                continue
+
+            a1, a2 = hostile_pair
+            p1_list = [a for a in armies_on_tile if a.owner == a1.owner]
+            p2_list = [a for a in armies_on_tile if a.owner == a2.owner]
+
             # Lock both hosts in combat and halt all marching, sieging, or demobilizing
             for a in p1_list + p2_list:
                 a.in_battle = True
@@ -1591,11 +1623,11 @@ class GameState:
                 a.is_mustering = False
 
             # One combat round per game-tick
-            p_martial = CHARACTERS.get(self.player_id, {}).get("stats", {}).get("martial", 10)
-            e_martial = CHARACTERS.get(self.enemy_id, {}).get("stats", {}).get("martial", 10)
+            martial_1 = CHARACTERS.get(a1.owner, {}).get("stats", {}).get("martial", 10)
+            martial_2 = CHARACTERS.get(a2.owner, {}).get("stats", {}).get("martial", 10)
 
-            dmg_to_a2 = max(1, int(a1.troops * 0.08 * (1 + p_martial * 0.02))  + random.randint(10, 50))
-            dmg_to_a1 = max(1, int(a2.troops * 0.08 * (1 + e_martial * 0.02)) + random.randint(10, 50))
+            dmg_to_a2 = max(1, int(a1.troops * 0.08 * (1 + martial_1 * 0.02)) + random.randint(10, 50))
+            dmg_to_a1 = max(1, int(a2.troops * 0.08 * (1 + martial_2 * 0.02)) + random.randint(10, 50))
 
             # Apply proportional casualties to both Crown Troops and Vassal Levies in a1
             actual_loss_1 = min(a1.troops, dmg_to_a1)
@@ -1640,24 +1672,35 @@ class GameState:
             a2.vassal_levies = max(0, a2.troops - a2.crown_troops)
 
             p_name = PROVINCES.get(a1.province, {}).get("name", "the realm")
+            name1 = CHARACTERS.get(a1.owner, {}).get("name", a1.owner).split()[0]
+            name2 = CHARACTERS.get(a2.owner, {}).get("name", a2.owner).split()[0]
+
             if a1.troops <= 0 and a2.troops <= 0:
-                self.logs.append(f"Both armies annihilated at tile {tile} in {p_name}!")
+                self.logs.append(f"Mutual Annihilation! Both armies perished at tile {tile} in {p_name}!")
                 if a1 in self.armies: self.armies.remove(a1)
                 if a2 in self.armies: self.armies.remove(a2)
                 self.check_reset_player_raise_cooldown()
             elif a1.troops <= 0:
-                self.logs.append(f"Defeat! {a1.name} was wiped out at tile {tile} in {p_name}!")
-                if a1 in self.armies: self.armies.remove(a1)
                 if a1.owner == self.player_id:
+                    self.logs.append(f"Defeat! {a1.name} was wiped out by {a2.name} at tile {tile} in {p_name}!")
                     self.check_reset_player_raise_cooldown()
+                elif a2.owner == self.player_id:
+                    self.logs.append(f"Glorious Victory! Destroyed the host of {name1} at tile {tile} in {p_name}!")
+                else:
+                    self.logs.append(f"Battle report: {name2}'s host crushed {name1}'s army at tile {tile} in {p_name}!")
+                if a1 in self.armies: self.armies.remove(a1)
                 a2.in_battle = False
                 a2.tile_path = []
                 a2.move_progress = 0.0
             elif a2.troops <= 0:
-                self.logs.append(f"Glorious Victory! Destroyed the Viking host at tile {tile} in {p_name}!")
-                if a2 in self.armies: self.armies.remove(a2)
                 if a2.owner == self.player_id:
+                    self.logs.append(f"Defeat! {a2.name} was wiped out by {a1.name} at tile {tile} in {p_name}!")
                     self.check_reset_player_raise_cooldown()
+                elif a1.owner == self.player_id:
+                    self.logs.append(f"Glorious Victory! Destroyed the host of {name2} at tile {tile} in {p_name}!")
+                else:
+                    self.logs.append(f"Battle report: {name1}'s host crushed {name2}'s army at tile {tile} in {p_name}!")
+                if a2 in self.armies: self.armies.remove(a2)
                 a1.in_battle = False
                 a1.tile_path = []
                 a1.move_progress = 0.0
