@@ -873,4 +873,90 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         elif modal_mouse_clicked and can_hov:
             state.logs.append("Cancelled construction on vassal territory.")
             state.vassal_build_confirm = None
-    
+
+    # ---------------------------------------------------------
+    # 6. FEUDAL SUBJUGATION / VASSALAGE EVENT MODAL
+    # ---------------------------------------------------------
+    if getattr(state, "subjugation_event", None):
+        ev = state.subjugation_event
+        # Dark backdrop
+        dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+        dim_surf.fill((0, 0, 0, 195))
+        screen.blit(dim_surf, (0, 0))
+
+        pop_w, pop_h = 740, 460
+        pop_x = (WINDOW_WIDTH - pop_w) // 2
+        pop_y = (WINDOW_HEIGHT - pop_h) // 2
+        pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
+
+        is_subjugated = (ev.get("type") == "player_vassalized")
+        border_col = (235, 140, 45) if is_subjugated else COLOR_GOLD
+
+        pygame.draw.rect(screen, (22, 26, 36), pop_rect, border_radius=10)
+        pygame.draw.rect(screen, border_col, pop_rect, 2, border_radius=10)
+
+        # Header Title
+        t_col = (255, 190, 80) if is_subjugated else COLOR_GOLD
+        t_surf = font_lg.render(ev["title"], True, t_col)
+        screen.blit(t_surf, (pop_x + (pop_w - t_surf.get_width()) // 2, pop_y + 24))
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 30, pop_y + 64), (pop_x + pop_w - 30, pop_y + 64), 1)
+
+        # Liege & Vassal Portraits / Heraldic Crests
+        p_alfred = portrait_cache.get("char_alfred")
+        p_halfdan = portrait_cache.get("char_halfdan")
+        c_alfred = coa_cache.get("char_alfred")
+        c_halfdan = coa_cache.get("char_halfdan")
+
+        left_char = p_halfdan if is_subjugated else p_alfred
+        right_char = p_alfred if is_subjugated else p_halfdan
+        left_coa = c_halfdan if is_subjugated else c_alfred
+        right_coa = c_alfred if is_subjugated else c_halfdan
+
+        if left_char:
+            s_left = pygame.transform.smoothscale(left_char, (58, 58))
+            screen.blit(s_left, (pop_x + 40, pop_y + 76))
+            pygame.draw.rect(screen, COLOR_GOLD, (pop_x + 40, pop_y + 76, 58, 58), 2)
+        if left_coa:
+            screen.blit(left_coa, (pop_x + 104, pop_y + 86))
+
+        # Relationship badge in middle
+        rel_txt = "⇦ SUZERAIN LIEGE • VASSAL SUBJECT ⇨"
+        rel_surf = font_xs.render(rel_txt, True, (255, 220, 120))
+        screen.blit(rel_surf, (pop_x + (pop_w - rel_surf.get_width()) // 2, pop_y + 95))
+
+        if right_char:
+            s_right = pygame.transform.smoothscale(right_char, (58, 58))
+            screen.blit(s_right, (pop_x + pop_w - 98, pop_y + 76))
+            pygame.draw.rect(screen, (160, 170, 190), (pop_x + pop_w - 98, pop_y + 76, 58, 58), 2)
+        if right_coa:
+            screen.blit(right_coa, (pop_x + pop_w - 146, pop_y + 86))
+
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 30, pop_y + 148), (pop_x + pop_w - 30, pop_y + 148), 1)
+
+        # Story description text
+        ty = pop_y + 164
+        for line in ev["text_lines"]:
+            if line:
+                screen.blit(font_xs.render(line, True, COLOR_TEXT_WHITE), (pop_x + 40, ty))
+            ty += 24
+
+        # Action / Continue Button
+        btn_w, btn_h = 360, 44
+        btn_x = pop_x + (pop_w - btn_w) // 2
+        btn_y = pop_y + pop_h - 66
+        btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+        b_hov = btn_rect.collidepoint(mouse_pos)
+
+        btn_bg = (40, 110, 60) if b_hov else (28, 80, 42)
+        btn_bdr = COLOR_TEXT_GREEN
+        if is_subjugated:
+            btn_bg = (120, 65, 30) if b_hov else (85, 45, 20)
+            btn_bdr = (255, 180, 80)
+
+        pygame.draw.rect(screen, btn_bg, btn_rect, border_radius=6)
+        pygame.draw.rect(screen, btn_bdr, btn_rect, 1, border_radius=6)
+        btn_txt = font_sm.render(ev["button_text"], True, COLOR_TEXT_WHITE)
+        screen.blit(btn_txt, (btn_rect.x + (btn_rect.w - btn_txt.get_width()) // 2, btn_rect.y + 12))
+
+        if modal_mouse_clicked and b_hov:
+            state.subjugation_event = None

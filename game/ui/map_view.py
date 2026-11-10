@@ -72,8 +72,15 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     pygame.draw.rect(screen, COLOR_DANELAW, (bar_x + wessex_pixel_w, bar_y, bar_w - wessex_pixel_w, bar_h), border_radius=4)
     pygame.draw.rect(screen, COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=4)
     
-    w_lbl = font_sm.render(f"WESSEX: {wessex_count} Provinces", True, (255, 230, 230))
-    d_lbl = font_sm.render(f"DANELAW: {danelaw_count} Provinces", True, (230, 240, 255))
+    if getattr(state, "player_liege", None) == state.enemy_id:
+        w_lbl = font_sm.render(f"WESSEX (Vassal Duchy): {wessex_count} Shire", True, (255, 230, 230))
+        d_lbl = font_sm.render(f"DANELAW (High Kingdom): {danelaw_count} Shires", True, (230, 240, 255))
+    elif getattr(state, "enemy_liege", None) == state.player_id:
+        w_lbl = font_sm.render(f"BRITAIN (High Kingdom): {wessex_count} Shires", True, COLOR_GOLD)
+        d_lbl = font_sm.render(f"JORVIK (Vassal Jarl): {danelaw_count} Shire", True, (230, 240, 255))
+    else:
+        w_lbl = font_sm.render(f"WESSEX: {wessex_count} Provinces", True, (255, 230, 230))
+        d_lbl = font_sm.render(f"DANELAW: {danelaw_count} Provinces", True, (230, 240, 255))
     screen.blit(w_lbl, (bar_x + 10, bar_y + 3))
     screen.blit(d_lbl, (bar_x + bar_w - d_lbl.get_width() - 10, bar_y + 3))
     
@@ -988,23 +995,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                 pygame.draw.circle(screen, COLOR_GOLD if is_player else (100, 160, 240), (mx, my), 5)
                 pygame.draw.circle(screen, (255, 255, 255), (mx, my), 2)
     
-    # Victory / Defeat Banner
-    if wessex_count == total_provs:
-        vic_rect = pygame.Rect(340, 260, 480, 110)
-        pygame.draw.rect(screen, (20, 50, 25), vic_rect, border_radius=8)
-        pygame.draw.rect(screen, COLOR_GOLD, vic_rect, 3, border_radius=8)
-        vb_title = font_banner.render("VICTORY!", True, COLOR_GOLD)
-        vb_sub = font_md.render("All Britain is united under King Alfred!", True, COLOR_TEXT_WHITE)
-        screen.blit(vb_title, (vic_rect.x + (vic_rect.w - vb_title.get_width()) // 2, vic_rect.y + 18))
-        screen.blit(vb_sub, (vic_rect.x + (vic_rect.w - vb_sub.get_width()) // 2, vic_rect.y + 65))
-    elif danelaw_count == total_provs:
-        def_rect = pygame.Rect(340, 260, 480, 110)
-        pygame.draw.rect(screen, (50, 20, 25), def_rect, border_radius=8)
-        pygame.draw.rect(screen, COLOR_TEXT_RED, def_rect, 3, border_radius=8)
-        db_title = font_banner.render("DEFEAT!", True, COLOR_TEXT_RED)
-        db_sub = font_md.render("Wessex has fallen to the Viking conquerors.", True, COLOR_TEXT_WHITE)
-        screen.blit(db_title, (def_rect.x + (def_rect.w - db_title.get_width()) // 2, def_rect.y + 18))
-        screen.blit(db_sub, (def_rect.x + (def_rect.w - db_sub.get_width()) // 2, def_rect.y + 65))
+    # (No hard victory / defeat banners: dynamic feudal subjugation replaces game over)
     
     # ---------------------------------------------------------
     # FLOATING MAP ZOOM & CAMERA CONTROLS HUD

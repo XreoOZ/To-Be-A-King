@@ -269,7 +269,7 @@ def run_game():
                     elif event.key == pygame.K_F11:
                         pygame.display.toggle_fullscreen()
 
-        is_popup_active = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.inspecting_ruler or state.vassal_build_confirm)
+        is_popup_active = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.inspecting_ruler or state.vassal_build_confirm or getattr(state, 'subjugation_event', None))
         if is_popup_active:
             if not state.popup_was_active:
                 if state.speed > 0:

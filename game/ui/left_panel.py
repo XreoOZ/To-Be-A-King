@@ -62,36 +62,68 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     
     # Realm Mobilization Buttons
     pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 174), (content_x + content_w, 174), 1)
-    
-    # Raise All Button
-    btn_raise_all = pygame.Rect(content_x, 184, 192, 38)
-    is_all_cd = (state.player_raise_cooldown > 0)
-    b_hover = btn_raise_all.collidepoint(mouse_pos) and not is_all_cd
-    if is_all_cd:
-        m_left = (state.player_raise_cooldown + 29) // 30
-        pygame.draw.rect(screen, (38, 42, 50), btn_raise_all, border_radius=4)
-        pygame.draw.rect(screen, (60, 65, 78), btn_raise_all, 1, border_radius=4)
-        cd_lbl = font_xs.render(f"COOLDOWN ({m_left}m)", True, (135, 145, 160))
-        screen.blit(cd_lbl, (btn_raise_all.x + (btn_raise_all.w - cd_lbl.get_width()) // 2, 196))
+
+    is_player_vassal = (getattr(state, "player_liege", None) == state.enemy_id)
+
+    if is_player_vassal:
+        # 1. Rebellion / Declare Independence Button
+        btn_rebel = pygame.Rect(content_x, 184, 225, 38)
+        b_reb_hov = btn_rebel.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (120, 35, 35) if b_reb_hov else (85, 25, 25), btn_rebel, border_radius=4)
+        pygame.draw.rect(screen, (255, 100, 100), btn_rebel, 1, border_radius=4)
+        reb_lbl = font_xs.render("⚔ DECLARE REBELLION", True, COLOR_TEXT_WHITE)
+        screen.blit(reb_lbl, (btn_rebel.x + (btn_rebel.w - reb_lbl.get_width()) // 2, 196))
+        if mouse_clicked and b_reb_hov:
+            state.declare_independence()
+
+        # 2. Local Fyrd Mobilization Button
+        btn_raise_fyrd = pygame.Rect(content_x + 235, 184, content_w - 235, 38)
+        is_all_cd = (state.player_raise_cooldown > 0)
+        b_hover = btn_raise_fyrd.collidepoint(mouse_pos) and not is_all_cd
+        if is_all_cd:
+            m_left = (state.player_raise_cooldown + 29) // 30
+            pygame.draw.rect(screen, (38, 42, 50), btn_raise_fyrd, border_radius=4)
+            pygame.draw.rect(screen, (60, 65, 78), btn_raise_fyrd, 1, border_radius=4)
+            cd_lbl = font_xs.render(f"WAIT ({m_left}m)", True, (135, 145, 160))
+            screen.blit(cd_lbl, (btn_raise_fyrd.x + (btn_raise_fyrd.w - cd_lbl.get_width()) // 2, 196))
+        else:
+            pygame.draw.rect(screen, (40, 110, 60) if b_hover else (30, 80, 45), btn_raise_fyrd, border_radius=4)
+            pygame.draw.rect(screen, COLOR_TEXT_GREEN, btn_raise_fyrd, 1, border_radius=4)
+            ra_lbl = font_xs.render("RAISE FYRD", True, COLOR_TEXT_WHITE)
+            screen.blit(ra_lbl, (btn_raise_fyrd.x + (btn_raise_fyrd.w - ra_lbl.get_width()) // 2, 196))
+            if mouse_clicked and b_hover:
+                state.raise_all_levies()
+
     else:
-        pygame.draw.rect(screen, (40, 110, 60) if b_hover else (30, 80, 45), btn_raise_all, border_radius=4)
-        pygame.draw.rect(screen, COLOR_TEXT_GREEN, btn_raise_all, 1, border_radius=4)
-        ra_lbl = font_sm.render("RAISE ALL (R)", True, COLOR_TEXT_WHITE)
-        screen.blit(ra_lbl, (btn_raise_all.x + (btn_raise_all.w - ra_lbl.get_width()) // 2, 194))
-        if mouse_clicked and b_hover:
-            state.raise_all_levies()
-    
-    # Disband All Button
-    btn_disband_all = pygame.Rect(content_x + 204, 184, 192, 38)
-    b_hover_d = btn_disband_all.collidepoint(mouse_pos)
-    pygame.draw.rect(screen, (100, 40, 40) if b_hover_d else (75, 30, 30), btn_disband_all, border_radius=4)
-    pygame.draw.rect(screen, COLOR_TEXT_RED, btn_disband_all, 1, border_radius=4)
-    da_lbl = font_sm.render("DISBAND ALL", True, COLOR_TEXT_WHITE)
-    screen.blit(da_lbl, (btn_disband_all.x + (btn_disband_all.w - da_lbl.get_width()) // 2, 194))
-    if mouse_clicked and b_hover_d:
-        for a in list(state.armies):
-            if a.owner == state.player_id:
-                state.disband_army(a)
+        # Standard Sovereign Mobilization: Raise All Button
+        btn_raise_all = pygame.Rect(content_x, 184, 192, 38)
+        is_all_cd = (state.player_raise_cooldown > 0)
+        b_hover = btn_raise_all.collidepoint(mouse_pos) and not is_all_cd
+        if is_all_cd:
+            m_left = (state.player_raise_cooldown + 29) // 30
+            pygame.draw.rect(screen, (38, 42, 50), btn_raise_all, border_radius=4)
+            pygame.draw.rect(screen, (60, 65, 78), btn_raise_all, 1, border_radius=4)
+            cd_lbl = font_xs.render(f"COOLDOWN ({m_left}m)", True, (135, 145, 160))
+            screen.blit(cd_lbl, (btn_raise_all.x + (btn_raise_all.w - cd_lbl.get_width()) // 2, 196))
+        else:
+            pygame.draw.rect(screen, (40, 110, 60) if b_hover else (30, 80, 45), btn_raise_all, border_radius=4)
+            pygame.draw.rect(screen, COLOR_TEXT_GREEN, btn_raise_all, 1, border_radius=4)
+            ra_lbl = font_sm.render("RAISE ALL (R)", True, COLOR_TEXT_WHITE)
+            screen.blit(ra_lbl, (btn_raise_all.x + (btn_raise_all.w - ra_lbl.get_width()) // 2, 194))
+            if mouse_clicked and b_hover:
+                state.raise_all_levies()
+        
+        # Disband All Button
+        btn_disband_all = pygame.Rect(content_x + 204, 184, 192, 38)
+        b_hover_d = btn_disband_all.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (100, 40, 40) if b_hover_d else (75, 30, 30), btn_disband_all, border_radius=4)
+        pygame.draw.rect(screen, COLOR_TEXT_RED, btn_disband_all, 1, border_radius=4)
+        da_lbl = font_sm.render("DISBAND ALL", True, COLOR_TEXT_WHITE)
+        screen.blit(da_lbl, (btn_disband_all.x + (btn_disband_all.w - da_lbl.get_width()) // 2, 194))
+        if mouse_clicked and b_hover_d:
+            for a in list(state.armies):
+                if a.owner == state.player_id:
+                    state.disband_army(a)
     
     # ---------------------------------------------------------
     # Left Panel Sub-Tabs: [ ⚔ Armies ]  [ ♟ Vassals ]  [ ♚ Demesne ]

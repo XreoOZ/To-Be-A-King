@@ -113,6 +113,12 @@ class GameState:
         self.enemy_capital = "jorvik"
         self.enemy_primary_capital = "jorvik"
         self.enemy_capital_was_lost = False
+
+        # Feudal Suzerainty & Dynamic Vassalage (No hard Defeat / Win!)
+        self.player_liege = None         # "char_halfdan" if Alfred is vassalized
+        self.enemy_liege = None          # "char_alfred" if Halfdan is vassalized
+        self.war_status = "war"          # "war" or "vassalage"
+        self.subjugation_event = None    # Feudal treaty story modal event
         
         # AI decision timer
         self.ai_timer = 1
@@ -286,6 +292,135 @@ class GameState:
         p_name = PROVINCES[province_id]["name"]
         self.logs.append(f"Royal Decree: King Alfred relocates the Realm Capital to {p_name}! Royal couriers and war summons will now depart from {p_name}.")
         return True
+
+    # ---------------------------------------------------------
+    # Feudal Subjugation & Dynamic Vassalage System
+    # (No hard defeat / win conditions; living feudal hierarchy)
+    # ---------------------------------------------------------
+    def check_subjugation_and_vassalage(self):
+        """
+        Evaluates territorial control for feudal submission:
+        - If Wessex loses all provinces: Alfred bends the knee as Duke of Wessex under High King Halfdan.
+        - If Danelaw loses all provinces: Halfdan bends the knee as Jarl of Jorvik under High King Alfred.
+        """
+        player_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") == self.player_id]
+        enemy_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") == self.enemy_id]
+
+        if len(player_provs) == 0 and self.player_liege is None:
+            self.trigger_player_subjugation_to_danelaw()
+        elif len(enemy_provs) == 0 and self.enemy_liege is None:
+            self.trigger_danelaw_subjugation_to_player()
+
+    def trigger_player_subjugation_to_danelaw(self):
+        """King Alfred yields to Halfdan and bends the knee, becoming Duke of Wessex."""
+        self.player_liege = self.enemy_id
+        self.enemy_liege = None
+        self.war_status = "vassalage"
+
+        CHARACTERS[self.player_id]["realm"] = "Duchy of Wessex (Vassal to Danelaw)"
+        CHARACTERS[self.player_id]["title"] = "Duke of Wessex & Vassal of York"
+        CHARACTERS[self.enemy_id]["realm"] = "The Danelaw (High Kingdom of Britain)"
+        CHARACTERS[self.enemy_id]["title"] = "High King of the Danelaw & All Britain"
+
+        # Restore ancestral seat of Wessex as Alfred's hereditary vassal duchy
+        PROVINCES["wessex"]["owner"] = self.player_id
+        PROVINCES["wessex"]["color"] = list(PROVINCE_FACTION_COLORS.get(self.player_id, {}).get("wessex", COLOR_WESSEX))
+        PROVINCES["wessex"]["levies_current"] = min(PROVINCES["wessex"].get("levies_max", 500), 250)
+        self.player_capital = "wessex"
+        self.player_primary_capital = "wessex"
+        self.player_capital_was_lost = False
+
+        # Clear enemy occupation in Wessex
+        for t, s in self.settlements.items():
+            if s.get("province") == "wessex":
+                s["occupied_by"] = None
+
+        # Stand down wartime offensive armies
+        for a in list(self.armies):
+            if a.owner == self.player_id:
+                self.disband_army(a)
+            elif a.owner == self.enemy_id and (a.province == "wessex" or a.is_sieging):
+                self.disband_army(a)
+
+        self.subjugation_event = {
+            "type": "player_vassalized",
+            "title": "TREATY OF SUBMISSION: BENDING THE KNEE",
+            "liege_name": "High King Halfdan Ragnarsson",
+            "vassal_name": "Duke Alfred of Wessex",
+            "text_lines": [
+                "All Saxon resistance across Britain has broken before the Great Heathen Army.",
+                "Yet King Alfred survives! Meeting High King Halfdan at the Stone of Fealty,",
+                "Alfred places his hands between Halfdan's and swears the ancient Oath of Vassalage.",
+                "",
+                "Halfdan confirms Wessex as your hereditary vassal duchy. You must pay 20% feudal",
+                "tax to York every month, but your court, your laws, and your dynasty endure.",
+                "",
+                "Bide your time, enrich your baronies, muster a secret host, and when",
+                "the Vikings are vulnerable—DECLARE REBELLION and reclaim the High Crown!"
+            ],
+            "button_text": "ACCEPT VASSALAGE & BIDE TIME"
+        }
+        self.logs.append("FEUDAL SUBMISSION: King Alfred has bent the knee to High King Halfdan. Wessex is now a vassal duchy under the Danelaw.")
+
+    def trigger_danelaw_subjugation_to_player(self):
+        """Halfdan yields to Alfred and bends the knee, becoming Jarl of Jorvik."""
+        self.enemy_liege = self.player_id
+        self.player_liege = None
+        self.war_status = "vassalage"
+
+        CHARACTERS[self.player_id]["realm"] = "High Kingdom of All Britain"
+        CHARACTERS[self.player_id]["title"] = "High King Alfred 'the Great' (Bretwalda)"
+        CHARACTERS[self.enemy_id]["realm"] = "Jarlhood of Jorvik (Vassal of Wessex)"
+        CHARACTERS[self.enemy_id]["title"] = "Jarl of Jorvik & Northern Marcher Lord"
+
+        # Restore Jorvik as Halfdan's hereditary vassal fiefdom
+        PROVINCES["jorvik"]["owner"] = self.enemy_id
+        PROVINCES["jorvik"]["color"] = list(PROVINCE_FACTION_COLORS.get(self.enemy_id, {}).get("jorvik", COLOR_DANELAW))
+        PROVINCES["jorvik"]["levies_current"] = min(PROVINCES["jorvik"].get("levies_max", 500), 250)
+        self.enemy_capital = "jorvik"
+        self.enemy_primary_capital = "jorvik"
+        self.enemy_capital_was_lost = False
+
+        # Clear enemy occupation in Jorvik
+        for t, s in self.settlements.items():
+            if s.get("province") == "jorvik":
+                s["occupied_by"] = None
+
+        # Stand down enemy armies
+        for a in list(self.armies):
+            if a.owner == self.enemy_id:
+                self.disband_army(a)
+
+        self.subjugation_event = {
+            "type": "enemy_vassalized",
+            "title": "TREATY OF WEDMORE: DANELAW SUBMISSION",
+            "liege_name": "High King Alfred 'the Great'",
+            "vassal_name": "Jarl Halfdan Ragnarsson",
+            "text_lines": [
+                "The Viking conquerors have been utterly crushed across the length of Britain!",
+                "Jarl Halfdan Ragnarsson surrenders his raven war banner and kneels before Alfred.",
+                "",
+                "Under the historic Treaty of Wedmore, Halfdan accepts Christian baptism and swears",
+                "solemn fealty to the Saxon Crown as your vassal Jarl in Jorvik.",
+                "",
+                "All 12 shires of Britain now acknowledge King Alfred as High King (Bretwalda)!",
+                "Halfdan now pays 20% feudal tribute to Winchester and his warriors stand ready",
+                "to serve as Viking auxilia in your royal host."
+            ],
+            "button_text": "RULE THE UNITED REALM"
+        }
+        self.logs.append("DANELAW SUBMISSION: Halfdan has bent the knee! Danelaw has accepted Saxon suzerainty. Alfred is High King of All Britain!")
+
+    def declare_independence(self):
+        """Duke Alfred casts off the Viking yoke and declares War of Independence!"""
+        if self.player_liege != self.enemy_id:
+            return
+        self.player_liege = None
+        self.war_status = "war"
+        CHARACTERS[self.player_id]["realm"] = "Kingdom of Wessex"
+        CHARACTERS[self.player_id]["title"] = "King of Wessex & the Anglo-Saxons"
+        self.ai_timer = 0
+        self.logs.append("⚔ WAR OF INDEPENDENCE! Duke Alfred casts off the Viking yoke and declares Sovereign Independence! Saxon war horns sound across Wessex!")
 
     # ---------------------------------------------------------
     # Army Operations
@@ -753,6 +888,9 @@ class GameState:
         # Update Army Movements & Combat
         self.update_armies()
 
+        # Dynamic Feudal Subjugation check (No game over / defeat screen)
+        self.check_subjugation_and_vassalage()
+
         # AI Behavior (Responsive 2-day tactical cycle)
         self.ai_timer -= 1
         if self.ai_timer <= 0:
@@ -838,6 +976,22 @@ class GameState:
         self.player["prestige"] += 1
         self.player["piety"] += 1
         self.enemy["prestige"] += 1
+
+        # Feudal Suzerainty & Vassalage Tributes
+        if getattr(self, "player_liege", None) == self.enemy_id:
+            # Player is vassal to Halfdan: pays 20% feudal tribute
+            w_tax = PROVINCES.get("wessex", {}).get("tax", 4)
+            trib = round(max(1.0, w_tax * 0.20 + 1.5), 1)
+            self.player["gold"] = max(0.0, round(self.player["gold"] - trib, 1))
+            self.enemy["gold"] = round(self.enemy.get("gold", 100) + trib, 1)
+            self.logs.append(f"Paid -{trib}g feudal tribute to Liege High King Halfdan.")
+        elif getattr(self, "enemy_liege", None) == self.player_id:
+            # Halfdan is vassal to Player: pays 20% feudal tribute
+            j_tax = PROVINCES.get("jorvik", {}).get("tax", 4)
+            trib = round(max(1.0, j_tax * 0.20 + 1.5), 1)
+            self.enemy["gold"] = max(0.0, round(self.enemy.get("gold", 100) - trib, 1))
+            self.player["gold"] = round(self.player["gold"] + trib, 1)
+            self.logs.append(f"Received +{trib}g feudal tribute from Vassal Jarl Halfdan of Jorvik.")
 
         # Vassal Feudal Autonomy: Vassals autonomously build whatever they want on their fiefs!
         # If they have enough gold and free tiles in their territory, they erect Cities (600g), Barracks (800g), or Forts (1000g)!
