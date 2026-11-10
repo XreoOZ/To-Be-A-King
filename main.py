@@ -2940,7 +2940,34 @@ def run_game():
             elif state.right_tab == "fiefs":
                 prov_fiefs = [f for f in state.fiefs.values() if f.get("province") == state.selected_province]
                 total_fiefs = len(prov_fiefs)
+                per_page = 5 if not state.editing_fief_id else 4
+                total_pages = max(1, (total_fiefs + per_page - 1) // per_page)
+                state.fief_page = max(0, min(getattr(state, "fief_page", 0), total_pages - 1))
+
                 screen.blit(font_md.render(f"Provincial Fiefs & Baronies ({total_fiefs})", True, COLOR_GOLD), (880, 155))
+
+                if total_pages > 1:
+                    # Quick Top Pagination buttons: < Page X/Y >
+                    h_prev_btn = pygame.Rect(1072, 152, 22, 22)
+                    h_next_btn = pygame.Rect(1146, 152, 22, 22)
+                    hp_hov = h_prev_btn.collidepoint(mouse_pos)
+                    hn_hov = h_next_btn.collidepoint(mouse_pos)
+
+                    pygame.draw.rect(screen, (50, 62, 85) if hp_hov else (32, 38, 52), h_prev_btn, border_radius=3)
+                    pygame.draw.rect(screen, COLOR_GOLD if hp_hov else COLOR_PANEL_BORDER, h_prev_btn, 1, border_radius=3)
+                    screen.blit(font_xs.render("<", True, COLOR_TEXT_WHITE if state.fief_page > 0 else COLOR_TEXT_MUTED), (1079, 155))
+
+                    pygame.draw.rect(screen, (50, 62, 85) if hn_hov else (32, 38, 52), h_next_btn, border_radius=3)
+                    pygame.draw.rect(screen, COLOR_GOLD if hn_hov else COLOR_PANEL_BORDER, h_next_btn, 1, border_radius=3)
+                    screen.blit(font_xs.render(">", True, COLOR_TEXT_WHITE if state.fief_page < total_pages - 1 else COLOR_TEXT_MUTED), (1153, 155))
+
+                    h_pg_txt = font_xs.render(f"{state.fief_page + 1}/{total_pages}", True, COLOR_GOLD)
+                    screen.blit(h_pg_txt, (1096 + (48 - h_pg_txt.get_width()) // 2, 156))
+
+                    if mouse_clicked and hp_hov and state.fief_page > 0:
+                        state.fief_page -= 1
+                    elif mouse_clicked and hn_hov and state.fief_page < total_pages - 1:
+                        state.fief_page += 1
 
                 # Header action: Edit banner or Carve New Fief button
                 if state.editing_fief_id:
@@ -2999,11 +3026,7 @@ def run_game():
                         carve_new_fief(state, state.selected_province)
                     fy = 216
 
-                # Pagination setup (5 fiefs per page, or 4 when editing)
-                per_page = 5 if not state.editing_fief_id else 4
-                total_pages = max(1, (total_fiefs + per_page - 1) // per_page)
-                state.fief_page = max(0, min(getattr(state, "fief_page", 0), total_pages - 1))
-
+                # Pagination slice
                 start_i = state.fief_page * per_page
                 page_fiefs = prov_fiefs[start_i:start_i + per_page]
 
@@ -3116,24 +3139,24 @@ def run_game():
 
                     fy += 68
 
-                # Pagination Controls for Fiefs list
+                # Pagination Controls for Fiefs list (Bottom bar)
                 if total_pages > 1:
-                    py_bar = 700
-                    prev_btn = pygame.Rect(880, py_bar, 80, 26)
-                    next_btn = pygame.Rect(1090, py_bar, 80, 26)
+                    py_bar = max(562, fy + 6)
+                    prev_btn = pygame.Rect(880, py_bar, 85, 26)
+                    next_btn = pygame.Rect(1085, py_bar, 85, 26)
                     p_hov = prev_btn.collidepoint(mouse_pos)
                     n_hov = next_btn.collidepoint(mouse_pos)
 
                     pygame.draw.rect(screen, COLOR_BUTTON_HOVER if p_hov else COLOR_BUTTON_NORMAL, prev_btn, border_radius=4)
-                    pygame.draw.rect(screen, COLOR_PANEL_BORDER, prev_btn, 1, border_radius=4)
-                    screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.fief_page > 0 else COLOR_TEXT_MUTED), (898, py_bar + 5))
+                    pygame.draw.rect(screen, COLOR_GOLD if p_hov else COLOR_PANEL_BORDER, prev_btn, 1, border_radius=4)
+                    screen.blit(font_xs.render("< PREV", True, COLOR_TEXT_WHITE if state.fief_page > 0 else COLOR_TEXT_MUTED), (898, py_bar + 5))
 
                     pygame.draw.rect(screen, COLOR_BUTTON_HOVER if n_hov else COLOR_BUTTON_NORMAL, next_btn, border_radius=4)
-                    pygame.draw.rect(screen, COLOR_PANEL_BORDER, next_btn, 1, border_radius=4)
-                    screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.fief_page < total_pages - 1 else COLOR_TEXT_MUTED), (1108, py_bar + 5))
+                    pygame.draw.rect(screen, COLOR_GOLD if n_hov else COLOR_PANEL_BORDER, next_btn, 1, border_radius=4)
+                    screen.blit(font_xs.render("NEXT >", True, COLOR_TEXT_WHITE if state.fief_page < total_pages - 1 else COLOR_TEXT_MUTED), (1108, py_bar + 5))
 
-                    pg_lbl = font_xs.render(f"Page {state.fief_page + 1}/{total_pages} ({total_fiefs} Fiefs)", True, COLOR_TEXT_MUTED)
-                    screen.blit(pg_lbl, (965 + (120 - pg_lbl.get_width()) // 2, py_bar + 5))
+                    pg_lbl = font_xs.render(f"Page {state.fief_page + 1}/{total_pages} ({total_fiefs} Fiefs)", True, COLOR_GOLD)
+                    screen.blit(pg_lbl, (970 + (110 - pg_lbl.get_width()) // 2, py_bar + 5))
 
                     if mouse_clicked and p_hov and state.fief_page > 0:
                         state.fief_page -= 1
