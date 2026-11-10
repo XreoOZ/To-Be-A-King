@@ -1185,31 +1185,24 @@ class GameState:
             self.ai_routine()
 
     def monthly_tick(self):
-        # 1. Base Province & Vassal monthly economy
+        # 1. Base Province passive levy replenishment & Vassal net savings for autonomy fund
         for pid, prov in PROVINCES.items():
-            owner = CHARACTERS.get(prov["owner"])
-            if owner:
-                owner["gold"] += prov.get("tax", 0)
-                # Slow passive replenishment
-                if prov["levies_current"] < prov["levies_max"]:
-                    prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 15)
-                # Vassal tax contribution & economy (calculated strictly via landed domain status)
-                for v in self.vassals.get(pid, []):
-                    st = get_vassal_landed_status(self, v, pid)
-                    if st["is_landed"]:
-                        owner["gold"] = round(owner["gold"] + st["tax_paid"], 1)
-                        v["gold"] = round(v.get("gold", 25) + st["net_savings"], 1)
-                        v["tax_contribution"] = st["tax_paid"]
-                        v["levy_contribution"] = st["levy_contribution"]
-                    else:
-                        # Landless noble holds no land/holdings -> generates 0 gold, pays 0 tax, provides 0 levies
-                        v["tax_contribution"] = 0
-                        v["levy_contribution"] = 0
+            if prov["levies_current"] < prov["levies_max"]:
+                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 15)
+            for v in self.vassals.get(pid, []):
+                st = get_vassal_landed_status(self, v, pid)
+                if st["is_landed"]:
+                    v["gold"] = round(v.get("gold", 25) + st["net_savings"], 1)
+                    v["tax_contribution"] = st["tax_paid"]
+                    v["levy_contribution"] = st["levy_contribution"]
+                else:
+                    v["tax_contribution"] = 0
+                    v["levy_contribution"] = 0
 
         # Maintain standardized enemy AI feudal laws uniformly across all Danelaw vassals
         standardize_enemy_ai_laws(self)
 
-        # 2. Modular Building Economic & Recruitment Tick
+        # 2. Holdings Recruitment Tick (City, Fort, Barracks contribute recruits to levy pool)
         processed_holdings = set()
         for coord, sdata in self.settlements.items():
             hid = sdata.get("id") or coord
@@ -1225,67 +1218,37 @@ class GameState:
             if not prov:
                 continue
 
-            is_crown = sdata.get("is_crown_demesne", False)
-            prov_ruler = CHARACTERS.get(prov["owner"])
-
-            # Personal demesne belongs to Alfred/player regardless of realm suzerainty
-            if is_crown:
-                demesne_owner = self.player
-            else:
-                demesne_owner = prov_ruler
-
             if htype == "city":
-                if demesne_owner:
-                    demesne_owner["gold"] += 3
-                # City contributes +10 recruits per month to provincial levy pool
                 prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 10)
-
             elif htype == "fort":
-                if demesne_owner:
-                    demesne_owner["gold"] += 1
-                # Fort contributes +10 recruits per month to provincial levy pool
                 prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 10)
-
             elif htype == "barrack":
                 lvl = sdata.get("level", 0)
                 bstats = get_barrack_stats(lvl)
-                upkeep = bstats["upkeep"]
-                recruits = bstats["recruits"]
+                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + bstats["recruits"])
 
-                if demesne_owner:
-                    demesne_owner["gold"] = max(0, demesne_owner["gold"] - upkeep)
-                # Boost province levies pool directly based on upgrade level (+10 base, +5 per level)
-                prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + recruits)
+        # 3. Synchronize Official Realm Economy directly with Ledger (Strict 1:1 Parity)
+        from game.systems.economy import get_realm_finances
+        p_fin = get_realm_finances(self, self.player_id)
+        self.player["gold"] = max(0.0, round(self.player["gold"] + p_fin["net_monthly"], 1))
 
-        # Army upkeep cost (1 gold per 100 Crown Demesne troops; Feudal Vassal Levies are FREE!)
-        player_crown_field = sum(min(a.troops, getattr(a, "crown_troops", 0)) for a in self.armies if a.owner == self.player_id)
-        upkeep = max(0, int(round(player_crown_field / 100.0)))
-        self.player["gold"] = max(0, self.player["gold"] - upkeep)
+        e_fin = get_realm_finances(self, self.enemy_id)
+        self.enemy["gold"] = max(0.0, round(self.enemy.get("gold", 100) + e_fin["net_monthly"], 1))
 
-        enemy_crown_field = sum(min(a.troops, getattr(a, "crown_troops", 0)) for a in self.armies if a.owner == self.enemy_id)
-        enemy_upkeep = max(0, int(round(enemy_crown_field / 100.0)))
-        self.enemy["gold"] = max(0, self.enemy["gold"] - enemy_upkeep)
+        # Feudal Suzerainty & Vassalage Tributes
+        if getattr(self, "player_liege", None) == self.enemy_id:
+            trib = p_fin["total_tribute"]
+            self.enemy["gold"] = round(self.enemy.get("gold", 100) + trib, 1)
+            liege_n = CHARACTERS.get(self.enemy_id, {}).get("name", "High King").split()[0]
+            self.logs.append(f"Paid -{trib}g feudal tribute (20% suzerainty tax on +{p_fin['total_income']}g domain inflow) to Liege {liege_n}.")
+        elif getattr(self, "enemy_liege", None) == self.player_id:
+            trib = e_fin["total_tribute"]
+            self.player["gold"] = round(self.player["gold"] + trib, 1)
+            self.logs.append(f"Received +{trib}g feudal tribute from Vassal Jarl Halfdan of Jorvik.")
 
         self.player["prestige"] += 1
         self.player["piety"] += 1
         self.enemy["prestige"] += 1
-
-        # Feudal Suzerainty & Vassalage Tributes (Strictly 20% of Gross Domain Income)
-        if getattr(self, "player_liege", None) == self.enemy_id:
-            from game.systems.economy import get_realm_finances
-            fin = get_realm_finances(self, self.player_id)
-            trib = round(fin["total_income"] * 0.20, 1)
-            self.player["gold"] = max(0.0, round(self.player["gold"] - trib, 1))
-            self.enemy["gold"] = round(self.enemy.get("gold", 100) + trib, 1)
-            liege_n = CHARACTERS.get(self.enemy_id, {}).get("name", "High King").split()[0]
-            self.logs.append(f"Paid -{trib}g feudal tribute (20% suzerainty tax on +{fin['total_income']}g domain inflow) to Liege {liege_n}.")
-        elif getattr(self, "enemy_liege", None) == self.player_id:
-            # Halfdan is vassal to Player: pays 20% feudal tribute
-            j_tax = PROVINCES.get("jorvik", {}).get("tax", 4)
-            trib = round(max(1.0, j_tax * 0.20 + 1.5), 1)
-            self.enemy["gold"] = max(0.0, round(self.enemy.get("gold", 100) - trib, 1))
-            self.player["gold"] = round(self.player["gold"] + trib, 1)
-            self.logs.append(f"Received +{trib}g feudal tribute from Vassal Jarl Halfdan of Jorvik.")
 
         # Vassal Feudal Autonomy: Vassals autonomously build whatever they want on their fiefs!
         # If they have enough gold and free tiles in their territory, they erect Cities (600g), Barracks (800g), or Forts (1000g)!
