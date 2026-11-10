@@ -1864,40 +1864,48 @@ def run_game():
         screen.blit(font_xs.render("👥 REALM VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD), (164, tab_y + 5))
 
         # Row 2 Tab: Crown Demesne
-        # Auto-reconcile settlements held by the Crown so they always have an associated Crown Demesne fief
+        # Compile all domains held directly by the Crown (Crown Fiefs & unpartitioned Crown Holdings)
+        player_crown_items = []
+        covered_holding_tiles = set()
+
+        # 1. Crown Fiefs (Formal sub-divisions held directly by the Crown)
+        for f in state.fiefs.values():
+            if (f.get("vassal_id") is None and
+                PROVINCES.get(f.get("province"), {}).get("owner") == state.player_id and
+                (f.get("holder") == state.player["name"] or f.get("holder") is None or f.get("is_crown_demesne"))):
+                f["holder"] = state.player["name"]
+                f["is_crown_demesne"] = True
+                player_crown_items.append({
+                    "id": f["id"],
+                    "name": f["name"],
+                    "province": f["province"],
+                    "tiles": f["tiles"],
+                    "is_fief": True
+                })
+                for t in f.get("tiles", []):
+                    covered_holding_tiles.add(t)
+
+        # 2. Direct Crown City Holdings (Holdings not part of any fief, e.g. dissolved fiefs)
         for h in get_all_settlement_holdings(state):
             sdata = h["data"]
             pid = h["province"]
             if PROVINCES.get(pid, {}).get("owner") == state.player_id and (sdata.get("is_crown_demesne") or sdata.get("vassal_id") is None):
                 sdata["lord"] = f"{state.player['name']} (Crown Demesne)"
                 sdata["is_crown_demesne"] = True
-                in_fief = any(any(t in f.get("tiles", []) for t in h["tiles"]) for f in state.fiefs.values())
-                if not in_fief:
-                    state.fief_id_counter += 1
-                    fid = f"fief_{state.fief_id_counter}"
-                    clean_name = h["name"].replace("Royal Citadel of ", "").replace("Royal Castle of ", "").replace("Royal Borough of ", "").replace(" Burgh", "")
-                    state.fiefs[fid] = {
-                        "id": fid,
+                if not any(t in covered_holding_tiles for t in h["tiles"]):
+                    p_short = PROVINCES[pid]["name"].split()[0]
+                    clean_hname = h["name"].replace("Royal Citadel of ", "").replace("Royal Castle of ", "").replace("Royal Borough of ", "")
+                    player_crown_items.append({
+                        "id": f"holding_{h['primary_tile'][0]}_{h['primary_tile'][1]}",
+                        "name": f"Crown Holding of {clean_hname}",
                         "province": pid,
                         "tiles": list(h["tiles"]),
-                        "name": f"Crown Demesne of {clean_name}",
-                        "holder": state.player["name"],
-                        "vassal_id": None,
-                        "is_crown_demesne": True
-                    }
+                        "is_fief": False
+                    })
+                    for t in h["tiles"]:
+                        covered_holding_tiles.add(t)
 
-        player_crown_fiefs = [
-            f for f in state.fiefs.values()
-            if (f.get("vassal_id") is None and
-                PROVINCES.get(f.get("province"), {}).get("owner") == state.player_id and
-                (f.get("holder") == state.player["name"] or f.get("holder") is None or f.get("is_crown_demesne")))
-        ]
-        for f in player_crown_fiefs:
-            if f.get("holder") is None or "Royal Demesne" in str(f.get("holder")):
-                f["holder"] = state.player["name"]
-            f["is_crown_demesne"] = True
-
-        d_title = f"👑 CROWN DEMESNE ({len(player_crown_fiefs)} Fiefs)"
+        d_title = f"👑 CROWN DEMESNE ({len(player_crown_items)} Holdings)"
         pygame.draw.rect(screen, (60, 48, 20) if is_d_active else (COLOR_BUTTON_HOVER if is_hov_td else (35, 40, 52)), tab_demesne, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_d_active else (90, 140, 210), tab_demesne, 1, border_radius=4)
         d_lbl = font_xs.render(d_title, True, COLOR_GOLD if is_d_active else (210, 230, 255))
@@ -1962,8 +1970,8 @@ def run_game():
 
         elif state.left_tab == "demesne":
             # Crown Demesne View (Personal Crown Fiefs & Cities)
-            total_cf = len(player_crown_fiefs)
-            header_lbl = font_md.render(f"Crown Demesne ({total_cf} Fiefs)", True, COLOR_GOLD)
+            total_cf = len(player_crown_items)
+            header_lbl = font_md.render(f"Crown Demesne ({total_cf} Holdings)", True, COLOR_GOLD)
             screen.blit(header_lbl, (25, 302))
 
             per_page = 5
@@ -1990,12 +1998,12 @@ def run_game():
                 state.demesne_page += 1
 
             start_i = state.demesne_page * per_page
-            cur_page_fiefs = player_crown_fiefs[start_i:start_i + per_page]
+            cur_page_fiefs = player_crown_items[start_i:start_i + per_page]
 
             fy = 328
             for f in cur_page_fiefs:
                 f_rect = pygame.Rect(25, fy, 260, 50)
-                is_sel = (f["id"] == state.selected_fief_id)
+                is_sel = (f["id"] == state.selected_fief_id or (not f["is_fief"] and f.get("tiles") and state.selected_settlement in f["tiles"]))
                 b_hover_f = f_rect.collidepoint(mouse_pos)
                 
                 bg_col = (70, 55, 20) if is_sel else ((50, 60, 78) if b_hover_f else (34, 40, 52))
@@ -2004,20 +2012,24 @@ def run_game():
 
                 screen.blit(font_sm.render(f"🏰 {f['name']}", True, COLOR_GOLD), (34, fy + 4))
                 p_short = PROVINCES[f['province']]['name'].split()[0]
-                status_str = f"Province: {p_short}  •  {len(f['tiles'])} Tiles (+6g/m)"
+                kind_str = "Crown Fief" if f["is_fief"] else "Crown City"
+                status_str = f"Province: {p_short} • {len(f['tiles'])}t ({kind_str})"
                 screen.blit(font_xs.render(status_str, True, (210, 230, 255)), (34, fy + 26))
 
                 if mouse_clicked and b_hover_f:
-                    state.selected_fief_id = f["id"]
                     state.selected_province = f["province"]
+                    if f["is_fief"]:
+                        state.selected_fief_id = f["id"]
+                    else:
+                        state.selected_fief_id = None
                     if f.get("tiles"):
                         state.selected_settlement = f["tiles"][0]
                     state.selected_army_id = None
 
                 fy += 54
 
-            if not player_crown_fiefs:
-                screen.blit(font_sm.render("No crown fiefs held directly.", True, COLOR_TEXT_MUTED), (25, 350))
+            if not player_crown_items:
+                screen.blit(font_sm.render("No crown holdings held directly.", True, COLOR_TEXT_MUTED), (25, 350))
                 screen.blit(font_xs.render("Revoke fiefs to expand royal land.", True, COLOR_TEXT_MUTED), (25, 370))
 
             # Bottom Pagination Controls
@@ -3311,6 +3323,23 @@ def run_game():
                             else:
                                 state.logs.append(f"Fief requires at least 2 tiles (currently has {len(edit_f['tiles'])}). Click more green tiles or click CANCEL.")
                         else:
+                            if edit_f:
+                                # Synchronize all settlement holdings in this newly expanded/merged fief!
+                                is_f_crown = (edit_f.get("is_crown_demesne", False) or 
+                                              edit_f.get("holder") == state.player["name"] or 
+                                              edit_f.get("vassal_id") is None)
+                                for t in edit_f.get("tiles", []):
+                                    if t in state.settlements:
+                                        if is_f_crown:
+                                            state.settlements[t]["lord"] = f"{state.player['name']} (Crown Demesne)"
+                                            state.settlements[t]["vassal_id"] = None
+                                            state.settlements[t]["is_crown_demesne"] = True
+                                            state.settlements[t]["is_crown_fief"] = True
+                                        else:
+                                            state.settlements[t]["lord"] = edit_f["holder"]
+                                            state.settlements[t]["vassal_id"] = edit_f.get("vassal_id")
+                                            state.settlements[t]["is_crown_demesne"] = False
+                                            state.settlements[t]["is_crown_fief"] = False
                             state.editing_fief_id = None
                             state.logs.append(f"Successfully established boundaries for {f_name} ({len(edit_f['tiles'])} tiles)!")
 
@@ -3401,15 +3430,22 @@ def run_game():
                         pygame.draw.rect(screen, (220, 80, 80), b_del, 1, border_radius=3)
                         screen.blit(font_xs.render("DISSOLVE", True, (255, 200, 200)), (1104, fy + 38))
                         if mouse_clicked and d_hov:
-                            del state.fiefs[f_data["id"]]
-                            if state.selected_fief_id == f_data["id"]:
+                            fid_to_del = f_data["id"]
+                            for t in f_data["tiles"]:
+                                if t in state.settlements:
+                                    state.settlements[t]["lord"] = f"{state.player['name']} (Crown Demesne)"
+                                    state.settlements[t]["vassal_id"] = None
+                                    state.settlements[t]["is_crown_demesne"] = True
+                                    state.settlements[t]["is_crown_fief"] = False
+                            del state.fiefs[fid_to_del]
+                            if state.selected_fief_id == fid_to_del:
                                 state.selected_fief_id = None
-                            if state.editing_fief_id == f_data["id"]:
+                            if state.editing_fief_id == fid_to_del:
                                 state.editing_fief_id = None
-                            state.logs.append(f"Dissolved {f_data['name']}. Land returned to province.")
+                            state.logs.append(f"Dissolved {f_data['name']}. Land returned to Crown province.")
                             break
                     else:
-                        # Revoke Fief Button (Transfers vassal ownership to Crown Demesne)
+                        # Revoke Fief Button (Transfers vassal ownership to Crown Demesne and dissolves fief partition)
                         b_revoke = pygame.Rect(970, fy + 36, 194, 20)
                         r_hov = b_revoke.collidepoint(mouse_pos)
                         pygame.draw.rect(screen, (100, 45, 45) if r_hov else (70, 30, 30), b_revoke, border_radius=3)
@@ -3418,11 +3454,7 @@ def run_game():
                         if mouse_clicked and r_hov:
                             v_prev = f_data["holder"]
                             v_prev_id = f_data.get("vassal_id")
-                            f_data["holder"] = state.player["name"]
-                            f_data["vassal_id"] = None
-                            f_data["is_crown_demesne"] = True
-                            p_short = PROVINCES[f_data['province']]['name'].split()[0]
-                            f_data["name"] = f"Crown Fief of {p_short}"
+                            fid_to_del = f_data["id"]
 
                             # 1. Transfer all settlements on this fief directly to the King (Crown Demesne)
                             for t in f_data["tiles"]:
@@ -3430,7 +3462,7 @@ def run_game():
                                     state.settlements[t]["lord"] = f"{state.player['name']} (Crown Demesne)"
                                     state.settlements[t]["vassal_id"] = None
                                     state.settlements[t]["is_crown_demesne"] = True
-                                    state.settlements[t]["is_crown_fief"] = True
+                                    state.settlements[t]["is_crown_fief"] = False
 
                             # 2. Update former vassal's held tiles
                             for pid, v_list in state.vassals.items():
@@ -3440,7 +3472,15 @@ def run_game():
                                         if not v["tiles"]:
                                             v["city_name"] = None
 
-                            state.logs.append(f"Revoked {f_data['name']} from {v_prev}! Transferred to Crown Demesne (King Alfred).")
+                            # 3. Dissolve the fief partition so land returns directly to the King as unpartitioned Crown land
+                            del state.fiefs[fid_to_del]
+                            if state.selected_fief_id == fid_to_del:
+                                state.selected_fief_id = None
+                            if state.editing_fief_id == fid_to_del:
+                                state.editing_fief_id = None
+
+                            state.logs.append(f"Revoked & dissolved {f_data['name']} from {v_prev}! Returned directly to Crown Demesne.")
+                            break
 
                     if mouse_clicked and is_f_hov and not (e_hov or g_hov or d_hov or r_hov):
                         state.selected_fief_id = f_data["id"]
