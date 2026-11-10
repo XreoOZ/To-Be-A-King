@@ -948,8 +948,8 @@ class GameState:
                                         elif (c, r + 1) in free_set:
                                             pair = [(c, r), (c, r + 1)]
                                             break
-                                    if not pair:
-                                        pair = [free_tiles[0]]
+                                    if not pair or len(pair) != 2:
+                                        continue
                                     
                                     eligible_petitions.append({
                                         "vassal": v["name"],
@@ -1327,12 +1327,7 @@ def run_game():
                     if (c, r) not in used and (c, r + 1) in tile_set and (c, r + 1) not in used:
                         pair = [(c, r), (c, r + 1)]
                         break
-            if not pair:
-                for (c, r) in tiles:
-                    if (c, r) not in used:
-                        pair = [(c, r)]
-                        break
-            if pair:
+            if pair and len(pair) == 2:
                 s_id = f"settlement_{settlement_counter}"
                 settlement_counter += 1
                 for t in pair:
@@ -1379,13 +1374,8 @@ def run_game():
                         if (c, r) not in used and (c, r + 1) in tile_set and (c, r + 1) not in used:
                             pair = [(c, r), (c, r + 1)]
                             break
-                if not pair:
-                    for (c, r) in tiles:
-                        if (c, r) not in used:
-                            pair = [(c, r)]
-                            break
 
-                if pair:
+                if pair and len(pair) == 2:
                     s_id = f"settlement_{settlement_counter}"
                     settlement_counter += 1
                     for t in pair:
