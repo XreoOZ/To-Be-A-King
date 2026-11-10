@@ -1823,6 +1823,7 @@ def run_game():
             "holder": None,
             "name": f"{pname} Fief #{cur_prov_fief_count + 1}",
             "vassal_id": None,
+            "is_crown_demesne": False,
             "is_newly_carved": True
         }
         target_state.selected_fief_id = fid
@@ -2273,7 +2274,7 @@ def run_game():
         for f in state.fiefs.values():
             if (f.get("vassal_id") is None and
                 PROVINCES.get(f.get("province"), {}).get("owner") == state.player_id and
-                (f.get("holder") == state.player["name"] or f.get("holder") is None or f.get("is_crown_demesne"))):
+                (f.get("holder") == state.player["name"] or f.get("is_crown_demesne"))):
                 f["holder"] = state.player["name"]
                 f["is_crown_demesne"] = True
                 player_crown_items.append({
@@ -4204,8 +4205,7 @@ def run_game():
                             if edit_f:
                                 # Synchronize all settlement holdings in this newly expanded/merged fief!
                                 is_f_crown = (edit_f.get("is_crown_demesne", False) or 
-                                              edit_f.get("holder") == state.player["name"] or 
-                                              edit_f.get("vassal_id") is None)
+                                              edit_f.get("holder") == state.player["name"])
                                 for t in edit_f.get("tiles", []):
                                     if t in state.settlements:
                                         if is_f_crown:
@@ -4213,9 +4213,15 @@ def run_game():
                                             state.settlements[t]["vassal_id"] = None
                                             state.settlements[t]["is_crown_demesne"] = True
                                             state.settlements[t]["is_crown_fief"] = True
-                                        else:
+                                        elif edit_f.get("vassal_id") or edit_f.get("holder"):
                                             state.settlements[t]["lord"] = edit_f["holder"]
                                             state.settlements[t]["vassal_id"] = edit_f.get("vassal_id")
+                                            state.settlements[t]["is_crown_demesne"] = False
+                                            state.settlements[t]["is_crown_fief"] = False
+                                        else:
+                                            # Ungranted fief (no governor/holder yet)
+                                            state.settlements[t]["lord"] = "Ungranted (No Governor)"
+                                            state.settlements[t]["vassal_id"] = None
                                             state.settlements[t]["is_crown_demesne"] = False
                                             state.settlements[t]["is_crown_fief"] = False
                             state.editing_fief_id = None
@@ -4256,16 +4262,17 @@ def run_game():
                     b_color = COLOR_GOLD if is_f_editing else ((100, 255, 120) if is_f_sel else COLOR_PANEL_BORDER)
                     pygame.draw.rect(screen, b_color, f_box, 2 if (is_f_sel or is_f_editing) else 1, border_radius=4)
 
-                    is_crown_owned = (f_data["holder"] is None or f_data["holder"] == state.player["name"] or f_data.get("is_crown_demesne"))
-                    
-                    if f_data["holder"] == state.player["name"] or f_data.get("is_crown_demesne"):
+                    is_ungranted = (f_data.get("holder") is None and f_data.get("vassal_id") is None and not f_data.get("is_crown_demesne"))
+                    is_crown_owned = (not is_ungranted) and (f_data.get("holder") == state.player["name"] or f_data.get("is_crown_demesne", False))
+
+                    if is_ungranted:
+                        holder_str = "Lord: Ungranted (No Governor)"
+                        h_col = (255, 185, 90)
+                    elif is_crown_owned:
                         holder_str = f"Lord: {state.player['name']} (Crown Demesne)"
                         h_col = COLOR_GOLD
-                    elif f_data["holder"] is None:
-                        holder_str = "Status: UNASSIGNED CROWN FIEF"
-                        h_col = (255, 180, 80)
                     else:
-                        holder_str = f"Lord: {f_data['holder']}"
+                        holder_str = f"Lord: {f_data.get('holder', 'Unknown')}"
                         h_col = (180, 255, 180)
 
                     screen.blit(font_xs.render(f"🛡 {f_data['name']} ({len(f_data['tiles'])} Tiles)", True, COLOR_GOLD), (888, fy + 4))
@@ -4290,7 +4297,7 @@ def run_game():
                             state.selected_settlement = None
 
                     # 2. Grant / Revoke Buttons
-                    if is_crown_owned:
+                    if is_ungranted or is_crown_owned:
                         # Grant Fief Button (Opens Vassal Selection Modal)
                         b_grant = pygame.Rect(970, fy + 36, 120, 20)
                         g_hov = b_grant.collidepoint(mouse_pos)
@@ -4597,13 +4604,17 @@ def run_game():
                         # Assign Fief
                         f_target["holder"] = c_v["name"]
                         f_target["vassal_id"] = c_v["id"]
-                        f_target["name"] = f"Barony of {c_v['name'].split()[1]}"
+                        f_target["is_crown_demesne"] = False
+                        f_target["is_newly_carved"] = False
+                        v_short_name = c_v["name"].split()[1] if len(c_v["name"].split()) > 1 else c_v["name"]
+                        f_target["name"] = f"Barony of {v_short_name}"
 
                         # Update all city settlements located on this fief to the chosen vassal!
                         for t in f_target["tiles"]:
                             if t in state.settlements:
                                 state.settlements[t]["lord"] = c_v["name"]
                                 state.settlements[t]["vassal_id"] = c_v["id"]
+                                state.settlements[t]["is_crown_demesne"] = False
                                 state.settlements[t]["is_crown_fief"] = False
                         
                         # Update Vassal details
