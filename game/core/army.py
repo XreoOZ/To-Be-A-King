@@ -23,12 +23,17 @@ class Army:
         self.move_progress = 0.0    # 0 to 100%
         self.move_speed = 100.0 / DAYS_PER_KOTAK  # % per day (1 day per tile)
         
-        # Combat & Siege
+        # Combat & Siege (15-Day Preparation & Decamp Cycle)
         self.is_sieging = False
         self.siege_progress = 0     # 0 to 100%
         self.in_battle = False
         self.target_city = None
         self.siege_target_name = None
+        self.siege_intent = False          # True only when explicitly ordered to siege
+        self.siege_prep_days = 0           # 15 days required to build siege camp before progress ticks
+        self.siege_packup_days = 0         # 15 days required to dismantle camp before free movement
+        self.pending_march_target = None   # Target tile queued while dismantling siege works
+        self.siege_target_tile = None      # Tile of the specific holding being besieged
         
         # Mobilization, Royal Courier Summons & Demobilization
         self.is_mustering = False

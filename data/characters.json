@@ -1,8 +1,8 @@
 {
   "char_alfred": {
     "id": "char_alfred",
-    "name": "King Alfred 'the Great'",
-    "title": "King of Wessex & the Anglo-Saxons",
+    "name": "King Alfred",
+    "title": "King of Wessex",
     "dynasty": "House of Wessex",
     "realm": "Kingdom of Wessex",
     "portrait": "portrait_alfred.png",
@@ -29,7 +29,7 @@
   "char_halfdan": {
     "id": "char_halfdan",
     "name": "Jarl Halfdan Ragnarsson",
-    "title": "Warlord of Danelaw & the Great Army",
+    "title": "Warlord of Danelaw",
     "dynasty": "House of Ragnarsson",
     "realm": "The Danelaw",
     "portrait": "portrait_halfden.png",

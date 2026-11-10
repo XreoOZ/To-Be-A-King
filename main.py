@@ -318,8 +318,31 @@ def run_game():
                 row_idx = int((my - origin_y) // curr_tile_h)
                 target_tile = (col_idx, row_idx)
                 if target_tile in CELL_TO_PROV:
-                    for army_obj in armies_to_order:
-                        state.order_army_march_to_tile(army_obj, target_tile)
+                    settlement = state.settlements.get(target_tile)
+                    target_prov_id = CELL_TO_PROV.get(target_tile)
+                    prov = PROVINCES.get(target_prov_id)
+                    is_hostile_holding = False
+                    if settlement and prov:
+                        occ = settlement.get("occupied_by")
+                        if state.are_hostile(state.player_id, prov["owner"]):
+                            if occ != state.player_id:
+                                is_hostile_holding = True
+                        elif occ is not None and state.are_hostile(state.player_id, occ):
+                            is_hostile_holding = True
+
+                    # If army is ALREADY standing on this hostile holding, open 'SIEGE THE CASTLE' context menu!
+                    is_standing_on = any(getattr(a, "tile", None) == target_tile for a in armies_to_order)
+                    if is_hostile_holding and is_standing_on:
+                        state.siege_context_menu = {
+                            "tile": target_tile,
+                            "pos": (mx, my),
+                            "name": settlement.get("name", "Stronghold"),
+                            "armies": [a.id for a in armies_to_order]
+                        }
+                    else:
+                        state.siege_context_menu = None
+                        for army_obj in armies_to_order:
+                            state.order_army_march_to_tile(army_obj, target_tile)
 
         if state.speed > 0:
             state.tick_timer += dt

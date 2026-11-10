@@ -132,6 +132,7 @@ class GameState:
         # Generate random 1-5 vassals for all provinces
         self.generate_province_vassals()
         setup_province_starter_cities(self)
+        self.siege_context_menu = None   # Floating context menu for 'SIEGE THE CASTLE'
 
     def are_hostile(self, char1, char2):
         """
@@ -368,24 +369,29 @@ class GameState:
                 else:
                     self.disband_army(a)
 
+        liege_char = CHARACTERS.get(self.enemy_id, {})
+        vassal_char = CHARACTERS.get(self.player_id, {})
+        liege_name = liege_char.get("name", "The Overlord")
+        vassal_name = vassal_char.get("name", "The Vassal")
+
         self.subjugation_event = {
             "type": "player_vassalized",
             "title": "TREATY OF SUBMISSION: BENDING THE KNEE",
-            "liege_name": "High King Halfdan Ragnarsson",
-            "vassal_name": "Duke Alfred of Wessex",
+            "liege_name": liege_name,
+            "vassal_name": vassal_name,
             "text_lines": [
-                "All Saxon resistance across Britain has broken before the Great Heathen Army.",
-                "Yet King Alfred survives! Meeting High King Halfdan at the Stone of Fealty,",
-                "Alfred places his hands between Halfdan's and swears the ancient Oath of Vassalage.",
+                f"All resistance across the realm has broken before {liege_name}.",
+                f"Yet {vassal_name} survives! Meeting at the Stone of Fealty,",
+                f"{vassal_name} places hands between {liege_name}'s and swears fealty.",
                 "",
-                "Halfdan confirms your ancestral demesne under Danelaw suzerainty. You must pay 20% feudal",
-                "tax to York every month, but your court, your laws, and your dynasty endure.",
+                f"{liege_name} confirms your ancestral demesne under suzerainty. You must pay 20% feudal",
+                "tax every month, but your court, your laws, and your dynasty endure.",
                 "",
                 "Bide your time and enrich your baronies under the sovereign peace of the realm."
             ],
             "button_text": "ACCEPT VASSALAGE & BIDE TIME"
         }
-        self.logs.append("FEUDAL SUBMISSION: King Alfred has bent the knee to High King Halfdan. Wessex is now a vassal duchy under the Danelaw.")
+        self.logs.append(f"FEUDAL SUBMISSION: {vassal_name} has bent the knee to {liege_name}.")
 
     def trigger_danelaw_subjugation_to_player(self):
         """Halfdan yields to Alfred and bends the knee, becoming Jarl of Jorvik."""
@@ -393,10 +399,12 @@ class GameState:
         self.player_liege = None
         self.war_status = "vassalage"
 
+        p_name = CHARACTERS[self.player_id].get("name", "High King")
+        e_name = CHARACTERS[self.enemy_id].get("name", "Lord")
         CHARACTERS[self.player_id]["realm"] = "High Kingdom of All Britain"
-        CHARACTERS[self.player_id]["title"] = "High King Alfred 'the Great' (Bretwalda)"
+        CHARACTERS[self.player_id]["title"] = f"High King {p_name} (Bretwalda)"
         CHARACTERS[self.enemy_id]["realm"] = "Jarlhood of Jorvik (Vassal of Wessex)"
-        CHARACTERS[self.enemy_id]["title"] = "Jarl of Jorvik & Northern Marcher Lord"
+        CHARACTERS[self.enemy_id]["title"] = f"Vassal Lord {e_name}"
 
         # Realm falls under Saxon High Kingdom suzerainty
         PROVINCES["jorvik"]["owner"] = self.player_id
@@ -430,23 +438,21 @@ class GameState:
 
         self.subjugation_event = {
             "type": "enemy_vassalized",
-            "title": "TREATY OF WEDMORE: DANELAW SUBMISSION",
-            "liege_name": "High King Alfred 'the Great'",
-            "vassal_name": "Jarl Halfdan Ragnarsson",
+            "title": "TREATY OF SUBMISSION: VICTORY FEALTY",
+            "liege_name": p_name,
+            "vassal_name": e_name,
             "text_lines": [
-                "The Viking conquerors have been utterly crushed across the length of Britain!",
-                "Jarl Halfdan Ragnarsson surrenders his raven war banner and kneels before Alfred.",
+                f"The opposing armies have been crushed across the realm!",
+                f"{e_name} surrenders their war banner and kneels before {p_name}.",
                 "",
-                "Under the historic Treaty of Wedmore, Halfdan accepts Christian baptism and swears",
-                "solemn fealty to the Saxon Crown as your vassal Jarl in Jorvik.",
+                f"Under the terms of submission, {e_name} swears fealty to the Crown as your vassal lord.",
                 "",
-                "All 12 shires of Britain now acknowledge King Alfred as High King (Bretwalda)!",
-                "Halfdan now pays 20% feudal tribute to Winchester and his warriors stand ready",
-                "to serve as Viking auxilia in your royal host."
+                f"All lands now acknowledge {p_name} as High King!",
+                f"{e_name} now pays 20% feudal tribute and their warriors stand ready to serve."
             ],
             "button_text": "RULE THE UNITED REALM"
         }
-        self.logs.append("DANELAW SUBMISSION: Halfdan has bent the knee! Danelaw has accepted Saxon suzerainty. Alfred is High King of All Britain!")
+        self.logs.append(f"SUBMISSION: {e_name} has bent the knee! {p_name} is High King of the realm!")
 
 
     # ---------------------------------------------------------
@@ -878,6 +884,72 @@ class GameState:
                     if host in self.armies:
                         self.armies.remove(host)
 
+    def cancel_army_siege(self, army, target_tile=None):
+        if not army:
+            return
+        if not getattr(army, "is_sieging", False) and getattr(army, "siege_prep_days", 0) <= 0:
+            return
+        army.is_sieging = False
+        army.siege_prep_days = 0
+        army.siege_intent = False
+        army.siege_packup_days = 15
+        army.pending_march_target = target_tile
+        army.tile_path = []
+        army.move_progress = 0.0
+        h_name = getattr(army, "siege_target_name", "the stronghold") or "the stronghold"
+        self.logs.append(f"⛺ Siege Cancelled: {army.name} begins dismantling siege works around {h_name} (15 days to pack up before moving).")
+
+    def order_army_siege_holding(self, army, target_tile=None):
+        if not army:
+            return
+        if army.in_battle:
+            self.logs.append(f"{army.name} is locked in combat and cannot organize siege works!")
+            return
+        if army.courier_en_route or army.is_mustering:
+            self.logs.append(f"{army.name} is not fully assembled!")
+            return
+        if getattr(army, "siege_packup_days", 0) > 0:
+            self.logs.append(f"{army.name} is currently dismantling camp ({army.siege_packup_days}d left) and cannot start a new siege yet!")
+            return
+
+        t = target_tile or army.tile
+        cur_settlement = self.settlements.get(t)
+        if not cur_settlement:
+            self.logs.append(f"No fortification or borough at {t} to besiege!")
+            return
+
+        prov = PROVINCES.get(army.province)
+        if not prov:
+            return
+
+        occ = cur_settlement.get("occupied_by")
+        is_enemy_prov = self.are_hostile(army.owner, prov["owner"])
+
+        needs_siege = False
+        if is_enemy_prov:
+            if occ != army.owner:
+                needs_siege = True
+        else:
+            if occ is not None and self.are_hostile(occ, prov["owner"]):
+                needs_siege = True
+
+        if not needs_siege:
+            self.logs.append(f"{cur_settlement.get('name', 'Holding')} is already under friendly control. No siege required!")
+            return
+
+        h_name = cur_settlement.get("name", "Holding")
+        army.siege_intent = True
+        army.siege_prep_days = 15
+        army.siege_packup_days = 0
+        army.is_sieging = False
+        army.siege_progress = 0
+        army.target_city = t
+        army.siege_target_tile = t
+        army.siege_target_name = h_name
+        army.tile_path = []
+        army.move_progress = 0.0
+        self.logs.append(f"⛺ Siege Order: {army.name} begins 15 days of siege preparation around {h_name}!")
+
     def order_army_march_to_tile(self, army, target_tile):
         if not army:
             return
@@ -893,6 +965,17 @@ class GameState:
         if army.is_demobilizing:
             army.is_demobilizing = False
             self.logs.append(f"March order issued! {army.name} cancelled demobilization and returned to war.")
+
+        # 15-Day Decamp Rule: If sieging or in prep, must pack up for 15 days before departure!
+        if getattr(army, "is_sieging", False) or getattr(army, "siege_prep_days", 0) > 0:
+            self.cancel_army_siege(army, target_tile=target_tile)
+            return
+
+        if getattr(army, "siege_packup_days", 0) > 0:
+            army.pending_march_target = target_tile
+            self.logs.append(f"{army.name} is dismantling siege equipment ({army.siege_packup_days}d left). Will march to {target_tile} upon completion.")
+            return
+
         if getattr(army, "tile", None) == target_tile:
             return
         
@@ -964,6 +1047,25 @@ class GameState:
                 if a.muster_days <= 0:
                     a.is_mustering = False
                     self.logs.append(f"⚔ {a.name} is fully assembled and battle-ready!")
+
+        # Update Siege Preparation & Decamp Timers (15-Day Cycles)
+        for a in list(self.armies):
+            if getattr(a, "siege_prep_days", 0) > 0 and not a.in_battle:
+                a.siege_prep_days -= 1
+                if a.siege_prep_days <= 0:
+                    a.is_sieging = True
+                    a.siege_progress = 0
+                    h_name = getattr(a, "siege_target_name", "the stronghold")
+                    self.logs.append(f"⚔ Siege Works Complete! {a.name} has launched the active siege against {h_name}!")
+
+            elif getattr(a, "siege_packup_days", 0) > 0 and not a.in_battle:
+                a.siege_packup_days -= 1
+                if a.siege_packup_days <= 0:
+                    self.logs.append(f"⛺ Camp Dismantled! {a.name} has finished breaking siege camp and is free to move.")
+                    dest = getattr(a, "pending_march_target", None)
+                    a.pending_march_target = None
+                    if dest and dest != getattr(a, "tile", None):
+                        self.order_army_march_to_tile(a, dest)
 
         # Update Army Movements & Combat
         self.update_armies()
@@ -1293,7 +1395,7 @@ class GameState:
         for a in list(self.armies):
             if a not in self.armies:
                 continue
-            if a.is_moving or a.in_battle or a.is_mustering or a.courier_en_route or a.is_demobilizing:
+            if a.is_moving or a.in_battle or a.is_mustering or a.courier_en_route or a.is_demobilizing or getattr(a, "siege_prep_days", 0) > 0 or getattr(a, "siege_packup_days", 0) > 0:
                 continue
 
             prov = PROVINCES.get(a.province)
@@ -1333,8 +1435,8 @@ class GameState:
                         needs_siege = True
                         is_liberation = True
 
-                if needs_siege:
-                    a.is_sieging = True
+                # Only siege if explicitly ordered (siege_intent == True) and prep is finished
+                if needs_siege and getattr(a, "siege_intent", False) and a.is_sieging and getattr(a, "siege_prep_days", 0) <= 0:
                     a.siege_target_name = h_name
                     a.target_city = a.tile
 
@@ -1345,6 +1447,9 @@ class GameState:
                     if a.siege_progress >= 100:
                         a.siege_progress = 0
                         a.is_sieging = False
+                        a.siege_intent = False
+                        a.siege_prep_days = 0
+                        a.siege_packup_days = 0
                         a.target_city = None
                         a.siege_target_name = None
 

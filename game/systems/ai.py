@@ -314,6 +314,8 @@ def run_realm_ai(state, ruler_id):
                 cur_unconquered = get_siegeable_holdings(state, main_host.province, ruler_id)
                 matching_tiles = [h[1][0] for h in cur_unconquered]
                 if getattr(main_host, "tile", None) in matching_tiles:
+                    if not getattr(main_host, "siege_intent", False) and getattr(main_host, "siege_prep_days", 0) <= 0 and not main_host.is_sieging and getattr(main_host, "siege_packup_days", 0) <= 0:
+                        state.order_army_siege_holding(main_host, main_host.tile)
                     return
                 elif cur_unconquered:
                     next_holding_tile = cur_unconquered[0][1][0]

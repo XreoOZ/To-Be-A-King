@@ -885,6 +885,14 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
             txt_badge = f"◆ HOME ({army.troops:,})"
             p_bg = (30, 48, 70)
             p_border = (120, 180, 240)
+        elif getattr(army, "siege_prep_days", 0) > 0:
+            txt_badge = f"⛺ Prep {army.siege_prep_days}d"
+            p_bg = (140, 75, 20)
+            p_border = (255, 200, 70)
+        elif getattr(army, "siege_packup_days", 0) > 0:
+            txt_badge = f"⛺ Pack {army.siege_packup_days}d"
+            p_bg = (110, 50, 20)
+            p_border = (220, 140, 50)
         elif army.is_sieging:
             if army.siege_target_name:
                 clean_name = army.siege_target_name
@@ -1051,6 +1059,42 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
         d_lbl = font_sm.render(f"DANELAW: {danelaw_count} Provinces", True, (230, 240, 255))
     screen.blit(w_lbl, (bar_x + 10, bar_y + 3))
     screen.blit(d_lbl, (bar_x + bar_w - d_lbl.get_width() - 10, bar_y + 3))
+
+    # ---------------------------------------------------------
+    # FLOATING SIEGE CONTEXT MENU (Right-Click "SIEGE THE CASTLE")
+    # ---------------------------------------------------------
+    if getattr(state, "siege_context_menu", None):
+        ctx = state.siege_context_menu
+        cx_x, cx_y = ctx["pos"]
+        h_name = ctx.get("name", "Stronghold")
+        
+        m_w, m_h = 240, 68
+        m_x = min(map_bg_rect.right - m_w - 12, max(map_bg_rect.left + 12, cx_x - m_w // 2))
+        m_y = min(map_bg_rect.bottom - m_h - 12, max(map_bg_rect.top + 12, cx_y - m_h - 10))
+        
+        menu_rect = pygame.Rect(m_x, m_y, m_w, m_h)
+        pygame.draw.rect(screen, (22, 26, 36), menu_rect, border_radius=6)
+        pygame.draw.rect(screen, COLOR_GOLD, menu_rect, 1, border_radius=6)
+        
+        header_surf = font_xs.render(f"Target: {h_name[:24]}", True, (240, 220, 160))
+        screen.blit(header_surf, (m_x + 10, m_y + 8))
+        
+        s_btn = pygame.Rect(m_x + 8, m_y + 26, m_w - 16, 32)
+        s_hov = s_btn.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (140, 45, 25) if s_hov else (100, 32, 18), s_btn, border_radius=4)
+        pygame.draw.rect(screen, (255, 120, 80) if s_hov else (200, 70, 40), s_btn, 1, border_radius=4)
+        s_lbl = font_sm.render("⚔ SIEGE THE CASTLE", True, COLOR_TEXT_WHITE)
+        screen.blit(s_lbl, (s_btn.x + (s_btn.w - s_lbl.get_width()) // 2, s_btn.y + 6))
+        
+        if mouse_clicked:
+            if s_hov:
+                for aid in ctx["armies"]:
+                    a_obj = next((a for a in state.armies if a.id == aid), None)
+                    if a_obj:
+                        state.order_army_siege_holding(a_obj, ctx["tile"])
+                state.siege_context_menu = None
+            elif not menu_rect.collidepoint(mouse_pos):
+                state.siege_context_menu = None
 
     # Unclip screen so right panel and remaining UI render normally across the whole display
     screen.set_clip(None)

@@ -190,9 +190,13 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
         elif sel_army.is_demobilizing:
             home_p = PROVINCES[sel_army.flag_origin]["name"].split()[0]
             screen.blit(font_md.render(f"STATUS: ◆ Returning Home to {home_p}", True, (140, 200, 255)), (content_x, 202))
+        elif getattr(sel_army, "siege_prep_days", 0) > 0:
+            screen.blit(font_md.render(f"STATUS: ⛺ SIEGE PREP ({sel_army.siege_prep_days}d left)", True, (255, 200, 70)), (content_x, 202))
+        elif getattr(sel_army, "siege_packup_days", 0) > 0:
+            screen.blit(font_md.render(f"STATUS: ⛺ BREAKING CAMP ({sel_army.siege_packup_days}d left)", True, (240, 160, 60)), (content_x, 202))
         elif sel_army.is_sieging:
             t_lbl = sel_army.siege_target_name or 'Holding'
-            screen.blit(font_md.render(f"STATUS: [Fort] Besieging {t_lbl} ({sel_army.siege_progress}%)", True, COLOR_GOLD), (content_x, 202))
+            screen.blit(font_md.render(f"STATUS: ⚑ BESIEGING {t_lbl} ({sel_army.siege_progress}%)", True, COLOR_GOLD), (content_x, 202))
         elif sel_army.is_moving:
             screen.blit(font_sm.render(f"Marching to: {PROVINCES[sel_army.next_province]['name']} ({int(sel_army.move_progress)}%)", True, COLOR_TEXT_WHITE), (content_x, 202))
         else:
@@ -208,6 +212,37 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
     
         # Action Buttons for Army
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 365), (content_x + content_w, 365), 1)
+        
+        # Siege / Break Siege Action Button (15-Day Cycle)
+        cur_settle = state.settlements.get(sel_army.tile)
+        is_on_hostile_settle = False
+        if cur_settle:
+            p_info = PROVINCES.get(sel_army.province)
+            occ = cur_settle.get("occupied_by")
+            if p_info and state.are_hostile(state.player_id, p_info["owner"]):
+                if occ != state.player_id:
+                    is_on_hostile_settle = True
+            elif occ is not None and state.are_hostile(state.player_id, occ):
+                is_on_hostile_settle = True
+
+        if sel_army.is_sieging or getattr(sel_army, "siege_prep_days", 0) > 0:
+            sg_btn = pygame.Rect(content_x, 330, content_w, 32)
+            b_sg_hov = sg_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (90, 45, 25) if b_sg_hov else (65, 30, 18), sg_btn, border_radius=6)
+            pygame.draw.rect(screen, (220, 110, 60), sg_btn, 1, border_radius=6)
+            sg_txt = font_sm.render("⛺ BREAK SIEGE (15d Pack Up)", True, COLOR_TEXT_WHITE)
+            screen.blit(sg_txt, (sg_btn.x + (sg_btn.w - sg_txt.get_width()) // 2, sg_btn.y + 6))
+            if mouse_clicked and b_sg_hov:
+                state.cancel_army_siege(sel_army)
+        elif is_on_hostile_settle and getattr(sel_army, "siege_packup_days", 0) <= 0:
+            sg_btn = pygame.Rect(content_x, 330, content_w, 32)
+            b_sg_hov = sg_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (140, 45, 25) if b_sg_hov else (100, 32, 18), sg_btn, border_radius=6)
+            pygame.draw.rect(screen, (255, 120, 80) if b_sg_hov else (200, 70, 40), sg_btn, 1, border_radius=6)
+            sg_txt = font_sm.render("⚔ SIEGE THE CASTLE (15d Prep)", True, COLOR_TEXT_WHITE)
+            screen.blit(sg_txt, (sg_btn.x + (sg_btn.w - sg_txt.get_width()) // 2, sg_btn.y + 6))
+            if mouse_clicked and b_sg_hov:
+                state.order_army_siege_holding(sel_army, sel_army.tile)
         
         # Merge button if other armies in same province
         other_armies = [a for a in state.armies if a.province == sel_army.province and a.owner == state.player_id and a.id != sel_army.id]
