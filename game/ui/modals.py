@@ -337,12 +337,18 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         total_garrison = v_status.get("total_garrison", 0)
     
         # Name and Titles
-        screen.blit(font_md.render(f"♚ {v_obj['name']}", True, (255, 120, 120) if is_enemy else COLOR_GOLD), (pop_x + 90, pop_y + 74))
+        is_direct = v_obj.get("is_direct_vassal", True)
+        rk_val = str(v_obj.get("rank", "count" if is_direct else "baron")).lower()
+        rk_sym = "🛡" if ("count" in rk_val or "thane" in rk_val or "warden" in rk_val) else ("⚜" if "duke" in rk_val else "🏰")
+        screen.blit(font_md.render(f"{rk_sym} {v_obj['name']}", True, (255, 120, 120) if is_enemy else COLOR_GOLD), (pop_x + 90, pop_y + 74))
         v_religion = "Norse Pagan" if p_owner == state.enemy_id else prov_data.get("faith", "Catholic")
         v_culture = "Norse" if p_owner == state.enemy_id else prov_data.get("culture", "Anglo-Saxon")
-        rank_str = f"Feudal Rank: {v_obj.get('title', 'Thane')} of {p_full.split()[0]}  •  Religion: {v_religion} ({v_culture})"
+        feud_role = "Direct Province Liege" if is_direct else "Sub-Vassal (Barony)"
+        rank_str = f"Feudal Rank: {v_obj.get('title', 'Count')} ({feud_role})  •  Faith: {v_religion} ({v_culture})"
         screen.blit(font_xs.render(rank_str, True, COLOR_TEXT_WHITE), (pop_x + 90, pop_y + 98))
-        seat_str = f"Seat of Power: {v_obj.get('city_name')}" if is_landed and v_obj.get('city_name') else "Seat of Power: Landless Subject (Awaiting Royal Charter)"
+        seat_str = f"Seat of Power: {v_obj.get('city_name')}" if is_landed and v_obj.get('city_name') else "Seat of Power: Landless Subject"
+        if is_direct and v_obj.get("sub_vassals"):
+            seat_str += f"  •  Retinue: 👥 {len(v_obj['sub_vassals'])} Barons"
         screen.blit(font_xs.render(seat_str, True, (140, 205, 255)), (pop_x + 90, pop_y + 114))
     
         # Feudal Attributes Grid (Martial, Stewardship, Diplomacy, Feudal Oath)

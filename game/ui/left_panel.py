@@ -16,6 +16,39 @@ from game.systems.economy import (
     get_vassal_landed_status, sync_province_holdings_stats, fmt_gold
 )
 
+def get_feudal_badge(rank_or_title):
+    """Returns (symbol, color) for feudal nobility ranks (CK2 style)."""
+    t = str(rank_or_title).lower()
+    if "king" in t or "emperor" in t:
+        return "👑", (255, 215, 0)
+    elif "duke" in t or "archon" in t or "ironlord" in t:
+        return "⚜", (240, 190, 70)
+    elif "count" in t or "thane" in t or "warden" in t:
+        return "🛡", (180, 210, 255)
+    else:
+        return "🏰", (220, 180, 140)
+
+def draw_feudal_pill(screen, font_xs, rank_or_title, x, y):
+    """Draws a Crusader Kings style rank badge pill and returns (pill_width, fg_color)."""
+    t = str(rank_or_title).lower()
+    if "king" in t or "emperor" in t:
+        txt, fg, bg = "👑 KING", (255, 215, 0), (70, 55, 15)
+    elif "duke" in t or "archon" in t or "ironlord" in t:
+        txt, fg, bg = "⚜ DUKE", (240, 190, 70), (60, 48, 20)
+    elif "count" in t or "thane" in t or "warden" in t:
+        txt, fg, bg = "🛡 COUNT", (180, 215, 255), (35, 55, 80)
+    else:
+        txt, fg, bg = "🏰 BARON", (230, 190, 150), (55, 42, 30)
+
+    txt_surf = font_xs.render(txt, True, fg)
+    w = txt_surf.get_width() + 8
+    h = 16
+    pill = pygame.Rect(x, y, w, h)
+    pygame.draw.rect(screen, bg, pill, border_radius=3)
+    pygame.draw.rect(screen, fg, pill, 1, border_radius=3)
+    screen.blit(txt_surf, (x + 4, y + 1))
+    return w, fg
+
 def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_cache, coa_cache):
     font_xs = fonts["xs"]
     font_sm = fonts["sm"]
@@ -215,6 +248,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     elif mouse_clicked and is_hov_tv:
         state.left_tab = "vassals"
         state.vassal_selected_province = None
+        state.vassal_inspecting_liege_id = None
         state.vassal_page = 0
     elif mouse_clicked and is_hov_td:
         if state.left_tab != "demesne":
@@ -481,20 +515,137 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     elif state.left_tab == "vassals":
         if not hasattr(state, "vassal_selected_province"):
             state.vassal_selected_province = None
+        if not hasattr(state, "vassal_inspecting_liege_id"):
+            state.vassal_inspecting_liege_id = None
         if not hasattr(state, "vassal_page"):
             state.vassal_page = 0
 
         # Gather realm provinces belonging to the player
         vassal_provinces = [pid for pid, prov in PROVINCES.items() if prov.get("owner") == state.player_id]
 
+        # Feudal Hierarchy Metrics & Vassal Limit Calculation
+        direct_vassal_count = sum(1 for pid in vassal_provinces for v in state.vassals.get(pid, []) if v.get("is_direct_vassal", True))
+        vassal_limit = getattr(state, "vassal_limit", 5)
+        is_over_limit = (direct_vassal_count > vassal_limit)
+        limit_penalty = min(100, (direct_vassal_count - vassal_limit) * 10) if is_over_limit else 0
+
         # -------------------------------------------------------------
-        # LEVEL 1: LIST OF PROVINCES IN THE REALM
+        # LEVEL 3: INSPECTING A COUNT'S DIRECT SUB-VASSALS (RETINUE)
         # -------------------------------------------------------------
-        if state.vassal_selected_province is None:
+        if state.vassal_inspecting_liege_id is not None:
+            liege_id = state.vassal_inspecting_liege_id
+            liege_v = next((v for plist in state.vassals.values() for v in plist if v.get("id") == liege_id), None)
+            l_name = liege_v["name"].split()[1] if liege_v else "Count"
+            l_rank = liege_v.get("rank", "count") if liege_v else "count"
+            l_sym, l_col = get_feudal_badge(l_rank)
+
+            # Back button to Level 2 (Province)
+            back_btn = pygame.Rect(25, 298, 120, 24)
+            is_back_hov = back_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (45, 65, 90) if is_back_hov else (30, 42, 60), back_btn, border_radius=4)
+            pygame.draw.rect(screen, COLOR_GOLD if is_back_hov else (80, 140, 220), back_btn, 1, border_radius=4)
+            screen.blit(font_xs.render("◄ BACK TO PROV", True, COLOR_GOLD if is_back_hov else COLOR_TEXT_WHITE), (31, 303))
+
+            hdr_lbl = font_xs.render(f"{l_sym} {l_name}'s Direct Vassals", True, COLOR_GOLD)
+            screen.blit(hdr_lbl, (152, 302))
+
+            if mouse_clicked and is_back_hov:
+                state.vassal_inspecting_liege_id = None
+                state.vassal_page = 0
+
+            # Sub-vassals swearing direct fealty to this Count
+            sub_list = [v for plist in state.vassals.values() for v in plist if v.get("liege_id") == liege_id or (liege_v and v.get("id") in liege_v.get("sub_vassals", []))]
+
+            per_page = 5
+            max_pages = max(1, (len(sub_list) + per_page - 1) // per_page)
+            state.vassal_page = max(0, min(getattr(state, "vassal_page", 0), max_pages - 1))
+            start_i = state.vassal_page * per_page
+            cur_page_subs = sub_list[start_i:start_i + per_page]
+
+            vy = 328
+            for b_data in cur_page_subs:
+                b_card = pygame.Rect(content_x, vy, content_w, 54)
+                is_bc_hov = b_card.collidepoint(mouse_pos)
+
+                gift_btn = pygame.Rect(content_x + content_w - 68, vy + 4, 62, 20)
+                is_g_hov = gift_btn.collidepoint(mouse_pos)
+                can_gift = (state.player["gold"] >= 50)
+
+                pygame.draw.rect(screen, (50, 60, 78) if is_bc_hov else (34, 40, 52), b_card, border_radius=4)
+                pygame.draw.rect(screen, (140, 180, 220) if is_bc_hov else COLOR_PANEL_BORDER, b_card, 1, border_radius=4)
+
+                pw, b_col = draw_feudal_pill(screen, font_xs, b_data.get("rank", "baron"), 32, vy + 4)
+                b_name_parts = b_data["name"].split(maxsplit=1)
+                b_name_disp = b_name_parts[1] if len(b_name_parts) > 1 else b_data["name"]
+                if len(b_name_disp) > 22: b_name_disp = b_name_disp[:20] + ".."
+                screen.blit(font_xs.render(b_name_disp, True, COLOR_TEXT_WHITE), (32 + pw + 6, vy + 5))
+
+                # Gift button
+                g_bg = (30, 70, 40) if (is_g_hov and can_gift) else ((20, 50, 30) if can_gift else (40, 42, 48))
+                g_bd = COLOR_TEXT_GREEN if can_gift else (80, 85, 95)
+                pygame.draw.rect(screen, g_bg, gift_btn, border_radius=3)
+                pygame.draw.rect(screen, g_bd, gift_btn, 1, border_radius=3)
+                g_lbl = font_xs.render("+50g 🎁", True, COLOR_TEXT_WHITE if can_gift else COLOR_TEXT_MUTED)
+                screen.blit(g_lbl, (gift_btn.x + (gift_btn.w - g_lbl.get_width()) // 2, gift_btn.y + 2))
+
+                st = get_vassal_landed_status(state, b_data, b_data.get("province"))
+                f_name = b_data.get("city_name") or "Barony Holding"
+                if len(f_name) > 30: f_name = f_name[:28] + ".."
+                screen.blit(font_xs.render(f"Fief: {f_name} • Liege: {l_name}", True, (210, 220, 235)), (32, vy + 20))
+
+                screen.blit(font_xs.render(f"Gold: {fmt_gold(b_data['gold'])}g  •  Levy: +{st['levy_contribution']}  •  Tax to {l_name}: +{fmt_gold(st['tax_paid'])}g/m", True, COLOR_TEXT_MUTED), (32, vy + 36))
+
+                if mouse_clicked:
+                    if is_g_hov:
+                        if can_gift:
+                            state.player["gold"] = round(state.player["gold"] - 50, 1)
+                            b_data["gold"] = round(b_data.get("gold", 0) + 50, 1)
+                            state.logs.append(f"👑 Sent 50g royal subsidy to {b_data['name']} (Treasury: {fmt_gold(b_data['gold'])}g).")
+                        else:
+                            state.logs.append(f"⚠️ Need 50 gold to send subsidy to {b_data['name']}!")
+                    elif is_bc_hov:
+                        state.selected_province = b_data.get("province")
+                        state.inspecting_vassal = {"province": b_data.get("province"), "vassal": b_data}
+                        if b_data.get("tiles"): state.selected_settlement = b_data["tiles"][0]
+                        state.logs.append(f"Opened royal dossier for vassal {b_data['name']}.")
+
+                vy += 58
+
+            if not sub_list:
+                screen.blit(font_sm.render(f"{l_name} currently has no direct sub-vassals.", True, COLOR_TEXT_MUTED), (25, 350))
+
+            # Pagination Controls
+            py_btn = 645
+            btn_prev = pygame.Rect(content_x, py_btn, 110, 28)
+            btn_next = pygame.Rect(content_x + content_w - 110, py_btn, 110, 28)
+            is_prev_hov = btn_prev.collidepoint(mouse_pos)
+            is_next_hov = btn_next.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
+            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.vassal_page > 0 else COLOR_TEXT_MUTED), (btn_prev.x + (btn_prev.w - font_xs.size("PREV")[0]) // 2, py_btn + 6))
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
+            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.vassal_page < max_pages - 1 else COLOR_TEXT_MUTED), (btn_next.x + (btn_next.w - font_xs.size("NEXT")[0]) // 2, py_btn + 6))
+            page_str = f"Page {state.vassal_page + 1}/{max_pages}"
+            p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
+            screen.blit(p_lbl, (content_x + (content_w - p_lbl.get_width()) // 2, py_btn + 6))
+            if mouse_clicked and is_prev_hov and state.vassal_page > 0: state.vassal_page -= 1
+            elif mouse_clicked and is_next_hov and state.vassal_page < max_pages - 1: state.vassal_page += 1
+
+        # -------------------------------------------------------------
+        # LEVEL 1: LIST OF PROVINCES IN THE REALM & DIRECT VASSALS
+        # -------------------------------------------------------------
+        elif state.vassal_selected_province is None:
             total_provs = len(vassal_provinces)
-            total_all_vassals = sum(len(state.vassals.get(pid, [])) for pid in vassal_provinces)
-            header_lbl = font_md.render(f"Realm Vassals ({total_all_vassals} Lords)", True, COLOR_GOLD)
-            screen.blit(header_lbl, (25, 302))
+            header_lbl = font_md.render("Realm Feudal Vassals", True, COLOR_GOLD)
+            screen.blit(header_lbl, (25, 300))
+
+            # Vassal Limit Badge (CK2 Style)
+            limit_col = COLOR_TEXT_RED if is_over_limit else COLOR_TEXT_GREEN
+            limit_txt = f"Direct: {direct_vassal_count}/{vassal_limit}"
+            if is_over_limit: limit_txt += f" (-{limit_penalty}%)"
+            lim_lbl = font_xs.render(limit_txt, True, limit_col)
+            screen.blit(lim_lbl, (content_x + content_w - lim_lbl.get_width() - 4, 304))
 
             per_page = 5
             max_pages = max(1, (total_provs + per_page - 1) // per_page)
@@ -509,16 +660,18 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 p_info = PROVINCES.get(pid, {})
                 p_name = p_info.get("name", pid).split()[0]
 
-                # Calculate total landed vassals and province levy contribution
-                landed_cnt = 0
+                direct_v = next((v for v in prov_v_list if v.get("is_direct_vassal", True)), None)
+                dv_name = direct_v["name"] if direct_v else "Unassigned Lord"
+                dv_subs = len(direct_v.get("sub_vassals", [])) if direct_v else 0
+                # Calculate province total levy & tax paid
                 total_levy = 0
-                for v in prov_v_list:
-                    st = get_vassal_landed_status(state, v, pid)
-                    if st["is_landed"]:
-                        landed_cnt += 1
-                        total_levy += st["levy_contribution"]
+                total_tax = 0.0
+                if direct_v:
+                    st = get_vassal_landed_status(state, direct_v, pid)
+                    total_levy = st["levy_contribution"]
+                    total_tax = st["tax_paid"]
 
-                p_card = pygame.Rect(content_x, vy, content_w, 50)
+                p_card = pygame.Rect(content_x, vy, content_w, 54)
                 is_p_hov = p_card.collidepoint(mouse_pos)
                 is_active_prov = (state.selected_province == pid)
 
@@ -529,19 +682,30 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 pygame.draw.rect(screen, border_c, p_card, 1, border_radius=4)
 
                 screen.blit(font_sm.render(f"◆ {p_name}", True, COLOR_GOLD), (34, vy + 4))
-                desc_str = f"{len(prov_v_list)} Vassals • {landed_cnt} Landed • Fyrd: +{total_levy}"
-                screen.blit(font_xs.render(desc_str, True, (210, 230, 255)), (34, vy + 26))
+                p_name_w = font_sm.size(f"◆ {p_name}")[0]
+                pw, dv_col = draw_feudal_pill(screen, font_xs, direct_v.get("rank", "count") if direct_v else "count", 34 + p_name_w + 10, vy + 4)
+                
+                dv_parts = dv_name.split(maxsplit=1)
+                dv_name_disp = dv_parts[1] if len(dv_parts) > 1 else dv_name
+                if len(dv_name_disp) > 16: dv_name_disp = dv_name_disp[:14] + ".."
+                screen.blit(font_xs.render(dv_name_disp, True, COLOR_TEXT_WHITE), (34 + p_name_w + 10 + pw + 6, vy + 5))
+
+                fief_seat = direct_v.get("city_name") if direct_v else "Fortress"
+                if len(fief_seat) > 24: fief_seat = fief_seat[:22] + ".."
+                desc_str = f"Seat: {fief_seat} • 👥 {dv_subs} Barons • Fyrd: +{total_levy} • Tax: +{fmt_gold(total_tax)}g/m"
+                screen.blit(font_xs.render(desc_str, True, (210, 230, 255)), (34, vy + 28))
 
                 arr_lbl = font_xs.render("View ›", True, COLOR_GOLD if is_p_hov else (160, 200, 240))
                 screen.blit(arr_lbl, (content_x + content_w - arr_lbl.get_width() - 8, vy + 16))
 
                 if mouse_clicked and is_p_hov:
                     state.vassal_selected_province = pid
+                    state.vassal_inspecting_liege_id = None
                     state.vassal_page = 0
                     state.selected_province = pid
-                    state.logs.append(f"Viewing vassal roster of {p_name}.")
+                    state.logs.append(f"Viewing feudal administration of {p_name}.")
 
-                vy += 54
+                vy += 58
 
             if not vassal_provinces:
                 screen.blit(font_sm.render("No provinces under realm rule.", True, COLOR_TEXT_MUTED), (25, 350))
@@ -591,6 +755,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
 
             if mouse_clicked and is_back_hov:
                 state.vassal_selected_province = None
+                state.vassal_inspecting_liege_id = None
                 state.vassal_page = 0
 
             per_page = 5
@@ -602,22 +767,52 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
 
             vy = 328
             for v_data in cur_page_vassals:
-                v_card = pygame.Rect(content_x, vy, content_w, 52)
+                is_direct = v_data.get("is_direct_vassal", True)
+                card_h = 58 if is_direct else 52
+                v_card = pygame.Rect(content_x, vy, content_w, card_h)
                 is_vc_hov = v_card.collidepoint(mouse_pos)
+
+                # Direct Vassals Drill-down Button (Only on Direct Vassal card!)
+                is_sub_hov = False
+                sub_btn = None
+                if is_direct:
+                    n_subs = len(v_data.get("sub_vassals", []))
+                    sub_btn = pygame.Rect(content_x + content_w - 180, vy + 4, 106, 20)
+                    is_sub_hov = sub_btn.collidepoint(mouse_pos)
 
                 # Quick Gift Gold Button on each card: [ +50g 🎁 ]
                 gift_btn = pygame.Rect(content_x + content_w - 68, vy + 4, 62, 20)
                 is_g_hov = gift_btn.collidepoint(mouse_pos)
                 can_gift = (state.player["gold"] >= 50)
 
-                pygame.draw.rect(screen, (50, 60, 78) if is_vc_hov else (34, 40, 52), v_card, border_radius=4)
-                pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
+                # Card styling (Direct Vassal has richer golden tint)
+                if is_direct:
+                    c_bg = (54, 58, 76) if is_vc_hov else (38, 44, 58)
+                    c_bd = COLOR_GOLD if is_vc_hov else (140, 180, 230)
+                else:
+                    c_bg = (48, 56, 72) if is_vc_hov else (34, 40, 52)
+                    c_bd = (140, 180, 220) if is_vc_hov else COLOR_PANEL_BORDER
 
-                # Vassal Name (truncate if long to leave space for gift button)
-                v_name_disp = v_data["name"]
-                if len(v_name_disp) > 17:
-                    v_name_disp = v_name_disp[:15] + ".."
-                screen.blit(font_xs.render(f"♟ {v_name_disp}", True, COLOR_GOLD), (32, vy + 4))
+                pygame.draw.rect(screen, c_bg, v_card, border_radius=4)
+                pygame.draw.rect(screen, c_bd, v_card, 1, border_radius=4)
+
+                # Vassal Name & Feudal Rank Pill
+                pw, rk_col = draw_feudal_pill(screen, font_xs, v_data.get("rank", "count" if is_direct else "baron"), 32, vy + 4)
+                v_parts = v_data["name"].split(maxsplit=1)
+                v_name_disp = v_parts[1] if len(v_parts) > 1 else v_data["name"]
+                max_chars = 18 if is_direct else 24
+                if len(v_name_disp) > max_chars:
+                    v_name_disp = v_name_disp[:max_chars - 2] + ".."
+                screen.blit(font_xs.render(v_name_disp, True, COLOR_TEXT_WHITE), (32 + pw + 6, vy + 5))
+
+                # Render Direct Vassals Button for Count
+                if is_direct and sub_btn:
+                    s_bg = (45, 75, 110) if is_sub_hov else (30, 50, 75)
+                    s_bd = (120, 190, 255) if is_sub_hov else (80, 130, 180)
+                    pygame.draw.rect(screen, s_bg, sub_btn, border_radius=3)
+                    pygame.draw.rect(screen, s_bd, sub_btn, 1, border_radius=3)
+                    s_lbl = font_xs.render(f"👥 Vassals ({n_subs}) ›", True, COLOR_TEXT_WHITE if is_sub_hov else (200, 230, 255))
+                    screen.blit(s_lbl, (sub_btn.x + (sub_btn.w - s_lbl.get_width()) // 2, sub_btn.y + 2))
 
                 # Draw Gift Button
                 g_bg = (30, 70, 40) if (is_g_hov and can_gift) else ((20, 50, 30) if can_gift else (40, 42, 48))
@@ -628,20 +823,25 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 screen.blit(g_lbl, (gift_btn.x + (gift_btn.w - g_lbl.get_width()) // 2, gift_btn.y + 2))
 
                 st = get_vassal_landed_status(state, v_data, sel_pid)
-                if st["is_landed"]:
-                    h_name = v_data.get("city_name") or (st["held_fiefs"][0].get("name") if st.get("held_fiefs") else None) or (st["held_settlements"][0].get("name") if st.get("held_settlements") else None) or "Landed Noble"
-                else:
-                    h_name = "Landless Noble (Unlanded)"
-                if len(h_name) > 28:
-                    h_name = h_name[:26] + ".."
-                screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 19))
+                f_seat = v_data.get("city_name") or "Landed Holding"
+                if len(f_seat) > 28: f_seat = f_seat[:26] + ".."
 
-                levy_txt = f"+{st['levy_contribution']}" if st["is_landed"] else "0"
-                tax_txt = f"+{fmt_gold(st['tax_paid'])}g/m" if st["is_landed"] else "0g/m"
-                screen.blit(font_xs.render(f"Gold: {fmt_gold(v_data['gold'])}g  •  Levy: {levy_txt}  •  Tax: {tax_txt}", True, COLOR_TEXT_MUTED), (32, vy + 34))
+                if is_direct:
+                    tile_cnt = len(v_data.get("tiles", []))
+                    screen.blit(font_xs.render(f"Fief: {f_seat} ({tile_cnt} Tiles • Province Liege)", True, (220, 235, 255)), (32, vy + 21))
+                    screen.blit(font_xs.render(f"Gold: {fmt_gold(v_data['gold'])}g • Tax to King: +{fmt_gold(st['tax_paid'])}g/m • Sub-Tax: +{fmt_gold(st.get('sub_tax_collected', 0))}g", True, COLOR_TEXT_MUTED), (32, vy + 38))
+                else:
+                    c_liege = next((cv for cv in prov_vassals if cv.get("is_direct_vassal", True)), None)
+                    l_short = c_liege["name"].split()[1] if c_liege else "Count"
+                    screen.blit(font_xs.render(f"Fief: {f_seat} (Subordinate to {l_short})", True, (200, 215, 235)), (32, vy + 19))
+                    screen.blit(font_xs.render(f"Gold: {fmt_gold(v_data['gold'])}g • Levy: +{st['levy_contribution']} • Tax to {l_short}: +{fmt_gold(st['tax_paid'])}g/m", True, COLOR_TEXT_MUTED), (32, vy + 34))
 
                 if mouse_clicked:
-                    if is_g_hov:
+                    if is_direct and is_sub_hov:
+                        state.vassal_inspecting_liege_id = v_data["id"]
+                        state.vassal_page = 0
+                        state.logs.append(f"Inspecting direct vassals of {v_data['name']}.")
+                    elif is_g_hov:
                         if can_gift:
                             state.player["gold"] = round(state.player["gold"] - 50, 1)
                             v_data["gold"] = round(v_data.get("gold", 0) + 50, 1)
@@ -655,7 +855,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                             state.selected_settlement = v_data["tiles"][0]
                         state.logs.append(f"Opened royal dossier for vassal {v_data['name']}.")
 
-                vy += 56
+                vy += (card_h + 4)
 
             if not prov_vassals:
                 screen.blit(font_sm.render(f"No vassals currently in {p_name}.", True, COLOR_TEXT_MUTED), (25, 350))

@@ -157,22 +157,66 @@ def get_vassal_landed_status(state, v_dict, prov_id=None):
         gross = 0
         total_garrison = len(held_tiles) * 20
 
-    if gross > 0 and tax_rate > 0:
-        tax_paid = round(gross * (tax_rate / 100.0), 1)
-        tax_paid = min(tax_paid, float(gross))
+    # Sub-Vassal Tax & Levy Aggregation for Direct Vassals (Counts / Dukes)
+    sub_vassal_ids = v_dict.get("sub_vassals", [])
+    sub_tax_collected = 0.0
+    sub_levy_collected = 0
+    sub_vassals_list = []
+
+    if sub_vassal_ids:
+        target_p = prov_id or v_dict.get("province")
+        prov_vassals = state.vassals.get(target_p, []) if target_p else []
+        for sv_id in sub_vassal_ids:
+            sv = next((v for v in prov_vassals if v.get("id") == sv_id), None)
+            if not sv:
+                for plist in state.vassals.values():
+                    sv = next((v for v in plist if v.get("id") == sv_id), None)
+                    if sv: break
+            if sv:
+                sv_tiles = sv.get("tiles", [])
+                sv_gross = 0
+                sv_garr = 0
+                for t in sv_tiles:
+                    s_data = state.settlements.get(t)
+                    if s_data:
+                        stype = s_data.get("type", "city")
+                        spec = BUILDING_SPECS.get(stype, {})
+                        sv_gross += spec.get("income", 0)
+                        sv_garr += spec.get("garrison", 100)
+                sv_tr = max(0, min(90, sv.get("tax_rate", 10)))
+                sv_lr = max(0, min(90, sv.get("levy_rate", 20)))
+                sv_tax_paid = round(sv_gross * (sv_tr / 100.0), 1)
+                sv_levy_contrib = int(round(sv_garr * (sv_lr / 100.0)))
+                sub_tax_collected += sv_tax_paid
+                sub_levy_collected += sv_levy_contrib
+                sub_vassals_list.append(sv)
+
+    total_gross = round(gross + sub_tax_collected, 1)
+    total_garrison = total_garrison + sub_levy_collected
+
+    if total_gross > 0 and tax_rate > 0:
+        tax_paid = round(total_gross * (tax_rate / 100.0), 1)
+        tax_paid = min(tax_paid, float(total_gross))
     else:
         tax_paid = 0.0
-    net_savings = round(gross - tax_paid, 1)
+    net_savings = round(total_gross - tax_paid, 1)
 
     levy_contribution = max(0, int(round(total_garrison * (levy_rate / 100.0))))
     household_guard = max(0, total_garrison - levy_contribution)
 
     return {
         "is_landed": True,
+        "is_direct_vassal": v_dict.get("is_direct_vassal", True),
+        "rank": v_dict.get("rank", "count"),
         "held_fiefs": held_fiefs,
         "held_settlements": held_settlements,
         "total_tiles": len(held_tiles),
-        "gross_income": gross,
+        "own_gross_income": gross,
+        "gross_income": total_gross,
+        "sub_vassals_count": len(sub_vassal_ids),
+        "sub_tax_collected": sub_tax_collected,
+        "sub_levy_collected": sub_levy_collected,
+        "sub_vassals_list": sub_vassals_list,
         "tax_rate": tax_rate,
         "tax_paid": tax_paid,
         "net_savings": net_savings,
@@ -315,20 +359,36 @@ def get_realm_finances(state, char_id=None):
 
     vassal_tithes = []
     total_vassal_tax = 0
+    direct_vassal_count = 0
     for pid, prov in PROVINCES.items():
         if prov["owner"] == char_id:
             for v in state.vassals.get(pid, []):
-                st = get_vassal_landed_status(state, v, pid)
-                if st["is_landed"] and st["tax_paid"] > 0:
-                    total_vassal_tax += st["tax_paid"]
-                    vassal_tithes.append({
-                        "name": v["name"],
-                        "pid": pid,
-                        "prov": PROVINCES[pid]["name"].split()[0],
-                        "tax_rate": st["tax_rate"],
-                        "tax_paid": st["tax_paid"],
-                        "gross": st["gross_income"]
-                    })
+                # Only direct vassals pay tax directly to Top Liege (King/char_id)
+                if v.get("is_direct_vassal", True) or v.get("liege_id") == char_id:
+                    direct_vassal_count += 1
+                    st = get_vassal_landed_status(state, v, pid)
+                    if st["is_landed"] and st["tax_paid"] > 0:
+                        total_vassal_tax += st["tax_paid"]
+                        vassal_tithes.append({
+                            "name": v["name"],
+                            "rank": v.get("rank", "count"),
+                            "pid": pid,
+                            "prov": PROVINCES[pid]["name"].split()[0],
+                            "tax_rate": st["tax_rate"],
+                            "tax_paid": st["tax_paid"],
+                            "gross": st["gross_income"],
+                            "sub_tax_collected": st.get("sub_tax_collected", 0.0),
+                            "sub_vassals_count": st.get("sub_vassals_count", 0)
+                        })
+
+    # Vassal Limit Penalty: -10% direct vassal tax efficiency per excess vassal
+    vassal_limit = getattr(state, "vassal_limit", 5)
+    vassal_limit_penalty_pct = 0
+    if direct_vassal_count > vassal_limit:
+        excess = direct_vassal_count - vassal_limit
+        vassal_limit_penalty_pct = min(100, excess * 10)
+        efficiency = (100 - vassal_limit_penalty_pct) / 100.0
+        total_vassal_tax = round(total_vassal_tax * efficiency, 1)
 
     crown_holdings = []
     total_crown_income = 0
@@ -439,6 +499,9 @@ def get_realm_finances(state, char_id=None):
         "barrack_expenses": barrack_expenses,
         "total_tribute": total_tribute,
         "tribute_expenses": tribute_expenses,
+        "direct_vassal_count": direct_vassal_count,
+        "vassal_limit": vassal_limit,
+        "vassal_limit_penalty_pct": vassal_limit_penalty_pct,
         "total_expense": total_expense,
         "net_monthly": net_monthly
     }
