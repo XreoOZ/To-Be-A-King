@@ -790,6 +790,127 @@ def get_all_settlement_holdings(state):
         })
     return holdings
 
+def get_realm_finances(state, char_id=None):
+    """
+    Returns complete itemized breakdown of realm finances:
+    - Provincial Tax Income (Tolls, tariffs & customs per province)
+    - Feudal Vassal Tithes (Taxes levied under Realm Laws 0-90%)
+    - Crown Demesne Direct Revenue (King's royal seats)
+    - Army Field Upkeep (1g per 500 soldiers in the field)
+    - Military Facilities Upkeep (Barracks & garrison drillmasters)
+    - Net monthly cash flow & Treasury balance
+    """
+    if char_id is None:
+        char_id = state.player_id
+    r_char = CHARACTERS.get(char_id, {})
+
+    # 1. Provincial Land Tax & Customs
+    prov_incomes = []
+    total_prov_tax = 0
+    for pid, prov in PROVINCES.items():
+        if prov["owner"] == char_id:
+            ptax = prov.get("tax", 0)
+            total_prov_tax += ptax
+            prov_incomes.append({
+                "pid": pid,
+                "name": prov["name"].split()[0],
+                "tax": ptax
+            })
+
+    # 2. Feudal Vassal Tithes (Taxes collected under Realm Laws)
+    vassal_tithes = []
+    total_vassal_tax = 0
+    for pid, prov in PROVINCES.items():
+        if prov["owner"] == char_id:
+            for v in state.vassals.get(pid, []):
+                st = get_vassal_landed_status(state, v, pid)
+                if st["is_landed"] and st["tax_paid"] > 0:
+                    total_vassal_tax += st["tax_paid"]
+                    vassal_tithes.append({
+                        "name": v["name"],
+                        "pid": pid,
+                        "prov": PROVINCES[pid]["name"].split()[0],
+                        "tax_rate": st["tax_rate"],
+                        "tax_paid": st["tax_paid"],
+                        "gross": st["gross_income"]
+                    })
+
+    # 3. Direct Crown Demesne Revenue (Direct modular holdings)
+    crown_holdings = []
+    total_crown_income = 0
+    for h in get_all_settlement_holdings(state):
+        sdata = h["data"]
+        pid = h["province"]
+        if PROVINCES.get(pid, {}).get("owner") == char_id and sdata.get("is_crown_demesne"):
+            htype = sdata.get("type", "city")
+            if htype == "fort":
+                val = 1
+            elif htype == "barrack":
+                val = 0
+            else:
+                val = 3
+            total_crown_income += val
+            clean_name = h["name"].replace("Royal Citadel of ", "").replace("Royal Castle of ", "").replace("Royal Borough of ", "")
+            crown_holdings.append({
+                "name": clean_name,
+                "prov": PROVINCES[pid]["name"].split()[0],
+                "type": htype.capitalize(),
+                "val": val
+            })
+
+    total_income = total_prov_tax + total_vassal_tax + total_crown_income
+
+    # 4. Army Field Upkeep (1 gold per 500 soldiers in the field)
+    army_expenses = []
+    total_army_upkeep = 0
+    for a in state.armies:
+        if a.owner == char_id:
+            cost = max(1, a.troops // 500) if a.troops >= 500 else 1
+            total_army_upkeep += cost
+            army_expenses.append({
+                "name": a.name,
+                "troops": a.troops,
+                "cost": cost,
+                "status": "Mustering" if a.is_mustering else ("In Battle" if a.in_battle else "Mobilized")
+            })
+
+    # 5. Barracks & Garrison Maintenance
+    barrack_expenses = []
+    total_facility_upkeep = 0
+    for coord, sdata in state.settlements.items():
+        if sdata.get("is_crown_demesne") and sdata.get("type") == "barrack":
+            pid = sdata.get("province")
+            if PROVINCES.get(pid, {}).get("owner") == char_id:
+                lvl = sdata.get("level", 0)
+                cost = 1 + lvl
+                total_facility_upkeep += cost
+                barrack_expenses.append({
+                    "name": sdata.get("name", "Royal Barracks"),
+                    "prov": PROVINCES[pid]["name"].split()[0],
+                    "lvl": lvl,
+                    "cost": cost
+                })
+
+    total_expense = total_army_upkeep + total_facility_upkeep
+    net_monthly = total_income - total_expense
+
+    return {
+        "treasury": r_char.get("gold", 0),
+        "total_prov_tax": total_prov_tax,
+        "prov_incomes": prov_incomes,
+        "total_vassal_tax": total_vassal_tax,
+        "vassal_tithes": vassal_tithes,
+        "total_crown_income": total_crown_income,
+        "crown_holdings": crown_holdings,
+        "total_income": total_income,
+        "total_army_upkeep": total_army_upkeep,
+        "army_expenses": army_expenses,
+        "total_facility_upkeep": total_facility_upkeep,
+        "barrack_expenses": barrack_expenses,
+        "total_expense": total_expense,
+        "net_monthly": net_monthly
+    }
+
 def get_siegeable_holdings(state, province_id, army_owner):
     prov = PROVINCES.get(province_id)
     if not prov:
@@ -880,6 +1001,8 @@ class GameState:
         self.fief_page = 0
         self.laws_page = 0
         self.laws_subtab = "tax"         # "tax" or "levy" sub-tab in Realm Laws
+        self.economy_subtab = "income"   # "income" or "expense" sub-tab in Royal Finances
+        self.economy_vassal_page = 0     # Pagination for vassal tithes breakdown
         
         # Camera & Map Viewport Zoom / Pan State
         self.zoom = 0.85                 # default initial zoom factor (0.85 frames whole Britain, 1.0 = standard, up to 2.4 = zoomed in)
@@ -1941,6 +2064,11 @@ def run_game():
                         state.laws_page = max(0, state.laws_page - 1)
                     elif event.y < 0:
                         state.laws_page += 1
+                elif l_panel_rect.collidepoint(mouse_pos) and state.left_tab == "economy":
+                    if event.y > 0:
+                        state.economy_vassal_page = max(0, state.economy_vassal_page - 1)
+                    elif event.y < 0:
+                        state.economy_vassal_page += 1
                 elif map_viewport.collidepoint(mouse_pos):
                     old_zoom = state.zoom
                     zoom_delta = 0.12 * event.y
@@ -2272,27 +2400,30 @@ def run_game():
                     state.disband_army(a)
 
         # ---------------------------------------------------------
-        # Left Panel Sub-Tabs: [ ⚔ Active Armies ]  [ 👥 Realm Vassals ]
-        #                      [ 👑 Demesne ]       [ ⚖ Realm Laws ]
+        # Left Panel Sub-Tabs: [ ⚔ Armies ]  [ 👥 Vassals ]  [ 👑 Demesne ]
+        #                      [ ⚖ Realm Laws ]     [ 💰 In/Expense ]
         # ---------------------------------------------------------
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 233), (285, 233), 1)
-        tab_y = 238
-        tab_armies = pygame.Rect(25, tab_y, 127, 25)
-        tab_vassals = pygame.Rect(158, tab_y, 127, 25)
-        tab_demesne = pygame.Rect(25, tab_y + 29, 127, 25)
-        tab_laws = pygame.Rect(158, tab_y + 29, 127, 25)
+        tab_y = 236
+        tab_armies = pygame.Rect(25, tab_y, 84, 25)
+        tab_vassals = pygame.Rect(113, tab_y, 84, 25)
+        tab_demesne = pygame.Rect(201, tab_y, 84, 25)
+        tab_laws = pygame.Rect(25, tab_y + 29, 127, 25)
+        tab_economy = pygame.Rect(156, tab_y + 29, 129, 25)
         
         is_hov_ta = tab_armies.collidepoint(mouse_pos)
         is_hov_tv = tab_vassals.collidepoint(mouse_pos)
         is_hov_td = tab_demesne.collidepoint(mouse_pos)
         is_hov_tl = tab_laws.collidepoint(mouse_pos)
+        is_hov_te = tab_economy.collidepoint(mouse_pos)
         
         is_a_active = (state.left_tab == "armies")
         is_v_active = (state.left_tab == "vassals")
         is_d_active = (state.left_tab == "demesne")
         is_l_active = (state.left_tab == "laws")
+        is_e_active = (state.left_tab == "economy")
         
-        # Row 1 Tabs
+        # Row 1 Tabs: Armies, Vassals, Demesne
         pygame.draw.rect(screen, COLOR_BUTTON_ACTIVE if is_a_active else (COLOR_BUTTON_HOVER if is_hov_ta else COLOR_BUTTON_NORMAL), tab_armies, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_a_active else COLOR_PANEL_BORDER, tab_armies, 1, border_radius=4)
         lbl_a = font_xs.render("⚔ ARMIES", True, COLOR_TEXT_WHITE if not is_a_active else COLOR_GOLD)
@@ -2303,11 +2434,9 @@ def run_game():
         lbl_v = font_xs.render("👥 VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD)
         screen.blit(lbl_v, (tab_vassals.x + (tab_vassals.w - lbl_v.get_width()) // 2, tab_y + 5))
 
-        # Row 2 Tabs: Crown Demesne & Realm Laws
+        # Crown Demesne Tab Items Calculation
         player_crown_items = []
         covered_holding_tiles = set()
-
-        # 1. Crown Fiefs (Formal sub-divisions held directly by the Crown)
         for f in state.fiefs.values():
             if (f.get("vassal_id") is None and
                 PROVINCES.get(f.get("province"), {}).get("owner") == state.player_id and
@@ -2324,7 +2453,6 @@ def run_game():
                 for t in f.get("tiles", []):
                     covered_holding_tiles.add(t)
 
-        # 2. Direct Crown City Holdings (Holdings not part of any fief, e.g. dissolved fiefs)
         for h in get_all_settlement_holdings(state):
             sdata = h["data"]
             pid = h["province"]
@@ -2348,13 +2476,20 @@ def run_game():
         pygame.draw.rect(screen, (60, 48, 20) if is_d_active else (COLOR_BUTTON_HOVER if is_hov_td else (35, 40, 52)), tab_demesne, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_d_active else (90, 140, 210), tab_demesne, 1, border_radius=4)
         d_lbl = font_xs.render(d_title, True, COLOR_GOLD if is_d_active else (210, 230, 255))
-        screen.blit(d_lbl, (tab_demesne.x + (tab_demesne.w - d_lbl.get_width()) // 2, tab_y + 34))
+        screen.blit(d_lbl, (tab_demesne.x + (tab_demesne.w - d_lbl.get_width()) // 2, tab_y + 5))
 
+        # Row 2 Tabs: Laws & Income/Expense
         l_title = "⚖ LAWS"
         pygame.draw.rect(screen, (60, 48, 20) if is_l_active else (COLOR_BUTTON_HOVER if is_hov_tl else (35, 40, 52)), tab_laws, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_l_active else (90, 140, 210), tab_laws, 1, border_radius=4)
         l_lbl = font_xs.render(l_title, True, COLOR_GOLD if is_l_active else (210, 230, 255))
         screen.blit(l_lbl, (tab_laws.x + (tab_laws.w - l_lbl.get_width()) // 2, tab_y + 34))
+
+        e_title = "💰 IN/EXPENSE"
+        pygame.draw.rect(screen, (60, 48, 20) if is_e_active else (COLOR_BUTTON_HOVER if is_hov_te else (35, 40, 52)), tab_economy, border_radius=4)
+        pygame.draw.rect(screen, COLOR_GOLD if is_e_active else (90, 140, 210), tab_economy, 1, border_radius=4)
+        e_lbl = font_xs.render(e_title, True, COLOR_GOLD if is_e_active else (210, 230, 255))
+        screen.blit(e_lbl, (tab_economy.x + (tab_economy.w - e_lbl.get_width()) // 2, tab_y + 34))
 
         if mouse_clicked and is_hov_ta:
             state.left_tab = "armies"
@@ -2370,6 +2505,9 @@ def run_game():
                 state.demesne_page = 0
         elif mouse_clicked and is_hov_tl:
             state.left_tab = "laws"
+        elif mouse_clicked and is_hov_te:
+            state.left_tab = "economy"
+            state.economy_vassal_page = 0
 
         if state.left_tab == "armies":
             # Active Saxon Armies Roster
@@ -2916,6 +3054,206 @@ def run_game():
                 state.laws_page -= 1
             elif mouse_clicked and is_next_hov and state.laws_page < max_pages - 1:
                 state.laws_page += 1
+
+        elif state.left_tab == "economy":
+            # Royal Financial Ledger & Budget View (Income & Expenses Breakdown)
+            fin = get_realm_finances(state, state.player_id)
+
+            # 1. Summary Treasury Card (y = 298 to 364)
+            sum_card = pygame.Rect(25, 298, 260, 66)
+            pygame.draw.rect(screen, (34, 42, 56), sum_card, border_radius=6)
+            pygame.draw.rect(screen, COLOR_GOLD, sum_card, 1, border_radius=6)
+
+            screen.blit(font_md.render("💰 Royal Treasury Ledger", True, COLOR_GOLD), (34, 303))
+            screen.blit(font_xs.render(f"Treasury: {fin['treasury']:,} Gold", True, COLOR_GOLD), (34, 323))
+
+            net_col = COLOR_TEXT_GREEN if fin['net_monthly'] >= 0 else COLOR_TEXT_RED
+            net_sign = "+" if fin['net_monthly'] >= 0 else ""
+            net_lbl = font_xs.render(f"Net: {net_sign}{fin['net_monthly']}g/m", True, net_col)
+            screen.blit(net_lbl, (275 - net_lbl.get_width(), 323))
+
+            screen.blit(font_xs.render(f"Income: +{fin['total_income']}g/m", True, (160, 225, 180)), (34, 342))
+            exp_lbl = font_xs.render(f"Expense: -{fin['total_expense']}g/m", True, (255, 140, 140))
+            screen.blit(exp_lbl, (275 - exp_lbl.get_width(), 342))
+
+            # 2. Sub-tab navigation: [ 📈 INCOME (+XXg) ] and [ 📉 EXPENSES (-XXg) ]
+            if not hasattr(state, "economy_subtab") or state.economy_subtab not in ("income", "expense"):
+                state.economy_subtab = "income"
+
+            tab_inc = pygame.Rect(25, 370, 128, 24)
+            tab_exp = pygame.Rect(157, 370, 128, 24)
+
+            is_inc_active = (state.economy_subtab == "income")
+            is_exp_active = (state.economy_subtab == "expense")
+
+            is_hov_inc = tab_inc.collidepoint(mouse_pos)
+            is_hov_exp = tab_exp.collidepoint(mouse_pos)
+
+            pygame.draw.rect(screen, (40, 70, 50) if is_inc_active else ((45, 52, 65) if is_hov_inc else (32, 38, 48)), tab_inc, border_radius=4)
+            pygame.draw.rect(screen, COLOR_TEXT_GREEN if is_inc_active else COLOR_PANEL_BORDER, tab_inc, 1, border_radius=4)
+            lbl_inc_txt = font_xs.render(f"📈 INCOME (+{fin['total_income']}g)", True, COLOR_TEXT_GREEN if is_inc_active else (200, 220, 240))
+            screen.blit(lbl_inc_txt, (tab_inc.x + (tab_inc.w - lbl_inc_txt.get_width()) // 2, 374))
+
+            pygame.draw.rect(screen, (75, 40, 40) if is_exp_active else ((45, 52, 65) if is_hov_exp else (32, 38, 48)), tab_exp, border_radius=4)
+            pygame.draw.rect(screen, COLOR_TEXT_RED if is_exp_active else COLOR_PANEL_BORDER, tab_exp, 1, border_radius=4)
+            lbl_exp_txt = font_xs.render(f"📉 EXPENSES (-{fin['total_expense']}g)", True, COLOR_TEXT_RED if is_exp_active else (200, 220, 240))
+            screen.blit(lbl_exp_txt, (tab_exp.x + (tab_exp.w - lbl_exp_txt.get_width()) // 2, 374))
+
+            if mouse_clicked and is_hov_inc and not is_inc_active:
+                state.economy_subtab = "income"
+                state.economy_vassal_page = 0
+            elif mouse_clicked and is_hov_exp and not is_exp_active:
+                state.economy_subtab = "expense"
+                state.economy_vassal_page = 0
+
+            if is_inc_active:
+                # -------------------------------------------------------------
+                # INCOME BREAKDOWN
+                # -------------------------------------------------------------
+                # 1. Provincial Land Tax & Customs Card (y = 400, h = 92)
+                card_p = pygame.Rect(25, 400, 260, 92)
+                pygame.draw.rect(screen, (32, 38, 50), card_p, border_radius=5)
+                pygame.draw.rect(screen, (80, 110, 150), card_p, 1, border_radius=5)
+
+                screen.blit(font_xs.render("🏛 Provincial Tax Income", True, COLOR_GOLD), (32, 404))
+                p_tot_lbl = font_xs.render(f"+{fin['total_prov_tax']}g/m", True, COLOR_TEXT_GREEN)
+                screen.blit(p_tot_lbl, (275 - p_tot_lbl.get_width(), 404))
+
+                screen.blit(font_xs.render("Tolls & trade customs from royal provinces:", True, COLOR_TEXT_MUTED), (32, 420))
+
+                # Show up to 6 provinces in 2 rows of 3
+                r1_provs = fin['prov_incomes'][:3]
+                r2_provs = fin['prov_incomes'][3:6]
+
+                r1_str = " • ".join([f"{p['name']}: +{p['tax']}g" for p in r1_provs])
+                screen.blit(font_xs.render(r1_str, True, (190, 225, 255)), (32, 440))
+
+                if r2_provs:
+                    r2_str = " • ".join([f"{p['name']}: +{p['tax']}g" for p in r2_provs])
+                    screen.blit(font_xs.render(r2_str, True, (190, 225, 255)), (32, 458))
+                else:
+                    screen.blit(font_xs.render("• Expand realm to collect more tolls", True, COLOR_TEXT_MUTED), (32, 458))
+
+                screen.blit(font_xs.render("Tip: Upgrade towns to increase province wealth", True, (150, 180, 210)), (32, 474))
+
+                # 2. Feudal Vassal Tithes Card (y = 498, h = 118)
+                card_v = pygame.Rect(25, 498, 260, 118)
+                pygame.draw.rect(screen, (32, 38, 50), card_v, border_radius=5)
+                pygame.draw.rect(screen, (80, 110, 150), card_v, 1, border_radius=5)
+
+                screen.blit(font_xs.render("👑 Feudal Vassal Tithes", True, COLOR_GOLD), (32, 502))
+                v_tot_lbl = font_xs.render(f"+{fin['total_vassal_tax']}g/m", True, COLOR_TEXT_GREEN)
+                screen.blit(v_tot_lbl, (275 - v_tot_lbl.get_width(), 502))
+
+                screen.blit(font_xs.render("Taxes levied from vassals under Realm Laws:", True, COLOR_TEXT_MUTED), (32, 518))
+
+                # Vassals pagination (< 1/X >)
+                v_tithes = fin['vassal_tithes']
+                per_v_page = 3
+                max_v_pages = max(1, (len(v_tithes) + per_v_page - 1) // per_v_page)
+                state.economy_vassal_page = max(0, min(getattr(state, "economy_vassal_page", 0), max_v_pages - 1))
+
+                btn_vp_prev = pygame.Rect(216, 501, 16, 16)
+                btn_vp_next = pygame.Rect(256, 501, 16, 16)
+                is_vpp_hov = btn_vp_prev.collidepoint(mouse_pos)
+                is_vpn_hov = btn_vp_next.collidepoint(mouse_pos)
+
+                screen.blit(font_xs.render("<", True, COLOR_TEXT_WHITE if state.economy_vassal_page > 0 else (70, 75, 85)), (220, 502))
+                v_pg_lbl = font_xs.render(f"{state.economy_vassal_page + 1}/{max_v_pages}", True, COLOR_TEXT_MUTED)
+                screen.blit(v_pg_lbl, (244 - v_pg_lbl.get_width() // 2, 502))
+                screen.blit(font_xs.render(">", True, COLOR_TEXT_WHITE if state.economy_vassal_page < max_v_pages - 1 else (70, 75, 85)), (260, 502))
+
+                if mouse_clicked and is_vpp_hov and state.economy_vassal_page > 0:
+                    state.economy_vassal_page -= 1
+                elif mouse_clicked and is_vpn_hov and state.economy_vassal_page < max_v_pages - 1:
+                    state.economy_vassal_page += 1
+
+                cur_v_slice = v_tithes[state.economy_vassal_page * per_v_page : (state.economy_vassal_page + 1) * per_v_page]
+                vy_item = 536
+                if cur_v_slice:
+                    for v_item in cur_v_slice:
+                        v_short = v_item['name'].split()[1] if len(v_item['name'].split()) > 1 else v_item['name']
+                        screen.blit(font_xs.render(f"• {v_short[:10]} ({v_item['prov']}):", True, (210, 220, 235)), (34, vy_item))
+                        screen.blit(font_xs.render(f"{v_item['tax_rate']}% -> +{v_item['tax_paid']}g/m", True, COLOR_TEXT_GREEN), (170, vy_item))
+                        vy_item += 18
+                else:
+                    screen.blit(font_xs.render("• No landed vassals paying tithes yet", True, COLOR_TEXT_MUTED), (34, 545))
+
+                screen.blit(font_xs.render("Adjust individual rates under [ ⚖ LAWS ] tab", True, COLOR_GOLD), (34, 596))
+
+                # 3. Direct Crown Demesne Revenue Card (y = 622, h = 54)
+                card_c = pygame.Rect(25, 622, 260, 54)
+                pygame.draw.rect(screen, (32, 38, 50), card_c, border_radius=5)
+                pygame.draw.rect(screen, (80, 110, 150), card_c, 1, border_radius=5)
+
+                screen.blit(font_xs.render("🏰 Crown Demesne Rents", True, COLOR_GOLD), (32, 626))
+                c_tot_lbl = font_xs.render(f"+{fin['total_crown_income']}g/m", True, COLOR_TEXT_GREEN)
+                screen.blit(c_tot_lbl, (275 - c_tot_lbl.get_width(), 626))
+
+                screen.blit(font_xs.render("Direct rents from King Alfred's royal seats:", True, COLOR_TEXT_MUTED), (32, 642))
+                c_sample = fin['crown_holdings'][:2]
+                if c_sample:
+                    c_str = " • ".join([f"{c['name'][:10]}: +{c['val']}g" for c in c_sample])
+                    screen.blit(font_xs.render(f"• {c_str}", True, (160, 225, 180)), (32, 658))
+                else:
+                    screen.blit(font_xs.render("• Winchester: +3g  • Wilton: +3g", True, (160, 225, 180)), (32, 658))
+
+            else:
+                # -------------------------------------------------------------
+                # EXPENSES BREAKDOWN
+                # -------------------------------------------------------------
+                # 1. Army Field Mobilization Upkeep Card (y = 400, h = 112)
+                card_a = pygame.Rect(25, 400, 260, 112)
+                pygame.draw.rect(screen, (42, 34, 38), card_a, border_radius=5)
+                pygame.draw.rect(screen, (150, 80, 80), card_a, 1, border_radius=5)
+
+                screen.blit(font_xs.render("⚔ Army Field Upkeep", True, COLOR_GOLD), (32, 404))
+                a_tot_lbl = font_xs.render(f"-{fin['total_army_upkeep']}g/m", True, COLOR_TEXT_RED)
+                screen.blit(a_tot_lbl, (275 - a_tot_lbl.get_width(), 404))
+
+                screen.blit(font_xs.render("Fyrd rations & supplies (1g per 500 soldiers):", True, COLOR_TEXT_MUTED), (32, 420))
+
+                ay_item = 440
+                if fin['army_expenses']:
+                    for a_exp in fin['army_expenses'][:3]:
+                        screen.blit(font_xs.render(f"• {a_exp['name'][:18]} ({a_exp['troops']:,}m):", True, (230, 215, 215)), (34, ay_item))
+                        screen.blit(font_xs.render(f"-{a_exp['cost']}g/m", True, COLOR_TEXT_RED), (220, ay_item))
+                        ay_item += 18
+                else:
+                    screen.blit(font_xs.render("• All levies garrisoned at home", True, (200, 230, 200)), (34, 444))
+                    screen.blit(font_xs.render("  (0 active field armies = 0g upkeep)", True, COLOR_TEXT_MUTED), (34, 462))
+
+                # 2. Military Facilities & Barracks Upkeep Card (y = 518, h = 82)
+                card_b = pygame.Rect(25, 518, 260, 82)
+                pygame.draw.rect(screen, (42, 34, 38), card_b, border_radius=5)
+                pygame.draw.rect(screen, (150, 80, 80), card_b, 1, border_radius=5)
+
+                screen.blit(font_xs.render("🛡 Forts & Barracks Maintenance", True, COLOR_GOLD), (32, 522))
+                b_tot_lbl = font_xs.render(f"-{fin['total_facility_upkeep']}g/m", True, COLOR_TEXT_RED)
+                screen.blit(b_tot_lbl, (275 - b_tot_lbl.get_width(), 522))
+
+                screen.blit(font_xs.render("Drillmasters & garrison maintenance (1+Lv gold):", True, COLOR_TEXT_MUTED), (32, 538))
+
+                if fin['barrack_expenses']:
+                    by_item = 558
+                    for b_exp in fin['barrack_expenses'][:2]:
+                        screen.blit(font_xs.render(f"• {b_exp['name']} ({b_exp['prov']}):", True, (230, 215, 215)), (34, by_item))
+                        screen.blit(font_xs.render(f"-{b_exp['cost']}g/m", True, COLOR_TEXT_RED), (225, by_item))
+                        by_item += 18
+                else:
+                    screen.blit(font_xs.render("• Standard wooden palisades (0g additional upkeep)", True, COLOR_TEXT_MUTED), (34, 558))
+
+                # 3. Monthly Financial Statement Card (y = 606, h = 70)
+                card_s = pygame.Rect(25, 606, 260, 70)
+                pygame.draw.rect(screen, (32, 40, 52), card_s, border_radius=5)
+                pygame.draw.rect(screen, COLOR_GOLD, card_s, 1, border_radius=5)
+
+                screen.blit(font_xs.render("⚖ Monthly Financial Bottom Line", True, COLOR_GOLD), (32, 610))
+                screen.blit(font_xs.render(f"Gross Inflow: +{fin['total_income']}g / month", True, (160, 225, 180)), (34, 626))
+                screen.blit(font_xs.render(f"Gross Outflow: -{fin['total_expense']}g / month", True, (255, 140, 140)), (34, 642))
+
+                net_st_lbl = font_xs.render(f"Net Cash Flow: {net_sign}{fin['net_monthly']}g / month", True, net_col)
+                screen.blit(net_st_lbl, (34, 658))
 
         # ---------------------------------------------------------
         # 3. CENTER: TERRITORY BALANCE & MAP
@@ -5087,17 +5425,19 @@ def run_game():
 
             screen.blit(font_sm.render(f"Treasury: {r_char.get('gold', 0):,} Gold", True, COLOR_GOLD), (pop_x + 40, col_y + 40))
             screen.blit(font_xs.render(f"• Prestige: {r_char.get('prestige', 0)}  •  Piety/Devotion: {r_char.get('piety', 0)}", True, (150, 200, 255)), (pop_x + 40, col_y + 66))
-            screen.blit(font_xs.render(f"• Provincial Tax Income: +{total_prov_tax}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 88))
-            screen.blit(font_xs.render(f"• Feudal Vassal Tithes: +{total_vassal_tax}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 110))
-            screen.blit(font_xs.render(f"• Crown Demesne Holdings: {crown_holdings_count} Direct Seats", True, COLOR_TEXT_WHITE), (pop_x + 40, col_y + 132))
-            screen.blit(font_xs.render(f"• Total Controlled Lands: {len(r_provs)} of 12 Provinces", True, COLOR_GOLD), (pop_x + 40, col_y + 154))
+            screen.blit(font_xs.render(f"• Provincial Tax Income: +{total_prov_tax}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 86))
+            screen.blit(font_xs.render(f"  (Direct tolls & tariffs from {len(r_provs)} provinces)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 100))
+            screen.blit(font_xs.render(f"• Feudal Vassal Tithes: +{total_vassal_tax}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 116))
+            screen.blit(font_xs.render(f"  (Taxes levied from {len(r_vassals)} lords via Tax Laws)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 130))
+            screen.blit(font_xs.render(f"• Crown Demesne Holdings: {crown_holdings_count} Direct Seats", True, COLOR_TEXT_WHITE), (pop_x + 40, col_y + 148))
+            screen.blit(font_xs.render(f"• Total Controlled Lands: {len(r_provs)} of 12 Provinces", True, COLOR_GOLD), (pop_x + 40, col_y + 166))
             
             p_list_str = ", ".join(r_prov_names[:6]) + ("..." if len(r_prov_names) > 6 else "")
-            screen.blit(font_xs.render(f"  ({p_list_str})", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 174))
+            screen.blit(font_xs.render(f"  ({p_list_str})", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 182))
 
             stance_str = "⚔ AT WAR (Invading Britain)" if is_ruler_enemy else "🛡 AT WAR (Defending England)"
             stance_col = (255, 100, 100) if is_ruler_enemy else COLOR_GOLD
-            screen.blit(font_xs.render(f"• Feudal Stance: {stance_str}", True, stance_col), (pop_x + 40, col_y + 202))
+            screen.blit(font_xs.render(f"• Feudal Stance: {stance_str}", True, stance_col), (pop_x + 40, col_y + 204))
 
             # RIGHT COLUMN: MILITARY MIGHT & VASSAL LORDS
             right_rect = pygame.Rect(pop_x + 350, col_y, col_w, 235)
