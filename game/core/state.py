@@ -245,6 +245,47 @@ class GameState:
         self.logs.append(f"Ducal Investiture: {target_v['name']} elevated to High Duke!")
         return True
 
+    def demote_and_assign_vassal(self, vassal_id, new_liege_id):
+        """
+        Demotes a Count/Duke to Baron, and assigns their liege:
+        - If new_liege_id == self.player_id: directly under the King as Crown Baron (does NOT count towards vassal limit).
+        - If new_liege_id == count_id: transferred under that Count as a provincial Baron.
+        """
+        all_vassals = [v for plist in self.vassals.values() for v in plist]
+        target_v = next((v for v in all_vassals if v.get("id") == vassal_id), None)
+        if not target_v:
+            return False
+
+        # Remove from any previous liege's sub_vassals
+        for v in all_vassals:
+            if vassal_id in v.get("sub_vassals", []):
+                v["sub_vassals"].remove(vassal_id)
+
+        target_v["rank"] = "baron"
+        target_v["title"] = "Baron"
+        if target_v["name"].startswith("Count "):
+            target_v["name"] = target_v["name"].replace("Count ", "Baron ")
+        elif target_v["name"].startswith("Duke "):
+            target_v["name"] = target_v["name"].replace("Duke ", "Baron ")
+        elif target_v["name"].startswith("Thane "):
+            target_v["name"] = target_v["name"].replace("Thane ", "Hearth-Warden ")
+        elif target_v["name"].startswith("Warden "):
+            target_v["name"] = target_v["name"].replace("Warden ", "Elder ")
+
+        if new_liege_id == self.player_id:
+            target_v["liege_id"] = self.player_id
+            target_v["is_direct_vassal"] = False
+            self.logs.append(f"Royal Decree: {target_v['name']} demoted to Direct Crown Baron under King Alden! (No vassal limit consumed)")
+        else:
+            new_liege = next((v for v in all_vassals if v.get("id") == new_liege_id), None)
+            if new_liege:
+                target_v["liege_id"] = new_liege["id"]
+                target_v["is_direct_vassal"] = False
+                if target_v["id"] not in new_liege.setdefault("sub_vassals", []):
+                    new_liege["sub_vassals"].append(target_v["id"])
+                self.logs.append(f"Feudal Charter: {target_v['name']} demoted to Baron and transferred under {new_liege['name']}!")
+        return True
+
     def demote_to_baron(self, vassal_id):
         """
         Demotes a Count/Duke directly to Baron. They remain direct vassals of the realm,
