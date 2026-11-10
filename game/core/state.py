@@ -661,13 +661,14 @@ class GameState:
             if prov["owner"] == self.player_id:
                 candidate_pids.append(pid)
             elif getattr(self, "player_liege", None) is not None:
-                # As a vassal, can mobilize levies from personal ancestral demesne
+                # As a vassal, only mobilize levies from the player's own ancestral demesne (Wessex), never the AI's (Jorvik)!
                 has_demesne = any(
-                    s.get("province") == pid and s.get("is_crown_demesne") and not s.get("vassal_id")
+                    s.get("province") == pid and (s.get("owner") == self.player_id or s.get("lord") == f"{self.player['name']} (Crown Demesne)")
                     for s in self.settlements.values()
                 )
                 if has_demesne or pid == self.player_capital:
-                    candidate_pids.append(pid)
+                    if pid != self.enemy_primary_capital:
+                        candidate_pids.append(pid)
 
         for pid in candidate_pids:
             prov = PROVINCES[pid]
@@ -1268,14 +1269,15 @@ class GameState:
         self.player["piety"] += 1
         self.enemy["prestige"] += 1
 
-        # Feudal Suzerainty & Vassalage Tributes
+        # Feudal Suzerainty & Vassalage Tributes (Strictly 20% of Gross Domain Income)
         if getattr(self, "player_liege", None) == self.enemy_id:
-            # Player is vassal to Halfdan: pays 20% feudal tribute
-            w_tax = PROVINCES.get("wessex", {}).get("tax", 4)
-            trib = round(max(1.0, w_tax * 0.20 + 1.5), 1)
+            from game.systems.economy import get_realm_finances
+            fin = get_realm_finances(self, self.player_id)
+            trib = round(fin["total_income"] * 0.20, 1)
             self.player["gold"] = max(0.0, round(self.player["gold"] - trib, 1))
             self.enemy["gold"] = round(self.enemy.get("gold", 100) + trib, 1)
-            self.logs.append(f"Paid -{trib}g feudal tribute to Liege High King Halfdan.")
+            liege_n = CHARACTERS.get(self.enemy_id, {}).get("name", "High King").split()[0]
+            self.logs.append(f"Paid -{trib}g feudal tribute (20% suzerainty tax on +{fin['total_income']}g domain inflow) to Liege {liege_n}.")
         elif getattr(self, "enemy_liege", None) == self.player_id:
             # Halfdan is vassal to Player: pays 20% feudal tribute
             j_tax = PROVINCES.get("jorvik", {}).get("tax", 4)
@@ -1833,6 +1835,7 @@ def setup_province_starter_cities(target_state):
                         "type": h_type,
                         "name": h_spec["name"],
                         "lord": f"{r_spec['lord']} (Crown Demesne)",
+                        "owner": r_spec["owner"],
                         "vassal_id": None,
                         "is_crown_demesne": True,
                         "is_crown_fief": True,
@@ -1846,6 +1849,7 @@ def setup_province_starter_cities(target_state):
                     "tiles": list(allocated),
                     "name": h_spec["fief"],
                     "holder": r_spec["lord"],
+                    "owner": r_spec["owner"],
                     "vassal_id": None,
                     "is_crown_demesne": True
                 }

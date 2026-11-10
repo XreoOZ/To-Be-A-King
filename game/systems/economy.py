@@ -337,11 +337,16 @@ def get_realm_finances(state, char_id=None):
         pid = h["province"]
         prov_owner = PROVINCES.get(pid, {}).get("owner")
         is_my_crown = False
-        if prov_owner == char_id and sdata.get("is_crown_demesne"):
+        # Holding belongs to char_id if explicitly owned or held by char_id
+        if sdata.get("owner") == char_id and sdata.get("is_crown_demesne"):
             is_my_crown = True
-        elif char_id == state.player_id and sdata.get("is_crown_demesne") and not sdata.get("vassal_id"):
-            occ = sdata.get("occupied_by")
-            if not occ or not state.are_hostile(occ, char_id):
+        elif char_id == state.player_id and sdata.get("lord") == f"{state.player['name']} (Crown Demesne)":
+            is_my_crown = True
+        elif prov_owner == char_id and sdata.get("is_crown_demesne") and not sdata.get("vassal_id"):
+            # Ensure AI's Jorvik holdings are never counted as player's
+            if char_id == state.player_id and pid == "jorvik":
+                is_my_crown = False
+            else:
                 is_my_crown = True
 
         if is_my_crown:
@@ -404,13 +409,16 @@ def get_realm_finances(state, char_id=None):
     tribute_expenses = []
     total_tribute = 0
     if char_id == state.player_id and getattr(state, "player_liege", None) == state.enemy_id:
-        w_tax = PROVINCES.get("wessex", {}).get("tax", 4)
-        trib = round(max(1.0, w_tax * 0.20 + 1.5), 1)
+        # Feudal Suzerainty Tax: strictly 20% of player's gross domain income
+        trib = round(total_income * 0.20, 1)
         total_tribute = trib
-        liege_n = CHARACTERS.get(state.enemy_id, {}).get("name", "Overlord").split()[0]
+        liege_n = CHARACTERS.get(state.enemy_id, {}).get("name", "High King").split()[0]
         tribute_expenses.append({
-            "name": f"Feudal Liege Tribute (To {liege_n})",
-            "cost": trib
+            "name": f"Feudal Liege Suzerainty Tax (20%)",
+            "liege": liege_n,
+            "rate": 20,
+            "cost": trib,
+            "base": total_income
         })
 
     total_expense = round(total_army_upkeep + total_facility_upkeep + total_tribute, 1)

@@ -134,9 +134,16 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
     covered_holding_tiles = set()
     for f in state.fiefs.values():
         prov_owner = PROVINCES.get(f.get("province"), {}).get("owner")
-        is_my_prov = (prov_owner == state.player_id)
-        is_my_holding = (f.get("holder") == state.player["name"] or f.get("is_crown_demesne"))
-        if f.get("vassal_id") is None and (is_my_prov or is_my_holding):
+        is_player_fief = (
+            f.get("owner") == state.player_id or
+            f.get("holder") == state.player["name"] or
+            (prov_owner == state.player_id and f.get("vassal_id") is None and f.get("holder") != state.enemy["name"])
+        )
+        # Prevent stealing AI Halfdan's Jorvik fiefs
+        if f.get("province") == "jorvik" and (f.get("holder") == state.enemy["name"] or f.get("owner") == state.enemy_id):
+            is_player_fief = False
+
+        if f.get("vassal_id") is None and is_player_fief:
             f["holder"] = state.player["name"]
             f["is_crown_demesne"] = True
             player_crown_items.append({
@@ -153,9 +160,16 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         sdata = h["data"]
         pid = h["province"]
         prov_owner = PROVINCES.get(pid, {}).get("owner")
-        is_my_prov = (prov_owner == state.player_id)
-        is_my_holding = (sdata.get("lord") == f"{state.player['name']} (Crown Demesne)" or sdata.get("is_crown_demesne"))
-        if (is_my_prov or is_my_holding) and sdata.get("vassal_id") is None:
+        is_player_holding = (
+            sdata.get("owner") == state.player_id or
+            sdata.get("lord") == f"{state.player['name']} (Crown Demesne)" or
+            (prov_owner == state.player_id and sdata.get("vassal_id") is None and sdata.get("lord") != f"{state.enemy['name']} (Crown Demesne)")
+        )
+        # Prevent stealing AI Halfdan's Jorvik holdings
+        if pid == "jorvik" and (sdata.get("lord") == f"{state.enemy['name']} (Crown Demesne)" or sdata.get("owner") == state.enemy_id):
+            is_player_holding = False
+
+        if is_player_holding and sdata.get("vassal_id") is None:
             sdata["lord"] = f"{state.player['name']} (Crown Demesne)"
             sdata["is_crown_demesne"] = True
             if not any(t in covered_holding_tiles for t in h["tiles"]):
@@ -1035,8 +1049,8 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 screen.blit(font_xs.render("• All levies garrisoned at home", True, (200, 230, 200)), (34, 444))
                 screen.blit(font_xs.render("  (0 active field armies = 0g upkeep)", True, COLOR_TEXT_MUTED), (34, 462))
     
-            # 2. Military Facilities & Barracks Upkeep Card (y = 518, h = 82)
-            card_b = pygame.Rect(content_x, 518, content_w, 82)
+            # 2. Military Facilities & Barracks Upkeep Card (y = 518, h = 64)
+            card_b = pygame.Rect(content_x, 518, content_w, 64)
             pygame.draw.rect(screen, (42, 34, 38), card_b, border_radius=5)
             pygame.draw.rect(screen, (150, 80, 80), card_b, 1, border_radius=5)
     
@@ -1045,33 +1059,44 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             screen.blit(b_tot_lbl, (275 - b_tot_lbl.get_width(), 522))
     
             screen.blit(font_xs.render("Drillmasters & garrison maintenance (1+Lv gold):", True, COLOR_TEXT_MUTED), (32, 538))
-    
-            by_item = 558
-            if fin.get('total_tribute', 0) > 0:
-                screen.blit(font_xs.render("• Suzerain Liege Tribute (20%):", True, (255, 190, 190)), (34, by_item))
-                screen.blit(font_xs.render(f"-{fin['total_tribute']}g/m", True, COLOR_TEXT_RED), (225, by_item))
-                by_item += 18
             if fin['barrack_expenses']:
+                by_item = 556
                 for b_exp in fin['barrack_expenses'][:2]:
-                    if by_item > 585:
-                        break
                     screen.blit(font_xs.render(f"• {b_exp['name']} ({b_exp['prov']}):", True, (230, 215, 215)), (34, by_item))
                     screen.blit(font_xs.render(f"-{b_exp['cost']}g/m", True, COLOR_TEXT_RED), (225, by_item))
-                    by_item += 18
-            elif fin.get('total_tribute', 0) <= 0:
-                screen.blit(font_xs.render("• Standard wooden palisades (0g additional upkeep)", True, COLOR_TEXT_MUTED), (34, 558))
-    
-            # 3. Monthly Financial Statement Card (y = 606, h = 70)
-            card_s = pygame.Rect(content_x, 606, content_w, 70)
+                    by_item += 16
+            else:
+                screen.blit(font_xs.render("• Standard wooden palisades (0g additional upkeep)", True, COLOR_TEXT_MUTED), (34, 556))
+
+            # 3. Feudal Liege Suzerainty Tax Card (Dedicated Card when vassalized)
+            has_tribute = (fin.get('total_tribute', 0) > 0)
+            if has_tribute:
+                card_t = pygame.Rect(content_x, 588, content_w, 64)
+                pygame.draw.rect(screen, (46, 32, 36), card_t, border_radius=5)
+                pygame.draw.rect(screen, (180, 75, 75), card_t, 1, border_radius=5)
+
+                screen.blit(font_xs.render("♚ Feudal Liege Suzerainty Tax (20%)", True, COLOR_GOLD), (32, 592))
+                t_tot_lbl = font_xs.render(f"-{fmt_gold(fin['total_tribute'])}g/m", True, COLOR_TEXT_RED)
+                screen.blit(t_tot_lbl, (275 - t_tot_lbl.get_width(), 592))
+
+                t_info = fin.get('tribute_expenses', [{}])[0]
+                liege_name = t_info.get('liege', 'Overlord')
+                screen.blit(font_xs.render(f"Mandatory tribute paid to Suzerain {liege_name}:", True, COLOR_TEXT_MUTED), (32, 608))
+                screen.blit(font_xs.render(f"• 20% feudal tax on gross domain (+{fmt_gold(fin['total_income'])}g) -> -{fmt_gold(fin['total_tribute'])}g/m", True, (255, 190, 190)), (34, 626))
+
+            # 4. Monthly Financial Statement Card
+            cs_y = 658 if has_tribute else 590
+            cs_h = 58 if has_tribute else 70
+            card_s = pygame.Rect(content_x, cs_y, content_w, cs_h)
             pygame.draw.rect(screen, (32, 40, 52), card_s, border_radius=5)
             pygame.draw.rect(screen, COLOR_GOLD, card_s, 1, border_radius=5)
     
-            screen.blit(font_xs.render("⚖ Monthly Financial Bottom Line", True, COLOR_GOLD), (32, 610))
-            screen.blit(font_xs.render(f"Gross Inflow: +{fmt_gold(fin['total_income'])}g / month", True, (160, 225, 180)), (34, 626))
-            screen.blit(font_xs.render(f"Gross Outflow: -{fmt_gold(fin['total_expense'])}g / month", True, (255, 140, 140)), (34, 642))
-    
-            net_st_lbl = font_xs.render(f"Net Cash Flow: {net_sign}{fmt_gold(abs(fin['net_monthly']))}g / month", True, net_col)
-            screen.blit(net_st_lbl, (34, 658))
+            screen.blit(font_xs.render("⚖ Monthly Financial Bottom Line", True, COLOR_GOLD), (32, cs_y + 4))
+            screen.blit(font_xs.render(f"Gross Inflow: +{fmt_gold(fin['total_income'])}g / month", True, (160, 225, 180)), (34, cs_y + 20))
+            screen.blit(font_xs.render(f"Gross Outflow: -{fmt_gold(fin['total_expense'])}g / month", True, (255, 140, 140)), (34, cs_y + 36))
+            if not has_tribute:
+                net_st_lbl = font_xs.render(f"Net Cash Flow: {net_sign}{fmt_gold(abs(fin['net_monthly']))}g / month", True, net_col)
+                screen.blit(net_st_lbl, (34, cs_y + 52))
 
     elif state.left_tab == "diplomacy":
         # -------------------------------------------------------------
