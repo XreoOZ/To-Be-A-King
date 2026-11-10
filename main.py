@@ -65,6 +65,7 @@ maximize_window()
 # Palette
 # Added constant for travel days per tile
 DAYS_PER_TILE = 5  # Number of in‑game days it takes to traverse one province
+DAYS_PER_KOTAK = 1.0  # Number of in-game days it takes to traverse one tile (kotak)
 
 COLOR_BG = (20, 24, 32)
 COLOR_PANEL_BG = (30, 35, 46)
@@ -355,6 +356,98 @@ SUB_FLAG_OFFSETS = [
 ]
 
 # -------------------------------------------------------------
+# Grid & Land Tile Connectivity Graph
+# -------------------------------------------------------------
+RAW_GRID = MAP_DATA["raw_grid"]
+
+CELL_TO_PROV = {}
+PROV_TO_TILES = {}
+
+for r, row in enumerate(RAW_GRID):
+    for c, ch in enumerate(row):
+        if ch == ".":
+            continue
+        prov_id = None
+        if ch == "H": prov_id = "highlands"
+        elif ch == "S": prov_id = "strathclyde"
+        elif ch in ("T", "L"): prov_id = "lothian"
+        elif ch == "B": prov_id = "bernicia"
+        elif ch == "D": prov_id = "deira"
+        elif ch == "Y": prov_id = "jorvik"
+        elif ch == "M": prov_id = "mercia"
+        elif ch == "E": prov_id = "east_anglia"
+        elif ch == "W":
+            prov_id = "wales" if r <= 17 else "wessex"
+        elif ch == "K": prov_id = "kent_essex"
+        elif ch == "C": prov_id = "cornwall"
+        else: prov_id = "wessex"
+        CELL_TO_PROV[(c, r)] = prov_id
+        PROV_TO_TILES.setdefault(prov_id, []).append((c, r))
+
+# Precompute Capital / Centroid Tile for each of the 12 provinces
+PROV_CAPITAL_TILES = {
+    "bernicia": (14, 9),
+    "cornwall": (6, 20),
+    "deira": (16, 11),
+    "east_anglia": (17, 16),
+    "highlands": (9, 3),
+    "jorvik": (14, 11),
+    "kent_essex": (14, 19),
+    "lothian": (12, 7),
+    "mercia": (14, 15),
+    "strathclyde": (8, 7),
+    "wales": (9, 15),
+    "wessex": (11, 20),
+}
+
+def get_province_capital_tile(pid):
+    return PROV_CAPITAL_TILES.get(pid, (11, 20))
+
+# Build Seamless 8-Way Tile Adjacency with Historical Water Strait Crossings
+TILE_ADJACENCY = {t: set() for t in CELL_TO_PROV}
+for (c, r) in CELL_TO_PROV:
+    for dc in (-1, 0, 1):
+        for dr in (-1, 0, 1):
+            if dc == 0 and dr == 0:
+                continue
+            nt = (c + dc, r + dr)
+            if nt in CELL_TO_PROV:
+                TILE_ADJACENCY[(c, r)].add(nt)
+
+# Bridges / Fords across narrow straits (Tamar for Cornwall, Severn for Wales)
+for t1 in CELL_TO_PROV:
+    p1 = CELL_TO_PROV[t1]
+    for t2 in CELL_TO_PROV:
+        p2 = CELL_TO_PROV[t2]
+        if p1 != p2:
+            d = max(abs(t1[0] - t2[0]), abs(t1[1] - t2[1]))
+            if d <= 2 and (
+                (p1 == "cornwall" and p2 == "wessex") or (p1 == "wessex" and p2 == "cornwall") or
+                (p1 == "wales" and p2 in ("mercia", "wessex")) or (p1 in ("mercia", "wessex") and p2 == "wales")
+            ):
+                TILE_ADJACENCY[t1].add(t2)
+                TILE_ADJACENCY[t2].add(t1)
+
+def find_shortest_tile_path(start_tile, goal_tile):
+    if start_tile == goal_tile:
+        return [start_tile]
+    if start_tile not in TILE_ADJACENCY or goal_tile not in TILE_ADJACENCY:
+        return None
+    queue = deque([[start_tile]])
+    visited = {start_tile}
+    while queue:
+        path = queue.popleft()
+        node = path[-1]
+        neighbors = sorted(TILE_ADJACENCY[node], key=lambda t: (t[0]-goal_tile[0])**2 + (t[1]-goal_tile[1])**2)
+        for neighbor in neighbors:
+            if neighbor == goal_tile:
+                return path + [neighbor]
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append(path + [neighbor])
+    return None
+
+# -------------------------------------------------------------
 # Province Adjacency Graph for Movement & Pathfinding
 # -------------------------------------------------------------
 ADJACENCY = {
@@ -425,7 +518,7 @@ def find_shortest_path(start, goal):
 # Army Class
 # -------------------------------------------------------------
 class Army:
-    def __init__(self, army_id, owner_id, province_id, troops, name="Levy Host", flag_origin=None, rank=1):
+    def __init__(self, army_id, owner_id, province_id, troops, name="Levy Host", flag_origin=None, rank=1, tile=None):
         self.id = army_id
         self.owner = owner_id
         self.province = province_id
@@ -437,10 +530,11 @@ class Army:
         self.crown_troops = 0   # Regular / Crown Demesne troops (costs 1g per 100 soldiers)
         self.vassal_levies = troops  # Feudal Vassal Levies (FREE 0g/m under feudal duty)
         
-        # Movement & Path
-        self.path = []              # list of province_ids to march through
+        # Tile Grid coordinates
+        self.tile = tile or get_province_capital_tile(province_id)
+        self.tile_path = []         # list of (col, row) coordinates to march through
         self.move_progress = 0.0    # 0 to 100%
-        self.move_speed = 100.0 / DAYS_PER_TILE      # % per day (takes DAYS_PER_TILE days per province)
+        self.move_speed = 100.0 / DAYS_PER_KOTAK  # % per day (1 day per tile)
         
         # Combat & Siege
         self.is_sieging = False
@@ -462,11 +556,46 @@ class Army:
 
     @property
     def is_moving(self):
-        return len(self.path) > 0
+        return len(self.tile_path) > 0
+
+    @property
+    def next_tile(self):
+        return self.tile_path[0] if self.tile_path else None
 
     @property
     def next_province(self):
-        return self.path[0] if self.path else None
+        if not self.tile_path:
+            return None
+        return CELL_TO_PROV.get(self.tile_path[0], self.province)
+
+    @property
+    def path(self):
+        """Returns the remaining unique province IDs along the army's tile path."""
+        p_list = []
+        cur_p = self.province
+        for t in self.tile_path:
+            p = CELL_TO_PROV.get(t, cur_p)
+            if p != cur_p:
+                if not p_list or p_list[-1] != p:
+                    p_list.append(p)
+                cur_p = p
+        return p_list
+
+    @path.setter
+    def path(self, new_val):
+        if not new_val:
+            self.tile_path = []
+            return
+        if isinstance(new_val, list) and new_val and isinstance(new_val[0], tuple):
+            self.tile_path = list(new_val)
+        elif isinstance(new_val, list) and new_val and isinstance(new_val[0], str):
+            target_prov = new_val[-1]
+            target_tile = get_province_capital_tile(target_prov)
+            route = find_shortest_tile_path(self.tile, target_tile)
+            if route and len(route) > 1:
+                self.tile_path = route[1:]
+            else:
+                self.tile_path = []
 
 # -------------------------------------------------------------
 # Modular Building System Specifications & Balancing
@@ -1337,21 +1466,18 @@ class GameState:
             self.logs.append("No active armies to rally! Raise levies first.")
             return
 
+        target_tile = get_province_capital_tile(target_province_id)
         rallied = 0
         for a in player_armies:
-            if a.province != target_province_id and not a.in_battle and not a.is_mustering and not a.courier_en_route:
-                path = find_shortest_path(a.province, target_province_id)
-                if path and len(path) > 1:
-                    a.path = path[1:]
-                    a.move_progress = 0.0
-                    a.is_sieging = False
-                    rallied += 1
+            if getattr(a, "tile", None) != target_tile and not a.in_battle and not a.is_mustering and not a.courier_en_route:
+                self.order_army_march_to_tile(a, target_tile)
+                rallied += 1
         
         target_name = PROVINCES[target_province_id]["name"]
-        self.logs.append(f"Rally orders issued! {len(player_armies)} hosts marching to {target_name}.")
+        self.logs.append(f"Rally orders issued! {len(player_armies)} hosts marching to {target_name} ({target_tile}).")
 
-    def merge_armies_in_province(self, province_id, owner_id):
-        armies_here = [a for a in self.armies if a.province == province_id and a.owner == owner_id and not a.is_moving and not a.is_demobilizing and not a.is_mustering and not a.courier_en_route]
+    def merge_armies_on_tile(self, tile, owner_id):
+        armies_here = [a for a in self.armies if getattr(a, "tile", None) == tile and a.owner == owner_id and not a.is_moving and not a.is_demobilizing and not a.is_mustering and not a.courier_en_route]
         if len(armies_here) <= 1:
             return
 
@@ -1364,7 +1490,9 @@ class GameState:
         dominant_army.troops = total_troops
         dominant_army.crown_troops = total_crown
         dominant_army.vassal_levies = total_vassal
-        dominant_army.name = f"Royal Host of {PROVINCES[province_id]['name'].split()[0]}"
+        prov_id = dominant_army.province
+        prov_name = PROVINCES.get(prov_id, {}).get("name", "Realm").split()[0]
+        dominant_army.name = f"Royal Host of {prov_name}"
         
         # Collect all contingent flags from every joining host (no truncation)
         all_origins = []
@@ -1379,9 +1507,20 @@ class GameState:
         for a in armies_here[1:]:
             if a.id == self.selected_army_id:
                 self.selected_army_id = dominant_army.id
-            self.armies.remove(a)
+            if a.id in self.selected_army_ids:
+                self.selected_army_ids.remove(a.id)
+                if dominant_army.id not in self.selected_army_ids:
+                    self.selected_army_ids.append(dominant_army.id)
+            if a in self.armies:
+                self.armies.remove(a)
             
-        self.logs.append(f"Combined {len(armies_here)} hosts under the banner of {dominant_army.name} ({total_troops:,} men)!")
+        self.logs.append(f"Combined {len(armies_here)} hosts on tile {tile} under banner of {dominant_army.name} ({total_troops:,} men)!")
+
+    def merge_armies_in_province(self, province_id, owner_id):
+        prov_tiles = set(getattr(a, "tile", None) for a in self.armies if a.province == province_id and a.owner == owner_id)
+        for t in prov_tiles:
+            if t is not None:
+                self.merge_armies_on_tile(t, owner_id)
 
     def disband_army(self, army):
         if not army:
@@ -1417,7 +1556,7 @@ class GameState:
                 new_id = f"army_{self.army_id_counter}"
                 self.army_id_counter += 1
                 p_short = PROVINCES[sf]["name"].split()[0]
-                sf_host = Army(new_id, army.owner, army.province, share, f"{p_short} Fyrd", flag_origin=sf)
+                sf_host = Army(new_id, army.owner, army.province, share, f"{p_short} Fyrd", flag_origin=sf, tile=army.tile)
                 self.armies.append(sf_host)
                 contingents_to_disband.append(sf_host)
                 
@@ -1427,8 +1566,9 @@ class GameState:
         contingents_to_disband.append(army)
 
         for host in contingents_to_disband:
-            if host.province == host.flag_origin:
-                # Already at home province: instant disband
+            home_cap_tile = get_province_capital_tile(host.flag_origin)
+            if host.province == host.flag_origin and getattr(host, "tile", None) == home_cap_tile:
+                # Already at home province & capital: instant disband
                 prov = PROVINCES.get(host.flag_origin)
                 if prov:
                     prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + host.troops)
@@ -1442,15 +1582,20 @@ class GameState:
                 host.is_demobilizing = True
                 host.is_sieging = False
                 host.is_mustering = False
-                path = find_shortest_path(host.province, host.flag_origin)
-                if path and len(path) > 1:
-                    host.path = path[1:]
+                tile_route = find_shortest_tile_path(host.tile, home_cap_tile)
+                if tile_route and len(tile_route) > 1:
+                    host.tile_path = tile_route[1:]
                     host.move_progress = 0.0
                     self.logs.append(f"{host.name} demobilizing! ({host.troops:,} men marching home to {PROVINCES[host.flag_origin]['name']}...)")
                 else:
-                    self.logs.append(f"Demobilizing order: {host.name} seeking route home to {PROVINCES[host.flag_origin]['name']}.")
+                    prov = PROVINCES.get(host.flag_origin)
+                    if prov:
+                        prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + host.troops)
+                    self.logs.append(f"{host.name} demobilized into garrison of {PROVINCES[host.flag_origin]['name']}.")
+                    if host in self.armies:
+                        self.armies.remove(host)
 
-    def order_army_march(self, army, target_province_id):
+    def order_army_march_to_tile(self, army, target_tile):
         if not army:
             return
         if army.in_battle:
@@ -1465,18 +1610,23 @@ class GameState:
         if army.is_demobilizing:
             army.is_demobilizing = False
             self.logs.append(f"March order issued! {army.name} cancelled demobilization and returned to war.")
-        if army.province == target_province_id:
+        if getattr(army, "tile", None) == target_tile:
             return
         
-        path = find_shortest_path(army.province, target_province_id)
+        path = find_shortest_tile_path(army.tile, target_tile)
         if path and len(path) > 1:
-            army.path = path[1:] # steps to traverse
+            army.tile_path = path[1:] # steps to traverse
             army.move_progress = 0.0
             army.is_sieging = False
-            t_name = PROVINCES[target_province_id]["name"]
-            self.logs.append(f"{army.name} is marching towards {t_name}...")
+            t_prov = CELL_TO_PROV.get(target_tile, army.province)
+            t_name = PROVINCES.get(t_prov, {}).get("name", "the realm")
+            self.logs.append(f"{army.name} marching to tile {target_tile} in {t_name}...")
         else:
-            self.logs.append(f"No valid march route from {army.province} to {target_province_id}!")
+            self.logs.append(f"No valid march route from {army.tile} to {target_tile}!")
+
+    def order_army_march(self, army, target_province_id):
+        target_tile = get_province_capital_tile(target_province_id)
+        self.order_army_march_to_tile(army, target_tile)
 
     # ---------------------------------------------------------
     # Game Loop Ticks
@@ -1680,9 +1830,9 @@ class GameState:
         self.logs.append(f"AD {self.year}: War rages across the lands of Britain.")
 
     def update_armies(self):
-        # Sanity check: Clear in_battle flag for any army that has no enemy in its province
+        # Sanity check: Clear in_battle flag for any army that has no enemy on its tile
         for a in self.armies:
-            opponents = [o for o in self.armies if o.province == a.province and o.owner != a.owner]
+            opponents = [o for o in self.armies if getattr(o, "tile", None) == getattr(a, "tile", None) and o.owner != a.owner]
             if not opponents:
                 a.in_battle = False
 
@@ -1690,34 +1840,35 @@ class GameState:
         for a in list(self.armies):
             if a.in_battle:
                 # Armies locked in battle cannot move or show path arrows
-                if a.path:
-                    a.path = []
+                if a.tile_path:
+                    a.tile_path = []
                     a.move_progress = 0.0
                 continue
 
             if a.is_moving:
                 a.move_progress += a.move_speed
                 if a.move_progress >= 100.0:
-                    a.province = a.path.pop(0)
+                    a.tile = a.tile_path.pop(0)
+                    a.province = CELL_TO_PROV.get(a.tile, a.province)
                     a.move_progress = 0.0
 
-                    # INTERCEPTION CHECK: if enemy is in this province, stop and fight
+                    # INTERCEPTION CHECK: if enemy is on this tile, stop and fight
                     enemy_owner = self.enemy_id if a.owner == self.player_id else self.player_id
                     blockers = [e for e in self.armies
-                                if e.province == a.province and e.owner == enemy_owner]
+                                if getattr(e, "tile", None) == a.tile and e.owner == enemy_owner]
                     if blockers:
-                        a.path = []
+                        a.tile_path = []
                         a.move_progress = 0.0
                         if a.is_demobilizing:
                             a.is_demobilizing = False
                             self.logs.append(f"Ambush! {a.name} was attacked while returning home!")
                         for b in blockers:
-                            b.path = []
+                            b.tile_path = []
                             b.move_progress = 0.0
                             b.is_sieging = False
 
                     # If reached final destination with no blocker:
-                    elif not a.path:
+                    elif not a.is_moving:
                         if a.is_demobilizing and a.province == a.flag_origin:
                             prov = PROVINCES.get(a.flag_origin)
                             if prov:
@@ -1728,19 +1879,20 @@ class GameState:
                             if a in self.armies:
                                 self.armies.remove(a)
                         elif not a.is_demobilizing:
-                            self.merge_armies_in_province(a.province, a.owner)
+                            self.merge_armies_on_tile(a.tile, a.owner)
 
-        # 2. Check Battles (Opposing armies in same province)
-        for pid in list(PROVINCES.keys()):
-            self.merge_armies_in_province(pid, self.player_id)
-            self.merge_armies_in_province(pid, self.enemy_id)
+        # 2. Check Battles (Opposing armies on same tile)
+        all_army_tiles = set(getattr(a, "tile", None) for a in self.armies if getattr(a, "tile", None) is not None)
+        for tile in all_army_tiles:
+            self.merge_armies_on_tile(tile, self.player_id)
+            self.merge_armies_on_tile(tile, self.enemy_id)
 
-            armies_in_prov = [a for a in self.armies if a.province == pid]
-            p1_list = [a for a in armies_in_prov if a.owner == self.player_id]
-            p2_list = [a for a in armies_in_prov if a.owner == self.enemy_id]
+            armies_on_tile = [a for a in self.armies if getattr(a, "tile", None) == tile]
+            p1_list = [a for a in armies_on_tile if a.owner == self.player_id]
+            p2_list = [a for a in armies_on_tile if a.owner == self.enemy_id]
 
             if not (p1_list and p2_list):
-                for a in armies_in_prov:
+                for a in armies_on_tile:
                     a.in_battle = False
                 continue
 
@@ -1750,7 +1902,7 @@ class GameState:
             # Lock both hosts in combat and halt all marching, sieging, or demobilizing
             for a in p1_list + p2_list:
                 a.in_battle = True
-                a.path = []
+                a.tile_path = []
                 a.move_progress = 0.0
                 a.is_sieging = False
                 a.is_demobilizing = False
@@ -1773,21 +1925,22 @@ class GameState:
                 a2.crown_troops = min(getattr(a2, "crown_troops", 0), a2.troops)
                 a2.vassal_levies = a2.troops - a2.crown_troops
 
+            p_name = PROVINCES.get(a1.province, {}).get("name", "the realm")
             if a1.troops <= 0 and a2.troops <= 0:
-                self.logs.append(f"Both armies annihilated at {PROVINCES[pid]['name']}!")
+                self.logs.append(f"Both armies annihilated at tile {tile} in {p_name}!")
                 if a1 in self.armies: self.armies.remove(a1)
                 if a2 in self.armies: self.armies.remove(a2)
             elif a1.troops <= 0:
-                self.logs.append(f"Defeat! {a1.name} was wiped out at {PROVINCES[pid]['name']}!")
+                self.logs.append(f"Defeat! {a1.name} was wiped out at tile {tile} in {p_name}!")
                 if a1 in self.armies: self.armies.remove(a1)
                 a2.in_battle = False
-                a2.path = []
+                a2.tile_path = []
                 a2.move_progress = 0.0
             elif a2.troops <= 0:
-                self.logs.append(f"Glorious Victory! Destroyed the Viking host at {PROVINCES[pid]['name']}!")
+                self.logs.append(f"Glorious Victory! Destroyed the Viking host at tile {tile} in {p_name}!")
                 if a2 in self.armies: self.armies.remove(a2)
                 a1.in_battle = False
-                a1.path = []
+                a1.tile_path = []
                 a1.move_progress = 0.0
 
         # 3. Check Sieges (City-by-City Siege in Enemy or Contested Province)
@@ -1798,7 +1951,7 @@ class GameState:
                 continue
 
             prov = PROVINCES[a.province]
-            defenders = [enemy for enemy in self.armies if enemy.province == a.province and enemy.owner != a.owner]
+            defenders = [enemy for enemy in self.armies if getattr(enemy, "tile", None) == a.tile and enemy.owner != a.owner]
             if defenders:
                 a.is_sieging = False
                 continue
@@ -1965,6 +2118,8 @@ class GameState:
             # Standard rally: Jorvik capital
             safe_rally = "jorvik" if "jorvik" in danelaw_provs else danelaw_provs[0]
 
+        safe_rally_tile = get_province_capital_tile(safe_rally)
+
         # ---------------------------------------------------------
         # 5. RALLY & MARCH TO CONCENTRATE FORCES
         # ---------------------------------------------------------
@@ -1972,11 +2127,8 @@ class GameState:
         for a in active_viking_armies:
             if a.is_mustering or a.courier_en_route:
                 continue
-            if a.province != safe_rally and not a.is_moving:
-                path = find_shortest_path(a.province, safe_rally)
-                if path and len(path) > 1:
-                    a.path = path[1:]
-                    a.move_progress = 0.0
+            if getattr(a, "tile", None) != safe_rally_tile and not a.is_moving:
+                self.order_army_march_to_tile(a, safe_rally_tile)
 
         # Automatically merge ready Viking hosts in all Danelaw provinces
         for dp in danelaw_provs:
@@ -1993,12 +2145,11 @@ class GameState:
             # SITUATION 1: Invaders are inside Danelaw territory!
             if has_invasion:
                 target_inv_prov = list(invading_threats.keys())[0]
-                if main_host.province != target_inv_prov:
-                    path = find_shortest_path(main_host.province, target_inv_prov)
-                    if path and len(path) > 1:
-                        main_host.path = path[1:]
-                        main_host.move_progress = 0.0
-                        self.logs.append(f"⚔ Halfdan marches his Great Host ({main_host.troops:,} men) into {PROVINCES[target_inv_prov]['name']} to repel Saxon invaders!")
+                invading_army = invading_threats[target_inv_prov][0]
+                target_tile = getattr(invading_army, "tile", get_province_capital_tile(target_inv_prov))
+                if getattr(main_host, "tile", None) != target_tile:
+                    self.order_army_march_to_tile(main_host, target_tile)
+                    self.logs.append(f"⚔ Halfdan marches his Great Host ({main_host.troops:,} men) to tile {target_tile} in {PROVINCES[target_inv_prov]['name']} to repel Saxon invaders!")
 
             # SITUATION 2: Enemy armies massing along the border!
             elif has_border_threat:
@@ -2006,23 +2157,24 @@ class GameState:
                 opposing_armies = threatened_borders.get(target_border, [])
                 opp_troops = sum(oa.troops for oa in opposing_armies)
 
-                if main_host.province != target_border:
-                    # Advance to the border fortress to defend
-                    path = find_shortest_path(main_host.province, target_border)
-                    if path and len(path) > 1:
-                        main_host.path = path[1:]
-                        main_host.move_progress = 0.0
-                        self.logs.append(f"⚔ Halfdan advances his Great Host ({main_host.troops:,} men) to {PROVINCES[target_border]['name']} to block Saxon invasion!")
+                if opposing_armies:
+                    opp_tile = getattr(opposing_armies[0], "tile", get_province_capital_tile(opposing_armies[0].province))
+                    closest_border_tile = min(PROV_TO_TILES[target_border], key=lambda t: (t[0]-opp_tile[0])**2 + (t[1]-opp_tile[1])**2)
+                else:
+                    closest_border_tile = get_province_capital_tile(target_border)
+
+                if getattr(main_host, "tile", None) != closest_border_tile:
+                    # Advance to the border tile to defend
+                    self.order_army_march_to_tile(main_host, closest_border_tile)
+                    self.logs.append(f"⚔ Halfdan advances his Great Host ({main_host.troops:,} men) to border tile {closest_border_tile} in {PROVINCES[target_border]['name']} to block Saxon invasion!")
                 else:
                     # Main host is AT the border! Halfdan launches a FEROCIOUS RETALIATION (Serangan Balik)!
                     # He does not wait passively to be sieged. If he has capable warriors, he strikes!
                     if opposing_armies and main_host.troops >= 200 and (main_host.troops >= opp_troops * 0.50 or main_host.troops >= 600):
+                        target_enemy_tile = getattr(opposing_armies[0], "tile", get_province_capital_tile(opposing_armies[0].province))
                         target_enemy_prov = opposing_armies[0].province
-                        path = find_shortest_path(target_border, target_enemy_prov)
-                        if path and len(path) > 1:
-                            main_host.path = path[1:]
-                            main_host.move_progress = 0.0
-                            self.logs.append(f"⚔ RETALIATION! Halfdan sallies out from {PROVINCES[target_border]['name']} to counter-attack the Saxon army in {PROVINCES[target_enemy_prov]['name']}!")
+                        self.order_army_march_to_tile(main_host, target_enemy_tile)
+                        self.logs.append(f"⚔ RETALIATION! Halfdan sallies out from border to strike Saxon army at {target_enemy_tile} in {PROVINCES[target_enemy_prov]['name']}!")
 
             # SITUATION 3: Offensive Invasion into Saxon England!
             else:
@@ -2032,11 +2184,9 @@ class GameState:
                     if player_provs:
                         border_targets = [p for p in player_provs if any(p in ADJACENCY.get(dp, []) for dp in danelaw_provs)]
                         target = random.choice(border_targets) if border_targets else random.choice(player_provs)
-                        path = find_shortest_path(main_host.province, target)
-                        if path and len(path) > 1:
-                            main_host.path = path[1:]
-                            main_host.move_progress = 0.0
-                            self.logs.append(f"⚔ The Great Viking Army! Halfdan marches south into {PROVINCES[target]['name']} ({main_host.troops:,} warriors)!")
+                        target_tile = get_province_capital_tile(target)
+                        self.order_army_march_to_tile(main_host, target_tile)
+                        self.logs.append(f"⚔ The Great Viking Army! Halfdan marches south into {PROVINCES[target]['name']} ({main_host.troops:,} warriors)!")
 
 # -------------------------------------------------------------
 # Main Game Loop
@@ -2479,13 +2629,16 @@ def run_game():
                         state.selected_army_ids = []
                         for a in state.armies:
                             if a.owner == state.player_id:
-                                ax, ay = province_anchors.get(a.province, (0, 0))
-                                # Interpolate badge pos if moving
-                                if a.is_moving and a.next_province:
-                                    nxt = province_anchors.get(a.next_province, (ax, ay))
+                                tc, tr = getattr(a, "tile", get_province_capital_tile(a.province))
+                                ax = origin_x + (tc * curr_tile_w) + (curr_tile_w // 2)
+                                ay = origin_y + (tr * curr_tile_h) + (curr_tile_h // 2)
+                                if a.is_moving and getattr(a, "next_tile", None):
+                                    nc, nr = a.next_tile
+                                    nx = origin_x + (nc * curr_tile_w) + (curr_tile_w // 2)
+                                    ny = origin_y + (nr * curr_tile_h) + (curr_tile_h // 2)
                                     pct = a.move_progress / 100.0
-                                    ax = int(ax + (nxt[0] - ax) * pct)
-                                    ay = int(ay + (nxt[1] - ay) * pct)
+                                    ax = int(ax + (nx - ax) * pct)
+                                    ay = int(ay + (ny - ay) * pct)
                                 badge_rect = pygame.Rect(ax - curr_tile_w, ay - curr_tile_h, curr_tile_w * 2, int(curr_tile_h * 1.5))
                                 if sel_rect.colliderect(badge_rect):
                                     state.selected_army_ids.append(a.id)
@@ -2597,14 +2750,14 @@ def run_game():
                     armies_to_order = [sel_single]
 
             if armies_to_order:
-                # Accurate province detection: reverse-lookup tile under cursor
+                # Accurate tile detection: reverse-lookup tile under cursor
                 mx, my = mouse_pos
                 col_idx = int((mx - origin_x) // curr_tile_w)
                 row_idx = int((my - origin_y) // curr_tile_h)
-                target_province = cell_to_prov.get((col_idx, row_idx))
-                if target_province:
+                target_tile = (col_idx, row_idx)
+                if target_tile in cell_to_prov:
                     for army_obj in armies_to_order:
-                        state.order_army_march(army_obj, target_province)
+                        state.order_army_march_to_tile(army_obj, target_tile)
         # Time advancement
         if state.speed > 0:
             state.tick_timer += dt
@@ -4362,38 +4515,71 @@ def run_game():
                      int(end[1] - head_size * _math.sin(angle + _math.pi/6)))
             pygame.draw.polygon(surface, color, [end, left, right])
 
-        def border_midpoint(pid_a, pid_b):
-            return get_border_midpoint(pid_a, pid_b)
+        # ---------------------------------------------------------
+        # PASS 3.7: RTS Tactical Destination Reticle when army is selected
+        # ---------------------------------------------------------
+        if (state.selected_army_id or state.selected_army_ids) and not state.build_mode:
+            mx, my = mouse_pos
+            if map_bg_rect.collidepoint((mx, my)) and not hud_rect.collidepoint((mx, my)):
+                hc = int((mx - origin_x) // curr_tile_w)
+                hr = int((my - origin_y) // curr_tile_h)
+                if (hc, hr) in cell_to_prov:
+                    hx = origin_x + hc * curr_tile_w
+                    hy = origin_y + hr * curr_tile_h
+                    h_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
+                    h_surf.fill((255, 215, 60, 45))
+                    screen.blit(h_surf, (hx, hy))
+                    pygame.draw.rect(screen, (255, 225, 80), (hx, hy, curr_tile_w, curr_tile_h), 1)
+                    # Corner brackets for tactical RTS reticle
+                    cs = 5
+                    pygame.draw.line(screen, COLOR_GOLD, (hx, hy), (hx + cs, hy), 2)
+                    pygame.draw.line(screen, COLOR_GOLD, (hx, hy), (hx, hy + cs), 2)
+                    pygame.draw.line(screen, COLOR_GOLD, (hx + curr_tile_w - 1, hy), (hx + curr_tile_w - 1 - cs, hy), 2)
+                    pygame.draw.line(screen, COLOR_GOLD, (hx + curr_tile_w - 1, hy), (hx + curr_tile_w - 1, hy + cs), 2)
+                    pygame.draw.line(screen, COLOR_GOLD, (hx, hy + curr_tile_h - 1), (hx + cs, hy + curr_tile_h - 1), 2)
+                    pygame.draw.line(screen, COLOR_GOLD, (hx, hy + curr_tile_h - 1), (hx, hy + curr_tile_h - 1 - cs), 2)
+                    pygame.draw.line(screen, COLOR_GOLD, (hx + curr_tile_w - 1, hy + curr_tile_h - 1), (hx + curr_tile_w - 1 - cs, hy + curr_tile_h - 1), 2)
+                    pygame.draw.line(screen, COLOR_GOLD, (hx + curr_tile_w - 1, hy + curr_tile_h - 1), (hx + curr_tile_w - 1, hy + curr_tile_h - 1 - cs), 2)
 
+        # ---------------------------------------------------------
+        # PASS 3.8: Tactical March Path Arrows (Tile-by-Tile)
+        # ---------------------------------------------------------
         for army in state.armies:
-            if not army.is_moving or army.in_battle:
+            if not army.is_moving or army.in_battle or not getattr(army, "tile_path", None):
                 continue
             is_player_army = (army.owner == state.player_id)
             arrow_col = (240, 180, 50) if is_player_army else (80, 130, 220)
 
-            # Build waypoints: centroid -> border midpoint -> centroid -> ...
-            path_steps = [army.province] + army.path
-            waypoints = [province_anchors.get(path_steps[0])]
-            for i in range(len(path_steps) - 1):
-                bp = border_midpoint(path_steps[i], path_steps[i + 1])
-                if bp:
-                    waypoints.append(bp)
-                dst = province_anchors.get(path_steps[i + 1])
-                if dst:
-                    waypoints.append(dst)
+            # Build waypoints through each tile center in route
+            waypoints = []
+            cur_tc, cur_tr = getattr(army, "tile", get_province_capital_tile(army.province))
+            cur_ax = origin_x + (cur_tc * curr_tile_w) + (curr_tile_w // 2)
+            cur_ay = origin_y + (cur_tr * curr_tile_h) + (curr_tile_h // 2)
+            if army.is_moving and getattr(army, "next_tile", None):
+                nc, nr = army.next_tile
+                nx = origin_x + (nc * curr_tile_w) + (curr_tile_w // 2)
+                ny = origin_y + (nr * curr_tile_h) + (curr_tile_h // 2)
+                pct = army.move_progress / 100.0
+                cur_ax = int(cur_ax + (nx - cur_ax) * pct)
+                cur_ay = int(cur_ay + (ny - cur_ay) * pct)
+            waypoints.append((cur_ax, cur_ay))
 
-            # Draw path segments with arrowhead on each leg
+            for (tc, tr) in army.tile_path:
+                wx = origin_x + (tc * curr_tile_w) + (curr_tile_w // 2)
+                wy = origin_y + (tr * curr_tile_h) + (curr_tile_h // 2)
+                waypoints.append((wx, wy))
+
+            # Draw path segments with arrowhead on destination leg
             for i in range(len(waypoints) - 1):
                 src = waypoints[i]
                 dst = waypoints[i + 1]
                 if src and dst:
-                    fade = max(80, 220 - i * 30)
-                    col = (arrow_col[0], arrow_col[1], arrow_col[2])
-                    # Dashed line for far steps
-                    if i % 2 == 0:
-                        draw_arrow(screen, col, src, dst, width=2, head_size=8)
+                    is_last = (i == len(waypoints) - 2)
+                    if is_last:
+                        draw_arrow(screen, arrow_col, src, dst, width=3, head_size=9)
                     else:
-                        pygame.draw.line(screen, col, src, dst, 2)
+                        pygame.draw.line(screen, arrow_col, src, dst, 2)
+                        pygame.draw.circle(screen, arrow_col, dst, 3)
 
         # ---------------------------------------------------------
         # DRAW ARMIES ON MAP (Waving War Banners & Troop Standard)
@@ -4401,18 +4587,18 @@ def run_game():
         anim_ticks = pygame.time.get_ticks()
 
         for army in state.armies:
-            base_pos = province_anchors.get(army.province)
-            if not base_pos:
-                continue
-
-            cx, cy = base_pos[0], base_pos[1]
+            tc, tr = getattr(army, "tile", get_province_capital_tile(army.province))
+            cx = origin_x + (tc * curr_tile_w) + (curr_tile_w // 2)
+            cy = origin_y + (tr * curr_tile_h) + (curr_tile_h // 2)
 
             # If moving, interpolate position smoothly along route
-            if army.is_moving and army.next_province and not army.in_battle:
-                next_pos = province_anchors.get(army.next_province, base_pos)
+            if army.is_moving and getattr(army, "next_tile", None) and not army.in_battle:
+                nc, nr = army.next_tile
+                nx = origin_x + (nc * curr_tile_w) + (curr_tile_w // 2)
+                ny = origin_y + (nr * curr_tile_h) + (curr_tile_h // 2)
                 pct = army.move_progress / 100.0
-                cx = int(cx + (next_pos[0] - base_pos[0]) * pct)
-                cy = int(cy + (next_pos[1] - base_pos[1]) * pct)
+                cx = int(cx + (nx - cx) * pct)
+                cy = int(cy + (ny - cy) * pct)
 
             is_player = (army.owner == state.player_id)
             is_sel_army = (army.id == state.selected_army_id or army.id in state.selected_army_ids)
