@@ -1027,7 +1027,7 @@ class GameState:
             return
 
         occ = cur_settlement.get("occupied_by")
-        if getattr(self, "war_status", "war") == "peace" and prov.get("owner") != army.owner:
+        if prov.get("owner") != army.owner and not self.are_hostile(army.owner, prov.get("owner")):
             self.declare_war(army.owner, prov["owner"], reason="Unprovoked Siege")
         is_enemy_prov = self.are_hostile(army.owner, prov["owner"])
 
@@ -1500,13 +1500,21 @@ class GameState:
         self.logs.append(f"AD {self.year}: War rages across the lands of Britain.")
 
     def update_armies(self):
-        # 0. Co-location check: Ensure any opposing armies on the same tile are at war
+        # 0. Co-location & Territorial Incursion Check (Multi-Realm Sovereign Borders)
         for a in self.armies:
-            if getattr(a, "tile", None) is not None and not getattr(a, "is_demobilizing", False) and a.troops > 0:
-                opponents = [o for o in self.armies if getattr(o, "tile", None) == a.tile and o.owner != a.owner and o.troops > 0]
-                for o in opponents:
-                    if not self.are_hostile(a.owner, o.owner):
-                        self.declare_war(a.owner, o.owner, reason="Troop Clash")
+            if not getattr(a, "is_demobilizing", False) and a.troops > 0:
+                # 0a. Check territory breach (foreign sovereign province)
+                p_id = getattr(a, "province", None)
+                p_owner = PROVINCES.get(p_id, {}).get("owner")
+                if p_owner and p_owner != a.owner and not self.are_hostile(a.owner, p_owner):
+                    self.declare_war(a.owner, p_owner, reason="Border Incursion")
+
+                # 0b. Check co-located hostile/neutral armies on same tile
+                if getattr(a, "tile", None) is not None:
+                    opponents = [o for o in self.armies if getattr(o, "tile", None) == a.tile and o.owner != a.owner and o.troops > 0]
+                    for o in opponents:
+                        if not self.are_hostile(a.owner, o.owner):
+                            self.declare_war(a.owner, o.owner, reason="Troop Clash")
 
         # Sanity check: Clear in_battle flag for any army that has no enemy on its tile
         for a in self.armies:

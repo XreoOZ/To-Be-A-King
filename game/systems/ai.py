@@ -122,7 +122,13 @@ def run_realm_ai(state, ruler_id):
     # 1. Standardize AI realm feudal laws
     standardize_realm_laws(state, ruler_id)
 
-    # 2. Tactical Reconnaissance: Hostile and Realm Armies
+    # 2. Sovereign Incursion Detection & Tactical Reconnaissance
+    # Any foreign army trespassing inside domestic territory immediately escalates to war!
+    for a in state.armies:
+        if a.owner != ruler_id and a.province in realm_provs and a.troops > 0 and not getattr(a, "is_demobilizing", False):
+            if not getattr(state, "are_hostile", lambda o1, o2: o1 != o2)(ruler_id, a.owner):
+                state.declare_war(a.owner, ruler_id, reason="Border Incursion")
+
     hostile_armies = [a for a in state.armies if getattr(state, "are_hostile", lambda o1, o2: o1 != o2)(ruler_id, a.owner) and a.troops > 0]
     my_armies = [a for a in state.armies if a.owner == ruler_id and a.troops > 0]
     hostile_provs = [pid for pid, p in PROVINCES.items() if getattr(state, "are_hostile", lambda o1, o2: o1 != o2)(ruler_id, p.get("owner"))]
@@ -156,7 +162,7 @@ def run_realm_ai(state, ruler_id):
     is_at_peace = (not hostile_armies and not hostile_provs and not has_invasion and not has_border_threat)
 
     # 3. Peacetime Frontier Vigilance & SIAGA (With 20-Day Mutual De-escalation Protocol)
-    is_official_peace = (getattr(state, "war_status", "war") == "peace")
+    is_official_peace = not any(state.are_hostile(ruler_id, other_id) for other_id in CHARACTERS if other_id != ruler_id)
     if is_official_peace:
         # Actual invaders trespassing inside domestic territory: full emergency!
         actual_invaders = [a for a in state.armies if a.owner != ruler_id and a.province in realm_provs and a.troops > 0]
