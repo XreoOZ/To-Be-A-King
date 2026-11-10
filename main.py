@@ -31,8 +31,8 @@ try:
 except Exception:
     pass
 
-# Force crisp, razor-sharp pixel scaling (0 = nearest-neighbor, eliminates bilinear blur/smudging on high-res monitors)
-os.environ["SDL_RENDER_SCALE_QUALITY"] = "0"
+# High-definition hardware texture scaling (2 = anisotropic / high-fidelity hardware scaling in SDL2)
+os.environ["SDL_RENDER_SCALE_QUALITY"] = "2"
 
 import pygame
 
@@ -89,11 +89,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-# Fonts
-font_xs = pygame.font.SysFont("segoeui", 12, bold=True)
-font_sm = pygame.font.SysFont("segoeui", 14)
-font_md = pygame.font.SysFont("segoeui", 17, bold=True)
-font_lg = pygame.font.SysFont("segoeui", 22, bold=True)
+# High-Fidelity Vector Fonts with Full Unicode Symbol Support (Crown, Swords, Shields, Hourglass)
+available_sysfonts = pygame.font.get_fonts()
+font_name = "segoeuisymbol" if "segoeuisymbol" in available_sysfonts else "segoeui"
+font_xs = pygame.font.SysFont(font_name, 12, bold=True)
+font_sm = pygame.font.SysFont(font_name, 14)
+font_md = pygame.font.SysFont(font_name, 17, bold=True)
+font_lg = pygame.font.SysFont(font_name, 22, bold=True)
 font_title = pygame.font.SysFont("georgia", 25, bold=True)
 font_banner = pygame.font.SysFont("georgia", 32, bold=True)
 
