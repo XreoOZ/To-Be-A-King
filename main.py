@@ -497,6 +497,90 @@ def get_barrack_stats(level):
     upkeep = 1 + lvl
     return {"level": lvl, "garrison": garrison, "recruits": recruits, "upkeep": upkeep}
 
+def get_vassal_landed_status(state, v_dict, prov_id=None):
+    """
+    Returns detailed landed status, held fiefs, held settlements,
+    gross monthly income, tax rate, tax paid to liege, net savings, and levy contribution.
+    If a vassal has NO fiefs or settlement tiles, they are LANDLESS:
+    Gross = 0, Tax = 0, Levies = 0, Net Savings = 0.
+    """
+    v_name = v_dict["name"]
+    v_id = v_dict.get("id")
+
+    # Check held fiefs
+    held_fiefs = [f for f in state.fiefs.values() if f.get("holder") == v_name or f.get("vassal_id") == v_id]
+
+    # Check held settlement tiles
+    held_tiles = list(v_dict.get("tiles", []))
+    for f in held_fiefs:
+        for t in f.get("tiles", []):
+            if t not in held_tiles:
+                held_tiles.append(t)
+
+    # Check physical settlements owned by this vassal
+    held_settlements = []
+    seen_hids = set()
+    for t in held_tiles:
+        if t in state.settlements:
+            sdata = state.settlements[t]
+            if sdata.get("vassal_id") == v_id or sdata.get("lord") == v_name:
+                hid = sdata.get("id") or sdata.get("name")
+                if hid not in seen_hids:
+                    seen_hids.add(hid)
+                    held_settlements.append(sdata)
+
+    is_landed = (len(held_fiefs) > 0 or len(held_settlements) > 0 or len(held_tiles) > 0)
+    tax_rate = v_dict.get("tax_rate", 10)
+
+    if not is_landed:
+        return {
+            "is_landed": False,
+            "held_fiefs": [],
+            "held_settlements": [],
+            "total_tiles": 0,
+            "gross_income": 0,
+            "tax_rate": tax_rate,
+            "tax_paid": 0,
+            "net_savings": 0,
+            "levy_contribution": 0
+        }
+
+    # Calculate gross domain income from owned physical holdings
+    gross = 0
+    levies = 0
+    if held_settlements:
+        for s in held_settlements:
+            stype = s.get("type", "city")
+            if stype in ("city", "town"):
+                gross += 30
+                levies += 100
+            elif stype == "fort":
+                gross += 15
+                levies += 300
+            elif stype == "barrack":
+                gross += 10
+                lvl = s.get("level", 0)
+                levies += (100 + min(400, lvl * 100))
+    else:
+        # Fief without constructed holding yet (agricultural land)
+        gross = len(held_tiles) * 10
+        levies = len(held_tiles) * 35
+
+    tax_paid = max(0, int(round(gross * (tax_rate / 100.0))))
+    net_savings = max(0, gross - tax_paid)
+
+    return {
+        "is_landed": True,
+        "held_fiefs": held_fiefs,
+        "held_settlements": held_settlements,
+        "total_tiles": len(held_tiles),
+        "gross_income": gross,
+        "tax_rate": tax_rate,
+        "tax_paid": tax_paid,
+        "net_savings": net_savings,
+        "levy_contribution": levies
+    }
+
 # -------------------------------------------------------------
 # City Siege & Contested Province Helpers
 # -------------------------------------------------------------
@@ -686,11 +770,12 @@ class GameState:
         self.pre_popup_speed = None      # Saved game speed before a popup paused the game
         self.popup_was_active = False    # Track whether a popup was active on previous frame
         
-        # Left Panel Sub-Tab System ('armies', 'vassals', or 'demesne')
+        # Left Panel Sub-Tab System ('armies', 'vassals', 'demesne', or 'laws')
         self.left_tab = "armies"
         self.vassal_page = 0
         self.demesne_page = 0
         self.fief_page = 0
+        self.laws_page = 0
         
         # Camera & Map Viewport Zoom / Pan State
         self.zoom = 0.85                 # default initial zoom factor (0.85 frames whole Britain, 1.0 = standard, up to 2.4 = zoomed in)
@@ -748,8 +833,9 @@ class GameState:
                 v_list.append({
                     "id": f"{pid}_vassal_{i}",
                     "name": f"{title} {fn} '{ep}'",
-                    "levy_contribution": random.randint(80, 260),
-                    "tax_contribution": random.randint(3, 8),
+                    "levy_contribution": 0,
+                    "tax_contribution": 0,
+                    "tax_rate": 10,
                     "gold": random.randint(150, 450),
                     "title": title,
                     "city_name": None,
@@ -1010,10 +1096,18 @@ class GameState:
                 # Slow passive replenishment
                 if prov["levies_current"] < prov["levies_max"]:
                     prov["levies_current"] = min(prov["levies_max"], prov["levies_current"] + 15)
-                # Vassal tax contribution & economy
+                # Vassal tax contribution & economy (calculated strictly via landed domain status)
                 for v in self.vassals.get(pid, []):
-                    owner["gold"] += v.get("tax_contribution", 1)
-                    v["gold"] = v.get("gold", 150) + random.randint(10, 25)
+                    st = get_vassal_landed_status(self, v, pid)
+                    if st["is_landed"]:
+                        owner["gold"] += st["tax_paid"]
+                        v["gold"] = v.get("gold", 150) + st["net_savings"]
+                        v["tax_contribution"] = st["tax_paid"]
+                        v["levy_contribution"] = st["levy_contribution"]
+                    else:
+                        # Landless noble holds no land/holdings -> generates 0 gold, pays 0 tax, provides 0 levies
+                        v["tax_contribution"] = 0
+                        v["levy_contribution"] = 0
 
         # 2. Modular Building Economic & Recruitment Tick
         processed_holdings = set()
@@ -1037,23 +1131,10 @@ class GameState:
             if htype == "city":
                 if is_crown and prov_ruler:
                     prov_ruler["gold"] += 3
-                else:
-                    # Vassal city: vassal gains +3g, contributes +1g tax to liege
-                    v_id = sdata.get("vassal_id")
-                    v_obj = next((v for v in self.vassals.get(pid, []) if v.get("id") == v_id or v.get("name") == sdata.get("lord")), None)
-                    if v_obj:
-                        v_obj["gold"] = v_obj.get("gold", 150) + 3
-                    if prov_ruler:
-                        prov_ruler["gold"] += 1
 
             elif htype == "fort":
                 if is_crown and prov_ruler:
                     prov_ruler["gold"] += 1
-                else:
-                    v_id = sdata.get("vassal_id")
-                    v_obj = next((v for v in self.vassals.get(pid, []) if v.get("id") == v_id or v.get("name") == sdata.get("lord")), None)
-                    if v_obj:
-                        v_obj["gold"] = v_obj.get("gold", 150) + 1
 
             elif htype == "barrack":
                 lvl = sdata.get("level", 0)
@@ -1635,6 +1716,13 @@ def run_game():
         target_state.fief_id_counter = max(target_state.fief_id_counter, fief_counter + 10)
         target_state.settlement_id_counter = max(target_state.settlement_id_counter, settlement_counter + 10)
 
+        # Synchronize all vassals' initial levy and tax contributions strictly according to landed status
+        for pid in PROVINCES:
+            for v in target_state.vassals.get(pid, []):
+                st = get_vassal_landed_status(target_state, v, pid)
+                v["tax_contribution"] = st["tax_paid"]
+                v["levy_contribution"] = st["levy_contribution"]
+
     # Setup starter cities and fiefs matching each vassal exactly
     setup_province_starter_cities(state)
 
@@ -1739,6 +1827,11 @@ def run_game():
                         state.demesne_page = max(0, state.demesne_page - 1)
                     elif event.y < 0:
                         state.demesne_page += 1
+                elif l_panel_rect.collidepoint(mouse_pos) and state.left_tab == "laws":
+                    if event.y > 0:
+                        state.laws_page = max(0, state.laws_page - 1)
+                    elif event.y < 0:
+                        state.laws_page += 1
                 elif map_viewport.collidepoint(mouse_pos):
                     old_zoom = state.zoom
                     zoom_delta = 0.12 * event.y
@@ -2058,33 +2151,37 @@ def run_game():
 
         # ---------------------------------------------------------
         # Left Panel Sub-Tabs: [ ⚔ Active Armies ]  [ 👥 Realm Vassals ]
-        #                      [ 👑 Crown Demesne (Personal Fiefs) ]
+        #                      [ 👑 Demesne ]       [ ⚖ Realm Laws ]
         # ---------------------------------------------------------
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 233), (285, 233), 1)
         tab_y = 238
-        tab_armies = pygame.Rect(25, tab_y, 125, 25)
+        tab_armies = pygame.Rect(25, tab_y, 127, 25)
         tab_vassals = pygame.Rect(158, tab_y, 127, 25)
-        tab_demesne = pygame.Rect(25, tab_y + 29, 260, 25)
+        tab_demesne = pygame.Rect(25, tab_y + 29, 127, 25)
+        tab_laws = pygame.Rect(158, tab_y + 29, 127, 25)
         
         is_hov_ta = tab_armies.collidepoint(mouse_pos)
         is_hov_tv = tab_vassals.collidepoint(mouse_pos)
         is_hov_td = tab_demesne.collidepoint(mouse_pos)
+        is_hov_tl = tab_laws.collidepoint(mouse_pos)
         
         is_a_active = (state.left_tab == "armies")
         is_v_active = (state.left_tab == "vassals")
         is_d_active = (state.left_tab == "demesne")
+        is_l_active = (state.left_tab == "laws")
         
         # Row 1 Tabs
         pygame.draw.rect(screen, COLOR_BUTTON_ACTIVE if is_a_active else (COLOR_BUTTON_HOVER if is_hov_ta else COLOR_BUTTON_NORMAL), tab_armies, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_a_active else COLOR_PANEL_BORDER, tab_armies, 1, border_radius=4)
-        screen.blit(font_xs.render("⚔ ACTIVE ARMIES", True, COLOR_TEXT_WHITE if not is_a_active else COLOR_GOLD), (32, tab_y + 5))
+        lbl_a = font_xs.render("⚔ ARMIES", True, COLOR_TEXT_WHITE if not is_a_active else COLOR_GOLD)
+        screen.blit(lbl_a, (tab_armies.x + (tab_armies.w - lbl_a.get_width()) // 2, tab_y + 5))
         
         pygame.draw.rect(screen, COLOR_BUTTON_ACTIVE if is_v_active else (COLOR_BUTTON_HOVER if is_hov_tv else COLOR_BUTTON_NORMAL), tab_vassals, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_v_active else COLOR_PANEL_BORDER, tab_vassals, 1, border_radius=4)
-        screen.blit(font_xs.render("👥 REALM VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD), (164, tab_y + 5))
+        lbl_v = font_xs.render("👥 VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD)
+        screen.blit(lbl_v, (tab_vassals.x + (tab_vassals.w - lbl_v.get_width()) // 2, tab_y + 5))
 
-        # Row 2 Tab: Crown Demesne
-        # Compile all domains held directly by the Crown (Crown Fiefs & unpartitioned Crown Holdings)
+        # Row 2 Tabs: Crown Demesne & Realm Laws
         player_crown_items = []
         covered_holding_tiles = set()
 
@@ -2125,16 +2222,26 @@ def run_game():
                     for t in h["tiles"]:
                         covered_holding_tiles.add(t)
 
-        d_title = f"👑 CROWN DEMESNE ({len(player_crown_items)} Holdings)"
+        d_title = f"👑 DEMESNE ({len(player_crown_items)})"
         pygame.draw.rect(screen, (60, 48, 20) if is_d_active else (COLOR_BUTTON_HOVER if is_hov_td else (35, 40, 52)), tab_demesne, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_d_active else (90, 140, 210), tab_demesne, 1, border_radius=4)
         d_lbl = font_xs.render(d_title, True, COLOR_GOLD if is_d_active else (210, 230, 255))
         screen.blit(d_lbl, (tab_demesne.x + (tab_demesne.w - d_lbl.get_width()) // 2, tab_y + 34))
 
+        l_title = "⚖ LAWS"
+        pygame.draw.rect(screen, (60, 48, 20) if is_l_active else (COLOR_BUTTON_HOVER if is_hov_tl else (35, 40, 52)), tab_laws, border_radius=4)
+        pygame.draw.rect(screen, COLOR_GOLD if is_l_active else (90, 140, 210), tab_laws, 1, border_radius=4)
+        l_lbl = font_xs.render(l_title, True, COLOR_GOLD if is_l_active else (210, 230, 255))
+        screen.blit(l_lbl, (tab_laws.x + (tab_laws.w - l_lbl.get_width()) // 2, tab_y + 34))
+
         if mouse_clicked and is_hov_ta:
             state.left_tab = "armies"
         elif mouse_clicked and is_hov_tv:
             state.left_tab = "vassals"
+        elif mouse_clicked and is_hov_td:
+            state.left_tab = "demesne"
+        elif mouse_clicked and is_hov_tl:
+            state.left_tab = "laws"
         elif mouse_clicked and is_hov_td:
             state.left_tab = "demesne"
 
@@ -2277,7 +2384,7 @@ def run_game():
             elif mouse_clicked and is_next_hov and state.demesne_page < max_pages - 1:
                 state.demesne_page += 1
 
-        else:
+        elif state.left_tab == "vassals":
             # Realm Vassals Directory (All vassals across Kingdom of Wessex)
             realm_vassals = []
             for pid, prov in PROVINCES.items():
@@ -2291,7 +2398,7 @@ def run_game():
             
             per_page = 5
             max_pages = max(1, (total_v + per_page - 1) // per_page)
-            state.vassal_page = max(0, min(state.vassal_page, max_pages - 1))
+            state.vassal_page = max(0, min(getattr(state, "vassal_page", 0), max_pages - 1))
             
             start_i = state.vassal_page * per_page
             cur_page_vassals = realm_vassals[start_i:start_i + per_page]
@@ -2308,9 +2415,13 @@ def run_game():
                 p_tag = font_xs.render(f"[{prov_short}]", True, (140, 200, 255))
                 screen.blit(p_tag, (280 - p_tag.get_width(), vy + 4))
                 
-                h_name = v_data.get("city_name") or "Landless Noble"
+                st = get_vassal_landed_status(state, v_data, v_pid)
+                h_name = v_data.get("city_name") if st["is_landed"] else "Landless Noble (Unlanded)"
                 screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 17))
-                screen.blit(font_xs.render(f"Gold: {v_data['gold']}g  •  Levy: +{v_data['levy_contribution']}  •  Tax: +{v_data['tax_contribution']}g/m", True, COLOR_TEXT_MUTED), (32, vy + 30))
+                
+                levy_txt = f"+{st['levy_contribution']}" if st["is_landed"] else "0"
+                tax_txt = f"+{st['tax_paid']}g/m" if st["is_landed"] else "0g/m"
+                screen.blit(font_xs.render(f"Gold: {v_data['gold']}g  •  Levy: {levy_txt}  •  Tax: {tax_txt}", True, COLOR_TEXT_MUTED), (32, vy + 30))
                 
                 if mouse_clicked and is_vc_hov:
                     state.selected_province = v_pid
@@ -2345,6 +2456,154 @@ def run_game():
                 state.vassal_page -= 1
             elif mouse_clicked and is_next_hov and state.vassal_page < max_pages - 1:
                 state.vassal_page += 1
+
+        elif state.left_tab == "laws":
+            # Feudal Realm Laws View (Customizable per-vassal tax rates)
+            realm_vassals = []
+            for pid, prov in PROVINCES.items():
+                if prov["owner"] == state.player_id:
+                    for v in state.vassals.get(pid, []):
+                        realm_vassals.append((pid, v))
+
+            total_v = len(realm_vassals)
+            header_lbl = font_md.render(f"Realm Laws ({total_v} Lords)", True, COLOR_GOLD)
+            screen.blit(header_lbl, (25, 302))
+
+            per_page = 5
+            max_pages = max(1, (total_v + per_page - 1) // per_page)
+            state.laws_page = max(0, min(getattr(state, "laws_page", 0), max_pages - 1))
+
+            # Header Top Pagination Controls (< 1/2 >)
+            top_btn_prev = pygame.Rect(216, 302, 18, 18)
+            top_btn_next = pygame.Rect(268, 302, 18, 18)
+            is_top_prev_hov = top_btn_prev.collidepoint(mouse_pos)
+            is_top_next_hov = top_btn_next.collidepoint(mouse_pos)
+
+            p_top_prev_col = COLOR_TEXT_WHITE if (state.laws_page > 0 and not is_top_prev_hov) else (COLOR_GOLD if is_top_prev_hov else (70, 75, 85))
+            p_top_next_col = COLOR_TEXT_WHITE if (state.laws_page < max_pages - 1 and not is_top_next_hov) else (COLOR_GOLD if is_top_next_hov else (70, 75, 85))
+            screen.blit(font_xs.render("<", True, p_top_prev_col), (221, 304))
+            p_top_str = f"{state.laws_page + 1}/{max_pages}"
+            p_top_lbl = font_xs.render(p_top_str, True, COLOR_TEXT_MUTED)
+            screen.blit(p_top_lbl, (244 - p_top_lbl.get_width() // 2, 304))
+            screen.blit(font_xs.render(">", True, p_top_next_col), (273, 304))
+
+            if mouse_clicked and is_top_prev_hov and state.laws_page > 0:
+                state.laws_page -= 1
+            elif mouse_clicked and is_top_next_hov and state.laws_page < max_pages - 1:
+                state.laws_page += 1
+
+            start_i = state.laws_page * per_page
+            cur_page_vassals = realm_vassals[start_i:start_i + per_page]
+
+            vy = 328
+            for v_pid, v_data in cur_page_vassals:
+                v_card = pygame.Rect(25, vy, 260, 56)
+                is_vc_hov = v_card.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (50, 60, 78) if is_vc_hov else (34, 40, 52), v_card, border_radius=4)
+                pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
+
+                prov_short = PROVINCES[v_pid]["name"].split()[0]
+                screen.blit(font_xs.render(f"👑 {v_data['name']}", True, COLOR_GOLD), (32, vy + 4))
+                p_tag = font_xs.render(f"[{prov_short}]", True, (140, 200, 255))
+                screen.blit(p_tag, (280 - p_tag.get_width(), vy + 4))
+
+                st = get_vassal_landed_status(state, v_data, v_pid)
+                h_name = v_data.get("city_name") if st["is_landed"] else "Landless Noble (Unlanded)"
+                screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 18))
+
+                # Tax Rate interactive adjuster: [-] [ 10% ] [+]
+                btn_dec = pygame.Rect(32, vy + 33, 20, 18)
+                rate_box = pygame.Rect(54, vy + 33, 44, 18)
+                btn_inc = pygame.Rect(100, vy + 33, 20, 18)
+
+                hov_dec = btn_dec.collidepoint(mouse_pos)
+                hov_rate = rate_box.collidepoint(mouse_pos)
+                hov_inc = btn_inc.collidepoint(mouse_pos)
+
+                # Draw [-] button
+                pygame.draw.rect(screen, (70, 80, 100) if hov_dec else (45, 52, 68), btn_dec, border_radius=3)
+                pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_dec, 1, border_radius=3)
+                screen.blit(font_xs.render("-", True, COLOR_TEXT_WHITE if hov_dec else COLOR_TEXT_MUTED), (39, vy + 34))
+
+                # Draw Rate Box
+                cur_rate = v_data.get("tax_rate", 10)
+                pygame.draw.rect(screen, (30, 38, 50), rate_box, border_radius=3)
+                pygame.draw.rect(screen, (90, 140, 210) if hov_rate else COLOR_PANEL_BORDER, rate_box, 1, border_radius=3)
+                rate_lbl = font_xs.render(f"{cur_rate}%", True, COLOR_GOLD if cur_rate > 0 else COLOR_TEXT_MUTED)
+                screen.blit(rate_lbl, (rate_box.x + (rate_box.w - rate_lbl.get_width()) // 2, vy + 34))
+
+                # Draw [+] button
+                pygame.draw.rect(screen, (70, 80, 100) if hov_inc else (45, 52, 68), btn_inc, border_radius=3)
+                pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_inc, 1, border_radius=3)
+                screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE if hov_inc else COLOR_TEXT_MUTED), (106, vy + 34))
+
+                # Right side: Tax generated readout
+                if st["is_landed"]:
+                    tax_info = f"Tax: +{st['tax_paid']}g/m"
+                    tax_col = COLOR_TEXT_GREEN if st['tax_paid'] > 0 else COLOR_TEXT_MUTED
+                else:
+                    tax_info = "Tax: 0g (No Land)"
+                    tax_col = COLOR_TEXT_MUTED
+                screen.blit(font_xs.render(tax_info, True, tax_col), (128, vy + 35))
+
+                # Handle Clicks
+                if mouse_clicked:
+                    if hov_dec:
+                        new_rate = max(0, cur_rate - 5)
+                        v_data["tax_rate"] = new_rate
+                        st_new = get_vassal_landed_status(state, v_data, v_pid)
+                        v_data["tax_contribution"] = st_new["tax_paid"]
+                        state.logs.append(f"Decreased {v_data['name']}'s tax obligation to {new_rate}%.")
+                    elif hov_inc:
+                        new_rate = min(50, cur_rate + 5)
+                        v_data["tax_rate"] = new_rate
+                        st_new = get_vassal_landed_status(state, v_data, v_pid)
+                        v_data["tax_contribution"] = st_new["tax_paid"]
+                        state.logs.append(f"Increased {v_data['name']}'s tax obligation to {new_rate}%.")
+                    elif hov_rate:
+                        cycle = [0, 5, 10, 15, 20, 25, 30, 40, 50]
+                        if cur_rate in cycle:
+                            next_i = (cycle.index(cur_rate) + 1) % len(cycle)
+                            new_rate = cycle[next_i]
+                        else:
+                            new_rate = 10
+                        v_data["tax_rate"] = new_rate
+                        st_new = get_vassal_landed_status(state, v_data, v_pid)
+                        v_data["tax_contribution"] = st_new["tax_paid"]
+                        state.logs.append(f"Adjusted {v_data['name']}'s tax rate to {new_rate}%.")
+                    elif is_vc_hov:
+                        state.selected_province = v_pid
+                        state.inspecting_vassal = {"province": v_pid, "vassal": v_data}
+                        if v_data.get("tiles"):
+                            state.selected_settlement = v_data["tiles"][0]
+                        state.logs.append(f"Inspecting feudal dossier for {v_data['name']}.")
+
+                vy += 60
+
+            # Bottom Pagination Controls
+            py_btn = 645
+            btn_prev = pygame.Rect(25, py_btn, 80, 26)
+            btn_next = pygame.Rect(205, py_btn, 80, 26)
+
+            is_prev_hov = btn_prev.collidepoint(mouse_pos)
+            is_next_hov = btn_next.collidepoint(mouse_pos)
+
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
+            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.laws_page > 0 else COLOR_TEXT_MUTED), (42, py_btn + 5))
+
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
+            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.laws_page < max_pages - 1 else COLOR_TEXT_MUTED), (222, py_btn + 5))
+
+            page_str = f"Page {state.laws_page + 1}/{max_pages}"
+            p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
+            screen.blit(p_lbl, (115 + (80 - p_lbl.get_width()) // 2, py_btn + 5))
+
+            if mouse_clicked and is_prev_hov and state.laws_page > 0:
+                state.laws_page -= 1
+            elif mouse_clicked and is_next_hov and state.laws_page < max_pages - 1:
+                state.laws_page += 1
 
         # ---------------------------------------------------------
         # 3. CENTER: TERRITORY BALANCE & MAP
@@ -3656,9 +3915,12 @@ def run_game():
                     pygame.draw.rect(screen, (100, 255, 120) if is_v_sel else COLOR_PANEL_BORDER, v_box, 1, border_radius=4)
 
                     screen.blit(font_xs.render(f"👑 {v['name']}", True, COLOR_GOLD if is_v_sel else COLOR_TEXT_WHITE), (888, vy + 4))
-                    c_info = v.get('city_name') or 'No Assigned Holding'
+                    st = get_vassal_landed_status(state, v, state.selected_province)
+                    c_info = v.get('city_name') if st["is_landed"] else 'Landless Noble (Unlanded)'
                     screen.blit(font_xs.render(f"Fief: {c_info}", True, (200, 230, 255)), (888, vy + 17))
-                    screen.blit(font_xs.render(f"Gold: {v['gold']}g  •  Levies: +{v['levy_contribution']}  •  Tax: +{v['tax_contribution']}g/m", True, COLOR_TEXT_MUTED), (888, vy + 29))
+                    levy_txt = f"+{st['levy_contribution']}" if st["is_landed"] else "0"
+                    tax_txt = f"+{st['tax_paid']}g/m" if st["is_landed"] else "0g/m"
+                    screen.blit(font_xs.render(f"Gold: {v['gold']}g  •  Levies: {levy_txt}  •  Tax: {tax_txt}", True, COLOR_TEXT_MUTED), (888, vy + 29))
 
                     if mouse_clicked and is_v_hov:
                         state.selected_vassal_idx = v_idx
@@ -3883,6 +4145,9 @@ def run_game():
                                         v["tiles"] = [t for t in v.get("tiles", []) if t not in f_data["tiles"]]
                                         if not v["tiles"]:
                                             v["city_name"] = None
+                                        st_v = get_vassal_landed_status(state, v, pid)
+                                        v["tax_contribution"] = st_v["tax_paid"]
+                                        v["levy_contribution"] = st_v["levy_contribution"]
 
                             # 3. Dissolve the fief partition so land returns directly to the King as unpartitioned Crown land
                             del state.fiefs[fid_to_del]
@@ -4111,8 +4376,12 @@ def run_game():
                     status_str = f"{loc_str}  •  Holds {n_held_fiefs} Fief(s)"
                     screen.blit(font_xs.render(status_str, True, (150, 210, 255) if is_loc else COLOR_TEXT_MUTED), (pop_x + 40, vy + 34))
 
-                    econ_str = f"Treasury: {c_v.get('gold', 150)}g  •  Levy Support: +{c_v.get('levy_contribution', 120)} soldiers"
-                    screen.blit(font_xs.render(econ_str, True, COLOR_TEXT_GREEN), (pop_x + 40, vy + 56))
+                    st_cv = get_vassal_landed_status(state, c_v, f_target.get("province"))
+                    if st_cv["is_landed"]:
+                        econ_str = f"Treasury: {c_v.get('gold', 150)}g  •  Levy Support: +{st_cv['levy_contribution']} soldiers"
+                    else:
+                        econ_str = f"Treasury: {c_v.get('gold', 150)}g  •  Status: Landless Noble (Unlanded)"
+                    screen.blit(font_xs.render(econ_str, True, COLOR_TEXT_GREEN if st_cv["is_landed"] else COLOR_TEXT_MUTED), (pop_x + 40, vy + 56))
 
                     # Grant Button
                     g_btn = pygame.Rect(pop_x + pop_w - 180, vy + 28, 140, 36)
@@ -4141,6 +4410,11 @@ def run_game():
                             if t not in c_v["tiles"]:
                                 c_v["tiles"].append(t)
                         c_v["gold"] = c_v.get("gold", 150) + 100
+                        if not c_v.get("city_name"):
+                            c_v["city_name"] = f_target["name"]
+                        st_new = get_vassal_landed_status(state, c_v, f_target["province"])
+                        c_v["tax_contribution"] = st_new["tax_paid"]
+                        c_v["levy_contribution"] = st_new["levy_contribution"]
                         
                         state.logs.append(f"Royal Investiture: Bestowed {f_target['name']} upon {c_v['name']} (+100g)!")
                         state.granting_fief_id = None
@@ -4222,17 +4496,27 @@ def run_game():
             else:
                 pygame.draw.rect(screen, (50, 60, 80), (pop_x + 30, pop_y + 74, 44, 50), border_radius=4)
 
+            v_status = get_vassal_landed_status(state, v_obj, v_pid)
+            held_fiefs = v_status["held_fiefs"]
+            total_held_tiles = v_status["total_tiles"]
+            is_landed = v_status["is_landed"]
+            tax_rate = v_status["tax_rate"]
+            tax_paid = v_status["tax_paid"]
+            monthly_gross = v_status["gross_income"]
+            net_profit = v_status["net_savings"]
+            levies_contrib = v_status["levy_contribution"]
+
             # Name and Titles
             screen.blit(font_md.render(f"👑 {v_obj['name']}", True, COLOR_GOLD), (pop_x + 90, pop_y + 74))
             rank_str = f"Feudal Rank: {v_obj.get('title', 'Thane')} of {p_full.split()[0]}  •  Religion: Catholic"
             screen.blit(font_xs.render(rank_str, True, COLOR_TEXT_WHITE), (pop_x + 90, pop_y + 98))
-            seat_str = f"Seat of Power: {v_obj.get('city_name') or 'Landless Subject (Awaiting Royal Charter)'}"
+            seat_str = f"Seat of Power: {v_obj.get('city_name')}" if is_landed and v_obj.get('city_name') else "Seat of Power: Landless Subject (Awaiting Royal Charter)"
             screen.blit(font_xs.render(seat_str, True, (140, 205, 255)), (pop_x + 90, pop_y + 114))
 
             # Feudal Attributes Grid (Martial, Stewardship, Diplomacy, Feudal Oath)
             stats_list = [
-                ("⚔ Martial", f"{10 + (v_obj['levy_contribution'] // 30)}", "(Commands Fyrd)"),
-                ("💰 Stewardship", f"{11 + (v_obj['tax_contribution'] * 2)}", "(Manages Estates)"),
+                ("⚔ Martial", f"{10 + (levies_contrib // 30)}" if is_landed else "8", "(Commands Fyrd)"),
+                ("💰 Stewardship", f"{11 + (tax_paid * 2)}" if is_landed else "9", "(Manages Estates)"),
                 ("🤝 Diplomacy", "13", "(Royal Harmony)"),
                 ("🛡 Feudal Oath", "100%", "(Faithful Subject)")
             ]
@@ -4245,10 +4529,6 @@ def run_game():
                 screen.blit(font_xs.render(s_name, True, COLOR_TEXT_MUTED), (bx + 8, by + 4))
                 screen.blit(font_md.render(s_val, True, COLOR_GOLD), (bx + 8, by + 18))
                 screen.blit(font_xs.render(s_sub, True, (120, 160, 200)), (bx + 48, by + 22))
-
-            # Compute vassal's overall fiefdoms and holdings
-            held_fiefs = [f for f in state.fiefs.values() if f.get("holder") == v_obj["name"] or f.get("vassal_id") == v_obj.get("id")]
-            total_held_tiles = sum(len(f.get("tiles", [])) for f in held_fiefs)
 
             # Two Main Columns: Economy & Treasury (Left), Military & Fiefs (Right)
             col_w = 305
@@ -4265,15 +4545,18 @@ def run_game():
             screen.blit(font_sm.render(f"Treasury: {v_obj['gold']} Gold", True, COLOR_GOLD), (pop_x + 40, col_y + 40))
             
             # Breakdown of monthly finances
-            tax_paid = v_obj.get("tax_contribution", 4)
-            monthly_gross = tax_paid + 24
-            net_profit = 24
-            
-            screen.blit(font_xs.render(f"• Gross Domain Income: +{monthly_gross}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 68))
-            screen.blit(font_xs.render("  (From tenant rents, tolls & agricultural yield)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 84))
-            screen.blit(font_xs.render(f"• Feudal Royal Tax to Liege: -{tax_paid}g / month", True, COLOR_TEXT_RED), (pop_x + 40, col_y + 104))
-            screen.blit(font_xs.render("  (Directly enriches King Alfred's treasury)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
-            screen.blit(font_xs.render(f"• Net Monthly Savings: +{net_profit}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 140))
+            if is_landed:
+                screen.blit(font_xs.render(f"• Gross Domain Income: +{monthly_gross}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 68))
+                screen.blit(font_xs.render("  (From tenant rents, tolls & agricultural yield)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 84))
+                screen.blit(font_xs.render(f"• Feudal Royal Tax ({tax_rate}%): -{tax_paid}g / month", True, COLOR_TEXT_RED), (pop_x + 40, col_y + 104))
+                screen.blit(font_xs.render("  (Directly enriches King Alfred's treasury)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
+                screen.blit(font_xs.render(f"• Net Monthly Savings: +{net_profit}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 140))
+            else:
+                screen.blit(font_xs.render("• Gross Domain Income: 0g / month", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 68))
+                screen.blit(font_xs.render("  (Landless noble holds no estates or tolls)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 84))
+                screen.blit(font_xs.render(f"• Feudal Royal Tax ({tax_rate}%): 0g / month", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 104))
+                screen.blit(font_xs.render("  (No domain revenue subject to royal taxation)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
+                screen.blit(font_xs.render("• Net Monthly Savings: 0g / month", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 140))
             
             # Autonomous Charter Status Bar
             screen.blit(font_xs.render("• Charter Fund (1,000g needed to build town):", True, COLOR_GOLD), (pop_x + 40, col_y + 168))
@@ -4301,10 +4584,16 @@ def run_game():
             screen.blit(font_md.render("⚔ Military Duty & Fiefdoms", True, COLOR_GOLD), (pop_x + 360, col_y + 10))
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 360, col_y + 32), (pop_x + 360 + col_w - 20, col_y + 32), 1)
 
-            screen.blit(font_sm.render(f"Fyrd Levies: +{v_obj['levy_contribution']} Soldiers", True, COLOR_TEXT_GREEN), (pop_x + 365, col_y + 40))
-            screen.blit(font_xs.render(f"• Household Guards / Garrison: {v_obj['levy_contribution'] * 2} Men", True, COLOR_TEXT_WHITE), (pop_x + 365, col_y + 68))
-            screen.blit(font_xs.render(f"• Feudal Service: Ready to march on King's call", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 86))
-            screen.blit(font_xs.render(f"• Fiefdoms Controlled: {len(held_fiefs)} Fief(s) ({total_held_tiles} Tiles)", True, (150, 215, 255)), (pop_x + 365, col_y + 110))
+            if is_landed:
+                screen.blit(font_sm.render(f"Fyrd Levies: +{levies_contrib} Soldiers", True, COLOR_TEXT_GREEN), (pop_x + 365, col_y + 40))
+                screen.blit(font_xs.render(f"• Household Guards / Garrison: {levies_contrib * 2} Men", True, COLOR_TEXT_WHITE), (pop_x + 365, col_y + 68))
+                screen.blit(font_xs.render("• Feudal Service: Ready to march on King's call", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 86))
+                screen.blit(font_xs.render(f"• Fiefdoms Controlled: {len(held_fiefs)} Fief(s) ({total_held_tiles} Tiles)", True, (150, 215, 255)), (pop_x + 365, col_y + 110))
+            else:
+                screen.blit(font_sm.render("Fyrd Levies: 0 Soldiers", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 40))
+                screen.blit(font_xs.render("• Household Guards: None (Unlanded)", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 68))
+                screen.blit(font_xs.render("• Feudal Service: Awaiting royal fief or title", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 86))
+                screen.blit(font_xs.render("• Fiefdoms Controlled: 0 Fiefs (0 Tiles)", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 110))
             
             # List held fiefs
             fy_item = col_y + 132
