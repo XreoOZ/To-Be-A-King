@@ -1107,82 +1107,139 @@ def run_game():
         target_state.settlements = {}
         target_state.fiefs = {}
         fief_counter = 1
-        
+        used_tiles_by_prov = {pid: set() for pid in prov_tile_list.keys()}
+
+        # -------------------------------------------------------------
+        # 1. RULER PERSONAL DEMESNE (3 Personal Crown Cities for King & Jarl)
+        # -------------------------------------------------------------
+        royal_demesnes = [
+            # King Alfred's 3 Personal Royal Cities
+            {"owner": target_state.player_id, "lord": target_state.player["name"], "province": "wessex", "city": "Royal Citadel of Winchester", "fief": "Crown Demesne of Winchester"},
+            {"owner": target_state.player_id, "lord": target_state.player["name"], "province": "wessex", "city": "Royal Borough of Wilton", "fief": "Crown Demesne of Wilton"},
+            {"owner": target_state.player_id, "lord": target_state.player["name"], "province": "kent_essex", "city": "Royal Castle of London", "fief": "Crown Demesne of London"},
+            
+            # Jarl Halfdan's 3 Personal Viking Strongholds
+            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "jorvik", "city": "Great Hall of Jorvik", "fief": "Royal Demesne of Jorvik"},
+            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "jorvik", "city": "Citadel of Eoforwic", "fief": "Royal Demesne of Eoforwic"},
+            {"owner": target_state.enemy_id, "lord": target_state.enemy["name"], "province": "deira", "city": "Viking Stronghold of Deira", "fief": "Royal Demesne of Deira"},
+        ]
+
+        for spec in royal_demesnes:
+            pid = spec["province"]
+            tiles = prov_tile_list.get(pid, [])
+            tile_set = set(tiles)
+            used = used_tiles_by_prov[pid]
+            pair = None
+            for (c, r) in tiles:
+                if (c, r) not in used and (c + 1, r) in tile_set and (c + 1, r) not in used:
+                    pair = [(c, r), (c + 1, r)]
+                    break
+            if not pair:
+                for (c, r) in tiles:
+                    if (c, r) not in used and (c, r + 1) in tile_set and (c, r + 1) not in used:
+                        pair = [(c, r), (c, r + 1)]
+                        break
+            if not pair:
+                for (c, r) in tiles:
+                    if (c, r) not in used:
+                        pair = [(c, r)]
+                        break
+            if pair:
+                for t in pair:
+                    used.add(t)
+                    target_state.settlements[t] = {
+                        "province": pid,
+                        "type": "town",
+                        "name": spec["city"],
+                        "lord": f"{spec['lord']} (Royal Demesne)",
+                        "vassal_id": None,
+                        "is_crown_demesne": True
+                    }
+                fid = f"fief_{fief_counter}"
+                fief_counter += 1
+                target_state.fiefs[fid] = {
+                    "id": fid,
+                    "province": pid,
+                    "tiles": pair,
+                    "name": spec["fief"],
+                    "holder": spec["lord"],
+                    "vassal_id": None,
+                    "is_crown_demesne": True
+                }
+
+        # -------------------------------------------------------------
+        # 2. VASSAL STARTER HOLDINGS & FIEFS (Remaining tiles)
+        # -------------------------------------------------------------
         for pid, tiles in prov_tile_list.items():
             v_list = target_state.vassals.get(pid, [])
             tile_set = set(tiles)
             pname = PROVINCES[pid]["name"].split()[0]
-            used_tiles = set()
+            used = used_tiles_by_prov[pid]
             
-            # Step 1: Assign each vassal their starter 2-tile Fief and City
             for idx, v in enumerate(v_list):
                 city_name = f"{v['name'].split()[1]}'s {random.choice(['Keep', 'Burgh', 'Castle', 'Borough'])}"
-                placed_pair = None
-                # Scan for free horizontal pair
+                pair = None
                 for (c, r) in tiles:
-                    if (c, r) not in used_tiles and (c + 1, r) in tile_set and (c + 1, r) not in used_tiles:
-                        placed_pair = [(c, r), (c + 1, r)]
+                    if (c, r) not in used and (c + 1, r) in tile_set and (c + 1, r) not in used:
+                        pair = [(c, r), (c + 1, r)]
                         break
-                # Scan for free vertical pair if horizontal not found
-                if not placed_pair:
+                if not pair:
                     for (c, r) in tiles:
-                        if (c, r) not in used_tiles and (c, r + 1) in tile_set and (c, r + 1) not in used_tiles:
-                            placed_pair = [(c, r), (c, r + 1)]
+                        if (c, r) not in used and (c, r + 1) in tile_set and (c, r + 1) not in used:
+                            pair = [(c, r), (c, r + 1)]
                             break
-                
-                if placed_pair:
-                    for t in placed_pair:
-                        used_tiles.add(t)
-                        target_state.settlements[t] = {"province": pid, "type": "town", "name": city_name, "lord": v["name"], "vassal_id": v["id"]}
+                if not pair:
+                    for (c, r) in tiles:
+                        if (c, r) not in used:
+                            pair = [(c, r)]
+                            break
+
+                if pair:
+                    for t in pair:
+                        used.add(t)
+                        target_state.settlements[t] = {
+                            "province": pid,
+                            "type": "town",
+                            "name": city_name,
+                            "lord": v["name"],
+                            "vassal_id": v["id"],
+                            "is_crown_demesne": False
+                        }
                     v["city_name"] = city_name
-                    v["tiles"] = placed_pair
-                    # Register Fief
+                    v["tiles"] = pair
                     fid = f"fief_{fief_counter}"
                     fief_counter += 1
                     target_state.fiefs[fid] = {
                         "id": fid,
                         "province": pid,
-                        "tiles": placed_pair,
+                        "tiles": pair,
                         "name": f"Barony of {v['name'].split()[1]}",
                         "holder": v["name"],
-                        "vassal_id": v["id"]
+                        "vassal_id": v["id"],
+                        "is_crown_demesne": False
                     }
                 else:
-                    # Single tile fallback
-                    for (c, r) in tiles:
-                        if (c, r) not in used_tiles:
-                            used_tiles.add((c, r))
-                            target_state.settlements[(c, r)] = {"province": pid, "type": "town", "name": city_name, "lord": v["name"], "vassal_id": v["id"]}
-                            v["city_name"] = city_name
-                            v["tiles"] = [(c, r)]
-                            fid = f"fief_{fief_counter}"
-                            fief_counter += 1
-                            target_state.fiefs[fid] = {
-                                "id": fid,
-                                "province": pid,
-                                "tiles": [(c, r)],
-                                "name": f"Barony of {v['name'].split()[1]}",
-                                "holder": v["name"],
-                                "vassal_id": v["id"]
-                            }
-                            break
-            
-            # Step 2: Group any remaining tiles into UNCLAIMED FIEFS (2 tiles min each)!
-            remaining_tiles = [t for t in tiles if t not in used_tiles]
+                    v["city_name"] = None
+                    v["tiles"] = []
+
+            # -------------------------------------------------------------
+            # 3. UNASSIGNED CROWN FIEFS (Any remaining tiles in pairs of min 2)
+            # -------------------------------------------------------------
+            remaining_tiles = [t for t in tiles if t not in used]
             rem_set = set(remaining_tiles)
             f_unclaimed_idx = 1
             for (c, r) in remaining_tiles:
-                if (c, r) in used_tiles:
+                if (c, r) in used:
                     continue
                 pair = None
-                if (c + 1, r) in rem_set and (c + 1, r) not in used_tiles:
+                if (c + 1, r) in rem_set and (c + 1, r) not in used:
                     pair = [(c, r), (c + 1, r)]
-                elif (c, r + 1) in rem_set and (c, r + 1) not in used_tiles:
+                elif (c, r + 1) in rem_set and (c, r + 1) not in used:
                     pair = [(c, r), (c, r + 1)]
                 
                 if pair:
                     for t in pair:
-                        used_tiles.add(t)
+                        used.add(t)
                     fid = f"fief_{fief_counter}"
                     fief_counter += 1
                     target_state.fiefs[fid] = {
@@ -1190,8 +1247,9 @@ def run_game():
                         "province": pid,
                         "tiles": pair,
                         "name": f"{pname} Fief #{f_unclaimed_idx}",
-                        "holder": None,  # UNASSIGNED / EMPTY FIEF READY TO BE GRANTED!
-                        "vassal_id": None
+                        "holder": None,
+                        "vassal_id": None,
+                        "is_crown_demesne": False
                     }
                     f_unclaimed_idx += 1
 
@@ -1481,43 +1539,59 @@ def run_game():
                     state.disband_army(a)
 
         # ---------------------------------------------------------
-        # Left Panel Sub-Tabs: [ ⚔ Active Armies ]  [ 👑 Realm Vassals ]
+        # Left Panel Sub-Tabs: [ ⚔ Active Armies ]  [ 👥 Realm Vassals ]
+        #                      [ 👑 Royal Demesne (Crown Fiefs) ]
         # ---------------------------------------------------------
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 233), (285, 233), 1)
-        tab_y = 240
-        tab_armies = pygame.Rect(25, tab_y, 125, 26)
-        tab_vassals = pygame.Rect(158, tab_y, 127, 26)
+        tab_y = 238
+        tab_armies = pygame.Rect(25, tab_y, 125, 25)
+        tab_vassals = pygame.Rect(158, tab_y, 127, 25)
+        tab_demesne = pygame.Rect(25, tab_y + 29, 260, 25)
         
         is_hov_ta = tab_armies.collidepoint(mouse_pos)
         is_hov_tv = tab_vassals.collidepoint(mouse_pos)
+        is_hov_td = tab_demesne.collidepoint(mouse_pos)
         
         is_a_active = (state.left_tab == "armies")
+        is_v_active = (state.left_tab == "vassals")
+        is_d_active = (state.left_tab == "demesne")
+        
+        # Row 1 Tabs
         pygame.draw.rect(screen, COLOR_BUTTON_ACTIVE if is_a_active else (COLOR_BUTTON_HOVER if is_hov_ta else COLOR_BUTTON_NORMAL), tab_armies, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_a_active else COLOR_PANEL_BORDER, tab_armies, 1, border_radius=4)
-        screen.blit(font_xs.render("⚔ ACTIVE ARMIES", True, COLOR_TEXT_WHITE if not is_a_active else COLOR_GOLD), (32, tab_y + 6))
+        screen.blit(font_xs.render("⚔ ACTIVE ARMIES", True, COLOR_TEXT_WHITE if not is_a_active else COLOR_GOLD), (32, tab_y + 5))
         
-        is_v_active = (state.left_tab == "vassals")
         pygame.draw.rect(screen, COLOR_BUTTON_ACTIVE if is_v_active else (COLOR_BUTTON_HOVER if is_hov_tv else COLOR_BUTTON_NORMAL), tab_vassals, border_radius=4)
         pygame.draw.rect(screen, COLOR_GOLD if is_v_active else COLOR_PANEL_BORDER, tab_vassals, 1, border_radius=4)
-        screen.blit(font_xs.render("👑 REALM VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD), (164, tab_y + 6))
-        
+        screen.blit(font_xs.render("👥 REALM VASSALS", True, COLOR_TEXT_WHITE if not is_v_active else COLOR_GOLD), (164, tab_y + 5))
+
+        # Row 2 Tab: Royal Demesne
+        player_crown_fiefs = [f for f in state.fiefs.values() if f.get("holder") == state.player["name"]]
+        d_title = f"👑 ROYAL DEMESNE ({len(player_crown_fiefs)} Crown Fiefs)"
+        pygame.draw.rect(screen, (60, 48, 20) if is_d_active else (COLOR_BUTTON_HOVER if is_hov_td else (35, 40, 52)), tab_demesne, border_radius=4)
+        pygame.draw.rect(screen, COLOR_GOLD if is_d_active else (90, 140, 210), tab_demesne, 1, border_radius=4)
+        d_lbl = font_xs.render(d_title, True, COLOR_GOLD if is_d_active else (210, 230, 255))
+        screen.blit(d_lbl, (tab_demesne.x + (tab_demesne.w - d_lbl.get_width()) // 2, tab_y + 34))
+
         if mouse_clicked and is_hov_ta:
             state.left_tab = "armies"
         elif mouse_clicked and is_hov_tv:
             state.left_tab = "vassals"
+        elif mouse_clicked and is_hov_td:
+            state.left_tab = "demesne"
 
         if state.left_tab == "armies":
             # Active Saxon Armies Roster
-            screen.blit(font_md.render("Active Saxon Armies", True, COLOR_GOLD), (25, 275))
+            screen.blit(font_md.render("Active Saxon Armies", True, COLOR_GOLD), (25, 302))
 
             player_armies = [a for a in state.armies if a.owner == state.player_id]
             if not player_armies:
-                screen.blit(font_sm.render("No armies raised yet.", True, COLOR_TEXT_MUTED), (25, 305))
-                screen.blit(font_sm.render("Click 'RAISE ALL' or select", True, COLOR_TEXT_MUTED), (25, 325))
-                screen.blit(font_sm.render("a province to raise local fyrd.", True, COLOR_TEXT_MUTED), (25, 345))
+                screen.blit(font_sm.render("No armies raised yet.", True, COLOR_TEXT_MUTED), (25, 330))
+                screen.blit(font_sm.render("Click 'RAISE ALL' or select", True, COLOR_TEXT_MUTED), (25, 350))
+                screen.blit(font_sm.render("a province to raise local fyrd.", True, COLOR_TEXT_MUTED), (25, 370))
             else:
-                ay = 305
-                for a in player_armies[:4]:
+                ay = 330
+                for a in player_armies[:3]:
                     a_rect = pygame.Rect(25, ay, 260, 44)
                     is_sel = (a.id == state.selected_army_id)
                     b_hover_a = a_rect.collidepoint(mouse_pos)
@@ -1556,6 +1630,50 @@ def run_game():
                 screen.blit(lm_surf, (25, log_y))
                 log_y += 24
 
+        elif state.left_tab == "demesne":
+            # Royal Demesne View (Personal Crown Fiefs & Cities)
+            screen.blit(font_md.render(f"Royal Crown Demesne ({len(player_crown_fiefs)} Fiefs)", True, COLOR_GOLD), (25, 302))
+            screen.blit(font_xs.render("King Alfred's Personal Holdings & Cities:", True, COLOR_TEXT_MUTED), (25, 324))
+
+            fy = 345
+            for f in player_crown_fiefs[:3]:
+                f_rect = pygame.Rect(25, fy, 260, 46)
+                is_sel = (f["id"] == state.selected_fief_id)
+                b_hover_f = f_rect.collidepoint(mouse_pos)
+                
+                bg_col = (70, 55, 20) if is_sel else ((50, 60, 78) if b_hover_f else (34, 40, 52))
+                pygame.draw.rect(screen, bg_col, f_rect, border_radius=4)
+                pygame.draw.rect(screen, COLOR_GOLD if is_sel else (80, 140, 220), f_rect, 1, border_radius=4)
+
+                screen.blit(font_sm.render(f"🏰 {f['name']}", True, COLOR_GOLD), (34, fy + 4))
+                p_short = PROVINCES[f['province']]['name'].split()[0]
+                status_str = f"Province: {p_short}  •  {len(f['tiles'])} Tiles (+6g/m)"
+                screen.blit(font_xs.render(status_str, True, (210, 230, 255)), (34, fy + 24))
+
+                if mouse_clicked and b_hover_f:
+                    state.selected_fief_id = f["id"]
+                    state.selected_province = f["province"]
+                    if f.get("tiles"):
+                        state.selected_settlement = f["tiles"][0]
+                    state.selected_army_id = None
+
+                fy += 50
+
+            if not player_crown_fiefs:
+                screen.blit(font_sm.render("No crown fiefs held directly.", True, COLOR_TEXT_MUTED), (25, 350))
+                screen.blit(font_xs.render("Revoke fiefs to expand royal land.", True, COLOR_TEXT_MUTED), (25, 370))
+
+            # Chronicle of Britain
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 505), (285, 505), 1)
+            screen.blit(font_md.render("Chronicle of Britain", True, COLOR_GOLD), (25, 515))
+
+            log_y = 545
+            for log_msg in state.logs[-6:]:
+                disp = log_msg[:34] + "..." if len(log_msg) > 37 else log_msg
+                lm_surf = font_sm.render(f"• {disp}", True, COLOR_TEXT_MUTED)
+                screen.blit(lm_surf, (25, log_y))
+                log_y += 24
+
         else:
             # Realm Vassals Directory (All vassals across Kingdom of Wessex)
             realm_vassals = []
@@ -1566,18 +1684,18 @@ def run_game():
             
             total_v = len(realm_vassals)
             header_lbl = font_md.render(f"Realm Vassals ({total_v} Lords)", True, COLOR_GOLD)
-            screen.blit(header_lbl, (25, 275))
+            screen.blit(header_lbl, (25, 302))
             
-            per_page = 6
+            per_page = 5
             max_pages = max(1, (total_v + per_page - 1) // per_page)
             state.vassal_page = max(0, min(state.vassal_page, max_pages - 1))
             
             start_i = state.vassal_page * per_page
             cur_page_vassals = realm_vassals[start_i:start_i + per_page]
             
-            vy = 305
+            vy = 328
             for v_pid, v_data in cur_page_vassals:
-                v_card = pygame.Rect(25, vy, 260, 52)
+                v_card = pygame.Rect(25, vy, 260, 50)
                 is_vc_hov = v_card.collidepoint(mouse_pos)
                 pygame.draw.rect(screen, (50, 60, 78) if is_vc_hov else (34, 40, 52), v_card, border_radius=4)
                 pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
@@ -1587,9 +1705,9 @@ def run_game():
                 p_tag = font_xs.render(f"[{prov_short}]", True, (140, 200, 255))
                 screen.blit(p_tag, (280 - p_tag.get_width(), vy + 4))
                 
-                h_name = v_data.get("city_name") or "Holding Fief"
-                screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 18))
-                screen.blit(font_xs.render(f"Gold: {v_data['gold']}g  •  Levy: +{v_data['levy_contribution']}  •  Tax: +{v_data['tax_contribution']}g/m", True, COLOR_TEXT_MUTED), (32, vy + 32))
+                h_name = v_data.get("city_name") or "Landless Noble"
+                screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 17))
+                screen.blit(font_xs.render(f"Gold: {v_data['gold']}g  •  Levy: +{v_data['levy_contribution']}  •  Tax: +{v_data['tax_contribution']}g/m", True, COLOR_TEXT_MUTED), (32, vy + 30))
                 
                 if mouse_clicked and is_vc_hov:
                     state.selected_province = v_pid
@@ -1598,10 +1716,10 @@ def run_game():
                         state.selected_settlement = v_data["tiles"][0]
                     state.logs.append(f"Inspecting vassal {v_data['name']} in {PROVINCES[v_pid]['name']}.")
                 
-                vy += 56
+                vy += 54
                 
             # Pagination Controls at bottom
-            py_btn = 650
+            py_btn = 645
             btn_prev = pygame.Rect(25, py_btn, 80, 26)
             btn_next = pygame.Rect(205, py_btn, 80, 26)
             
