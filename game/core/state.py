@@ -8,7 +8,7 @@ import copy
 from game.config import DAYS_PER_TILE, DAYS_PER_KOTAK, LEVY_RAISE_COOLDOWN_DAYS, COLOR_WESSEX, COLOR_DANELAW
 from game.data.characters import CHARACTERS, INITIAL_CHARACTERS
 from game.data.provinces import PROVINCES, INITIAL_PROVINCES, PROVINCE_FACTION_COLORS, ADJACENCY, find_shortest_path, reset_global_world_data
-from game.data.buildings import BUILDING_SPECS, get_barrack_stats
+from game.data.buildings import BUILDING_SPECS, get_barrack_stats, BARRACK_UPGRADE_COSTS
 from game.core.map import CELL_TO_PROV, PROV_TO_TILES, PROV_CAPITAL_TILES, get_province_capital_tile, find_shortest_tile_path, TILE_ADJACENCY
 from game.core.army import Army
 from game.systems.economy import (
@@ -1227,12 +1227,25 @@ class GameState:
                 barrack_cost = BUILDING_SPECS["barrack"]["cost"] # 800
                 fort_cost = BUILDING_SPECS["fort"]["cost"]       # 1000
 
-                if v_gold < city_cost:
+                if v_gold < min(city_cost, 400):
                     continue
 
-                v_fiefs = [f for f in self.fiefs.values() if f.get("province") == pid and (f.get("holder") == v["name"] or f.get("vassal_id") == v.get("id"))]
-                if not v_fiefs:
-                    continue
+                # Check ALL fiefs held by this vassal anywhere across the realm!
+                v_fiefs = [f for f in self.fiefs.values() if (f.get("holder") == v["name"] or f.get("vassal_id") == v.get("id"))]
+
+                # Also include un-fiefed tiles held directly by this vassal if any
+                direct_tiles = [t for t in v.get("tiles", []) if t not in self.settlements]
+                if direct_tiles:
+                    tiles_by_prov = {}
+                    for dt in direct_tiles:
+                        p_dt = CELL_TO_PROV.get(dt, pid)
+                        tiles_by_prov.setdefault(p_dt, []).append(dt)
+                    for p_dt, dt_list in tiles_by_prov.items():
+                        v_fiefs.append({
+                            "name": f"Domain of {v['name'].split()[1] if len(v['name'].split()) > 1 else v['name']}",
+                            "province": p_dt,
+                            "tiles": dt_list
+                        })
 
                 # Find all available choices for this vassal
                 possible_builds = []
@@ -1263,19 +1276,56 @@ class GameState:
                     if v_gold >= city_cost:
                         possible_builds.append(("city", city_cost, [free_tiles[0]], f))
 
+                # 4. Check Barracks Upgrade Option for existing barracks
+                all_v_tiles = list(v.get("tiles", []))
+                for f in v_fiefs:
+                    for t in f.get("tiles", []):
+                        if t not in all_v_tiles:
+                            all_v_tiles.append(t)
+
+                for t in all_v_tiles:
+                    s_cur = self.settlements.get(t)
+                    if s_cur and s_cur.get("type") == "barrack" and (s_cur.get("vassal_id") == v.get("id") or s_cur.get("lord") == v["name"]):
+                        cur_lvl = s_cur.get("level", 1) or 1
+                        if cur_lvl < 5:
+                            next_lvl = cur_lvl + 1
+                            up_cost = BARRACK_UPGRADE_COSTS.get(next_lvl, 400)
+                            if v_gold >= up_cost:
+                                f_dummy = {"province": s_cur.get("province", pid), "name": s_cur.get("name", "Barracks")}
+                                possible_builds.append(("upgrade_barrack", up_cost, [t], f_dummy))
+
                 if not possible_builds:
                     continue
 
                 # Autonomous Decision:
-                # If vassal has no city in this fief yet, they strongly prefer building a City to generate wealth!
+                # If vassal has no city in their fiefs yet, they strongly prefer building a City to generate wealth!
                 has_city = any(self.settlements.get(t, {}).get("type") in ("city", "town") for f in v_fiefs for t in f.get("tiles", []))
                 if not has_city:
                     city_choices = [b for b in possible_builds if b[0] == "city"]
                     choice = city_choices[0] if city_choices else random.choice(possible_builds)
                 else:
-                    choice = random.choice(possible_builds)
+                    # Prefer higher-tier investments if wealthy
+                    if v_gold >= fort_cost and any(b[0] == "fort" for b in possible_builds):
+                        fort_choices = [b for b in possible_builds if b[0] == "fort"]
+                        choice = fort_choices[0]
+                    else:
+                        choice = random.choice(possible_builds)
 
                 b_type, b_cost, chosen_tiles, chosen_fief = choice
+                f_pid = chosen_fief.get("province", pid)
+
+                if b_type == "upgrade_barrack":
+                    t = chosen_tiles[0]
+                    s_cur = self.settlements[t]
+                    s_cur["level"] = (s_cur.get("level", 1) or 1) + 1
+                    v["gold"] = round(v["gold"] - b_cost, 1)
+                    sync_province_holdings_stats(self, f_pid)
+                    st_v = get_vassal_landed_status(self, v, pid)
+                    v["tax_contribution"] = st_v["tax_paid"]
+                    v["levy_contribution"] = st_v["levy_contribution"]
+                    self.logs.append(f"Feudal Autonomy: {v['name']} has upgraded {s_cur['name']} to Level {s_cur['level']} ({b_cost}g) in {PROVINCES.get(f_pid, {}).get('name', 'the realm')}!")
+                    continue
+
                 v["gold"] = round(v["gold"] - b_cost, 1)
 
                 self.settlement_id_counter += 1
@@ -1291,7 +1341,7 @@ class GameState:
                 for t in chosen_tiles:
                     self.settlements[t] = {
                         "id": s_id,
-                        "province": pid,
+                        "province": f_pid,
                         "type": b_type,
                         "name": s_name,
                         "lord": v["name"],
@@ -1307,13 +1357,15 @@ class GameState:
                     v["city_name"] = s_name
 
                 # Synchronize province stats and vassal stats immediately
-                sync_province_holdings_stats(self, pid)
+                sync_province_holdings_stats(self, f_pid)
+                if f_pid != pid:
+                    sync_province_holdings_stats(self, pid)
                 st_v = get_vassal_landed_status(self, v, pid)
                 v["tax_contribution"] = st_v["tax_paid"]
                 v["levy_contribution"] = st_v["levy_contribution"]
 
                 b_spec = BUILDING_SPECS[b_type]
-                self.logs.append(f"Feudal Autonomy: {v['name']} has autonomously constructed a {b_spec['name']} ({b_cost}g) in {chosen_fief['name']} ({PROVINCES[pid]['name']})!")
+                self.logs.append(f"Feudal Autonomy: {v['name']} has autonomously constructed a {b_spec['name']} ({b_cost}g) in {chosen_fief['name']} ({PROVINCES.get(f_pid, {}).get('name', 'the realm')})!")
 
     def yearly_tick(self):
         self.player["age"] += 1
