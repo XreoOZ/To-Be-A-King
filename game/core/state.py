@@ -7,7 +7,7 @@ import copy
 
 from game.config import DAYS_PER_TILE, DAYS_PER_KOTAK, LEVY_RAISE_COOLDOWN_DAYS, COLOR_WESSEX, COLOR_DANELAW
 from game.data.characters import CHARACTERS, INITIAL_CHARACTERS
-from game.data.provinces import PROVINCES, INITIAL_PROVINCES, PROVINCE_FACTION_COLORS, ADJACENCY, find_shortest_path
+from game.data.provinces import PROVINCES, INITIAL_PROVINCES, PROVINCE_FACTION_COLORS, ADJACENCY, find_shortest_path, reset_global_world_data
 from game.data.buildings import BUILDING_SPECS, get_barrack_stats
 from game.core.map import CELL_TO_PROV, PROV_TO_TILES, PROV_CAPITAL_TILES, get_province_capital_tile, find_shortest_tile_path, TILE_ADJACENCY
 from game.core.army import Army
@@ -125,6 +125,13 @@ class GameState:
         
         # Generate random 1-5 vassals for all provinces
         self.generate_province_vassals()
+
+    def reset(self):
+        """Reinitialize entire game state and 1:1 starter cities matching vassals in-place."""
+        reset_global_world_data()
+        self.__init__()
+        setup_province_starter_cities(self)
+        self.logs.append("Game reset to 1 January 867 AD! Vassals & cities synchronized.")
 
     def generate_province_vassals(self):
         saxon_first_names = ["Aethelred", "Aelfric", "Leofric", "Godric", "Wulfstan", "Eadric", "Beorn", "Ordgar", "Cenwulf", "Dunstan", "Brihtnoth", "Aldhelm"]

@@ -88,9 +88,7 @@ def render_header(screen, state, mouse_pos, mouse_clicked, is_popup_active, font
     screen.blit(rst_lbl, (rst_btn.x + (rst_btn.w - rst_lbl.get_width()) // 2, rst_btn.y + 8))
     if mouse_clicked and b_rst_hov:
         # Reinitialize entire game state and 1:1 starter cities matching vassals!
-        reset_global_world_data()
-        state = GameState()
-        setup_province_starter_cities(state)
-        state.logs.append("Game reset to 1 January 867 AD! Vassals & cities synchronized.")
-    
+        state.reset()
+        if on_reset:
+            on_reset()
     # ---------------------------------------------------------
