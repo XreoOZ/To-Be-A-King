@@ -67,6 +67,7 @@ class GameState:
         # Left Panel Sub-Tab System ('armies', 'vassals', 'demesne', or 'laws')
         self.left_tab = "armies"
         self.vassal_page = 0
+        self.vassal_selected_province = None
         self.demesne_page = 0
         self.demesne_selected_province = None  # None = show province list; str = province id to show fiefs inside
         self.fief_page = 0

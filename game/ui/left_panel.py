@@ -214,6 +214,8 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
         state.left_tab = "armies"
     elif mouse_clicked and is_hov_tv:
         state.left_tab = "vassals"
+        state.vassal_selected_province = None
+        state.vassal_page = 0
     elif mouse_clicked and is_hov_td:
         if state.left_tab != "demesne":
             state.left_tab = "demesne"
@@ -477,80 +479,211 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 state.demesne_page += 1
     
     elif state.left_tab == "vassals":
-        # Realm Vassals Directory (All vassals across Kingdom of Wessex)
-        realm_vassals = []
-        for pid, prov in PROVINCES.items():
-            if prov["owner"] == state.player_id:
-                for v in state.vassals.get(pid, []):
-                    realm_vassals.append((pid, v))
-        
-        total_v = len(realm_vassals)
-        header_lbl = font_md.render(f"Realm Vassals ({total_v} Lords)", True, COLOR_GOLD)
-        screen.blit(header_lbl, (25, 302))
-        
-        per_page = 5
-        max_pages = max(1, (total_v + per_page - 1) // per_page)
-        state.vassal_page = max(0, min(getattr(state, "vassal_page", 0), max_pages - 1))
-        
-        start_i = state.vassal_page * per_page
-        cur_page_vassals = realm_vassals[start_i:start_i + per_page]
-        
-        vy = 328
-        for v_pid, v_data in cur_page_vassals:
-            v_card = pygame.Rect(content_x, vy, content_w, 50)
-            is_vc_hov = v_card.collidepoint(mouse_pos)
-            pygame.draw.rect(screen, (50, 60, 78) if is_vc_hov else (34, 40, 52), v_card, border_radius=4)
-            pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
-            
-            prov_short = PROVINCES[v_pid]["name"].split()[0]
-            screen.blit(font_xs.render(f"♟ {v_data['name']}", True, COLOR_GOLD), (32, vy + 4))
-            p_tag = font_xs.render(f"[{prov_short}]", True, (140, 200, 255))
-            screen.blit(p_tag, (content_x + content_w - p_tag.get_width() - 8, vy + 4))
-            
-            st = get_vassal_landed_status(state, v_data, v_pid)
-            if st["is_landed"]:
-                h_name = v_data.get("city_name") or (st["held_fiefs"][0].get("name") if st.get("held_fiefs") else None) or (st["held_settlements"][0].get("name") if st.get("held_settlements") else None) or "Landed Noble"
-            else:
-                h_name = "Landless Noble (Unlanded)"
-            screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 17))
-            
-            levy_txt = f"+{st['levy_contribution']}" if st["is_landed"] else "0"
-            tax_txt = f"+{fmt_gold(st['tax_paid'])}g/m" if st["is_landed"] else "0g/m"
-            screen.blit(font_xs.render(f"Gold: {fmt_gold(v_data['gold'])}g  •  Levy: {levy_txt}  •  Tax: {tax_txt}", True, COLOR_TEXT_MUTED), (32, vy + 30))
-            
-            if mouse_clicked and is_vc_hov:
-                state.selected_province = v_pid
-                state.inspecting_vassal = {"province": v_pid, "vassal": v_data}
-                if v_data.get("tiles"):
-                    state.selected_settlement = v_data["tiles"][0]
-                state.logs.append(f"Opened royal dossier for vassal {v_data['name']}.")
-            
-            vy += 54
-            
-        # Pagination Controls at bottom
-        py_btn = 645
-        btn_prev = pygame.Rect(content_x, py_btn, 110, 28)
-        btn_next = pygame.Rect(content_x + content_w - 110, py_btn, 110, 28)
-        
-        is_prev_hov = btn_prev.collidepoint(mouse_pos)
-        is_next_hov = btn_next.collidepoint(mouse_pos)
-        
-        pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
-        pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
-        screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.vassal_page > 0 else COLOR_TEXT_MUTED), (btn_prev.x + (btn_prev.w - font_xs.size("PREV")[0]) // 2, py_btn + 6))
-        
-        pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
-        pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
-        screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.vassal_page < max_pages - 1 else COLOR_TEXT_MUTED), (btn_next.x + (btn_next.w - font_xs.size("NEXT")[0]) // 2, py_btn + 6))
-        
-        page_str = f"Page {state.vassal_page + 1}/{max_pages}"
-        p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
-        screen.blit(p_lbl, (content_x + (content_w - p_lbl.get_width()) // 2, py_btn + 6))
-        
-        if mouse_clicked and is_prev_hov and state.vassal_page > 0:
-            state.vassal_page -= 1
-        elif mouse_clicked and is_next_hov and state.vassal_page < max_pages - 1:
-            state.vassal_page += 1
+        if not hasattr(state, "vassal_selected_province"):
+            state.vassal_selected_province = None
+        if not hasattr(state, "vassal_page"):
+            state.vassal_page = 0
+
+        # Gather realm provinces belonging to the player
+        vassal_provinces = [pid for pid, prov in PROVINCES.items() if prov.get("owner") == state.player_id]
+
+        # -------------------------------------------------------------
+        # LEVEL 1: LIST OF PROVINCES IN THE REALM
+        # -------------------------------------------------------------
+        if state.vassal_selected_province is None:
+            total_provs = len(vassal_provinces)
+            total_all_vassals = sum(len(state.vassals.get(pid, [])) for pid in vassal_provinces)
+            header_lbl = font_md.render(f"Realm Vassals ({total_all_vassals} Lords)", True, COLOR_GOLD)
+            screen.blit(header_lbl, (25, 302))
+
+            per_page = 5
+            max_pages = max(1, (total_provs + per_page - 1) // per_page)
+            state.vassal_page = max(0, min(getattr(state, "vassal_page", 0), max_pages - 1))
+
+            start_i = state.vassal_page * per_page
+            cur_page_provs = vassal_provinces[start_i:start_i + per_page]
+
+            vy = 328
+            for pid in cur_page_provs:
+                prov_v_list = state.vassals.get(pid, [])
+                p_info = PROVINCES.get(pid, {})
+                p_name = p_info.get("name", pid).split()[0]
+
+                # Calculate total landed vassals and province levy contribution
+                landed_cnt = 0
+                total_levy = 0
+                for v in prov_v_list:
+                    st = get_vassal_landed_status(state, v, pid)
+                    if st["is_landed"]:
+                        landed_cnt += 1
+                        total_levy += st["levy_contribution"]
+
+                p_card = pygame.Rect(content_x, vy, content_w, 50)
+                is_p_hov = p_card.collidepoint(mouse_pos)
+                is_active_prov = (state.selected_province == pid)
+
+                bg_c = (60, 50, 24) if is_active_prov else ((50, 60, 78) if is_p_hov else (34, 40, 52))
+                border_c = COLOR_GOLD if (is_p_hov or is_active_prov) else (80, 140, 220)
+
+                pygame.draw.rect(screen, bg_c, p_card, border_radius=4)
+                pygame.draw.rect(screen, border_c, p_card, 1, border_radius=4)
+
+                screen.blit(font_sm.render(f"◆ {p_name}", True, COLOR_GOLD), (34, vy + 4))
+                desc_str = f"{len(prov_v_list)} Vassals • {landed_cnt} Landed • Fyrd: +{total_levy}"
+                screen.blit(font_xs.render(desc_str, True, (210, 230, 255)), (34, vy + 26))
+
+                arr_lbl = font_xs.render("View ›", True, COLOR_GOLD if is_p_hov else (160, 200, 240))
+                screen.blit(arr_lbl, (content_x + content_w - arr_lbl.get_width() - 8, vy + 16))
+
+                if mouse_clicked and is_p_hov:
+                    state.vassal_selected_province = pid
+                    state.vassal_page = 0
+                    state.selected_province = pid
+                    state.logs.append(f"Viewing vassal roster of {p_name}.")
+
+                vy += 54
+
+            if not vassal_provinces:
+                screen.blit(font_sm.render("No provinces under realm rule.", True, COLOR_TEXT_MUTED), (25, 350))
+
+            # Bottom Pagination Controls for Province List
+            py_btn = 645
+            btn_prev = pygame.Rect(content_x, py_btn, 110, 28)
+            btn_next = pygame.Rect(content_x + content_w - 110, py_btn, 110, 28)
+            is_prev_hov = btn_prev.collidepoint(mouse_pos)
+            is_next_hov = btn_next.collidepoint(mouse_pos)
+
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
+            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.vassal_page > 0 else COLOR_TEXT_MUTED), (btn_prev.x + (btn_prev.w - font_xs.size("PREV")[0]) // 2, py_btn + 6))
+
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
+            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.vassal_page < max_pages - 1 else COLOR_TEXT_MUTED), (btn_next.x + (btn_next.w - font_xs.size("NEXT")[0]) // 2, py_btn + 6))
+
+            page_str = f"Page {state.vassal_page + 1}/{max_pages}"
+            p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
+            screen.blit(p_lbl, (content_x + (content_w - p_lbl.get_width()) // 2, py_btn + 6))
+
+            if mouse_clicked and is_prev_hov and state.vassal_page > 0:
+                state.vassal_page -= 1
+            elif mouse_clicked and is_next_hov and state.vassal_page < max_pages - 1:
+                state.vassal_page += 1
+
+        # -------------------------------------------------------------
+        # LEVEL 2: LIST OF VASSALS INSIDE THE SELECTED PROVINCE
+        # -------------------------------------------------------------
+        else:
+            sel_pid = state.vassal_selected_province
+            prov_vassals = state.vassals.get(sel_pid, [])
+            p_info = PROVINCES.get(sel_pid, {})
+            p_name = p_info.get("name", sel_pid).split()[0]
+
+            # Back Button & Province Header
+            back_btn = pygame.Rect(25, 298, 105, 24)
+            is_back_hov = back_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (45, 65, 90) if is_back_hov else (30, 42, 60), back_btn, border_radius=4)
+            pygame.draw.rect(screen, COLOR_GOLD if is_back_hov else (80, 140, 220), back_btn, 1, border_radius=4)
+            screen.blit(font_xs.render("◄ ALL PROVS", True, COLOR_GOLD if is_back_hov else COLOR_TEXT_WHITE), (33, 303))
+
+            header_lbl = font_sm.render(f"◆ {p_name} ({len(prov_vassals)} Lords)", True, COLOR_GOLD)
+            screen.blit(header_lbl, (140, 302))
+
+            if mouse_clicked and is_back_hov:
+                state.vassal_selected_province = None
+                state.vassal_page = 0
+
+            per_page = 5
+            max_pages = max(1, (len(prov_vassals) + per_page - 1) // per_page)
+            state.vassal_page = max(0, min(getattr(state, "vassal_page", 0), max_pages - 1))
+
+            start_i = state.vassal_page * per_page
+            cur_page_vassals = prov_vassals[start_i:start_i + per_page]
+
+            vy = 328
+            for v_data in cur_page_vassals:
+                v_card = pygame.Rect(content_x, vy, content_w, 52)
+                is_vc_hov = v_card.collidepoint(mouse_pos)
+
+                # Quick Gift Gold Button on each card: [ +50g 🎁 ]
+                gift_btn = pygame.Rect(content_x + content_w - 68, vy + 4, 62, 20)
+                is_g_hov = gift_btn.collidepoint(mouse_pos)
+                can_gift = (state.player["gold"] >= 50)
+
+                pygame.draw.rect(screen, (50, 60, 78) if is_vc_hov else (34, 40, 52), v_card, border_radius=4)
+                pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
+
+                # Vassal Name (truncate if long to leave space for gift button)
+                v_name_disp = v_data["name"]
+                if len(v_name_disp) > 17:
+                    v_name_disp = v_name_disp[:15] + ".."
+                screen.blit(font_xs.render(f"♟ {v_name_disp}", True, COLOR_GOLD), (32, vy + 4))
+
+                # Draw Gift Button
+                g_bg = (30, 70, 40) if (is_g_hov and can_gift) else ((20, 50, 30) if can_gift else (40, 42, 48))
+                g_bd = COLOR_TEXT_GREEN if can_gift else (80, 85, 95)
+                pygame.draw.rect(screen, g_bg, gift_btn, border_radius=3)
+                pygame.draw.rect(screen, g_bd, gift_btn, 1, border_radius=3)
+                g_lbl = font_xs.render("+50g 🎁", True, COLOR_TEXT_WHITE if can_gift else COLOR_TEXT_MUTED)
+                screen.blit(g_lbl, (gift_btn.x + (gift_btn.w - g_lbl.get_width()) // 2, gift_btn.y + 2))
+
+                st = get_vassal_landed_status(state, v_data, sel_pid)
+                if st["is_landed"]:
+                    h_name = v_data.get("city_name") or (st["held_fiefs"][0].get("name") if st.get("held_fiefs") else None) or (st["held_settlements"][0].get("name") if st.get("held_settlements") else None) or "Landed Noble"
+                else:
+                    h_name = "Landless Noble (Unlanded)"
+                if len(h_name) > 28:
+                    h_name = h_name[:26] + ".."
+                screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 19))
+
+                levy_txt = f"+{st['levy_contribution']}" if st["is_landed"] else "0"
+                tax_txt = f"+{fmt_gold(st['tax_paid'])}g/m" if st["is_landed"] else "0g/m"
+                screen.blit(font_xs.render(f"Gold: {fmt_gold(v_data['gold'])}g  •  Levy: {levy_txt}  •  Tax: {tax_txt}", True, COLOR_TEXT_MUTED), (32, vy + 34))
+
+                if mouse_clicked:
+                    if is_g_hov:
+                        if can_gift:
+                            state.player["gold"] = round(state.player["gold"] - 50, 1)
+                            v_data["gold"] = round(v_data.get("gold", 0) + 50, 1)
+                            state.logs.append(f"👑 Sent 50g royal subsidy to {v_data['name']} (Treasury: {fmt_gold(v_data['gold'])}g).")
+                        else:
+                            state.logs.append(f"⚠️ Need 50 gold to send subsidy to {v_data['name']}!")
+                    elif is_vc_hov:
+                        state.selected_province = sel_pid
+                        state.inspecting_vassal = {"province": sel_pid, "vassal": v_data}
+                        if v_data.get("tiles"):
+                            state.selected_settlement = v_data["tiles"][0]
+                        state.logs.append(f"Opened royal dossier for vassal {v_data['name']}.")
+
+                vy += 56
+
+            if not prov_vassals:
+                screen.blit(font_sm.render(f"No vassals currently in {p_name}.", True, COLOR_TEXT_MUTED), (25, 350))
+
+            # Bottom Pagination Controls for Vassal List
+            py_btn = 645
+            btn_prev = pygame.Rect(content_x, py_btn, 110, 28)
+            btn_next = pygame.Rect(content_x + content_w - 110, py_btn, 110, 28)
+
+            is_prev_hov = btn_prev.collidepoint(mouse_pos)
+            is_next_hov = btn_next.collidepoint(mouse_pos)
+
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_prev_hov else COLOR_BUTTON_NORMAL, btn_prev, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_prev, 1, border_radius=4)
+            screen.blit(font_xs.render("◄ PREV", True, COLOR_TEXT_WHITE if state.vassal_page > 0 else COLOR_TEXT_MUTED), (btn_prev.x + (btn_prev.w - font_xs.size("PREV")[0]) // 2, py_btn + 6))
+
+            pygame.draw.rect(screen, COLOR_BUTTON_HOVER if is_next_hov else COLOR_BUTTON_NORMAL, btn_next, border_radius=4)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_next, 1, border_radius=4)
+            screen.blit(font_xs.render("NEXT ►", True, COLOR_TEXT_WHITE if state.vassal_page < max_pages - 1 else COLOR_TEXT_MUTED), (btn_next.x + (btn_next.w - font_xs.size("NEXT")[0]) // 2, py_btn + 6))
+
+            page_str = f"Page {state.vassal_page + 1}/{max_pages}"
+            p_lbl = font_xs.render(page_str, True, COLOR_TEXT_MUTED)
+            screen.blit(p_lbl, (content_x + (content_w - p_lbl.get_width()) // 2, py_btn + 6))
+
+            if mouse_clicked and is_prev_hov and state.vassal_page > 0:
+                state.vassal_page -= 1
+            elif mouse_clicked and is_next_hov and state.vassal_page < max_pages - 1:
+                state.vassal_page += 1
     
     elif state.left_tab == "laws":
         # Feudal Realm Laws View (Customizable per-vassal tax and levy rates 0% - 90%)

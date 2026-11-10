@@ -559,33 +559,97 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                 fy_item += 19
 
         # Action Buttons at Bottom
-        btn_w, btn_h = 280, 38
-        
-        # Button 1: Locate on Map (pans camera to vassal seat)
-        loc_btn = pygame.Rect(pop_x + 40, pop_y + pop_h - 60, btn_w, btn_h)
-        loc_hov = loc_btn.collidepoint(mouse_pos)
-        pygame.draw.rect(screen, (40, 85, 130) if loc_hov else (28, 60, 95), loc_btn, border_radius=6)
-        pygame.draw.rect(screen, (100, 180, 255), loc_btn, 1, border_radius=6)
-        screen.blit(font_sm.render("▶ LOCATE SEAT ON MAP", True, COLOR_TEXT_WHITE), (pop_x + 95, pop_y + pop_h - 50))
-        if modal_mouse_clicked and loc_hov:
-            state.selected_province = v_pid
-            if v_obj.get("tiles"):
-                tc, tr = v_obj["tiles"][0]
-                state.selected_settlement = (tc, tr)
-                # Pan camera to focus on this holding
-                state.cam_pan_x = VIEWPORT_CENTER_X - (tc * curr_tile_w + curr_tile_w // 2)
-                state.cam_pan_y = VIEWPORT_CENTER_Y - (tr * curr_tile_h + curr_tile_h // 2)
-            state.inspecting_vassal = None
-            state.logs.append(f"Centering camera on {v_obj['name']}'s seat in {p_full}.")
-    
-        # Button 2: Close Dossier (ESC)
-        close_btn = pygame.Rect(pop_x + pop_w - 40 - btn_w, pop_y + pop_h - 60, btn_w, btn_h)
-        c_hov = close_btn.collidepoint(mouse_pos)
-        pygame.draw.rect(screen, (75, 35, 35) if c_hov else (55, 25, 25), close_btn, border_radius=6)
-        pygame.draw.rect(screen, (220, 80, 80), close_btn, 1, border_radius=6)
-        screen.blit(font_sm.render("CLOSE DOSSIER (ESC)", True, (255, 220, 220)), (pop_x + pop_w - 40 - btn_w + 70, pop_y + pop_h - 50))
-        if modal_mouse_clicked and c_hov:
-            state.inspecting_vassal = None
+        if not is_enemy:
+            btn_h = 36
+            loc_btn = pygame.Rect(pop_x + 30, pop_y + pop_h - 56, 170, btn_h)
+            gift50_btn = pygame.Rect(pop_x + 215, pop_y + pop_h - 56, 155, btn_h)
+            gift100_btn = pygame.Rect(pop_x + 385, pop_y + pop_h - 56, 155, btn_h)
+            close_btn = pygame.Rect(pop_x + 555, pop_y + pop_h - 56, 195, btn_h)
+
+            loc_hov = loc_btn.collidepoint(mouse_pos)
+            g50_hov = gift50_btn.collidepoint(mouse_pos)
+            g100_hov = gift100_btn.collidepoint(mouse_pos)
+            c_hov = close_btn.collidepoint(mouse_pos)
+
+            can_g50 = (state.player["gold"] >= 50)
+            can_g100 = (state.player["gold"] >= 100)
+
+            # Button 1: Locate
+            pygame.draw.rect(screen, (40, 85, 130) if loc_hov else (28, 60, 95), loc_btn, border_radius=6)
+            pygame.draw.rect(screen, (100, 180, 255), loc_btn, 1, border_radius=6)
+            loc_lbl = font_xs.render("▶ LOCATE SEAT", True, COLOR_TEXT_WHITE)
+            screen.blit(loc_lbl, (loc_btn.x + (loc_btn.w - loc_lbl.get_width()) // 2, loc_btn.y + 10))
+
+            # Button 2: Gift 50g
+            pygame.draw.rect(screen, (35, 75, 45) if (g50_hov and can_g50) else ((25, 55, 35) if can_g50 else (40, 42, 48)), gift50_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_TEXT_GREEN if can_g50 else (80, 85, 95), gift50_btn, 1, border_radius=6)
+            g50_lbl = font_xs.render("🎁 GIFT 50g", True, COLOR_TEXT_WHITE if can_g50 else COLOR_TEXT_MUTED)
+            screen.blit(g50_lbl, (gift50_btn.x + (gift50_btn.w - g50_lbl.get_width()) // 2, gift50_btn.y + 10))
+
+            # Button 3: Gift 100g
+            pygame.draw.rect(screen, (75, 65, 25) if (g100_hov and can_g100) else ((55, 45, 20) if can_g100 else (40, 42, 48)), gift100_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_GOLD if can_g100 else (80, 85, 95), gift100_btn, 1, border_radius=6)
+            g100_lbl = font_xs.render("👑 GIFT 100g", True, COLOR_GOLD if can_g100 else COLOR_TEXT_MUTED)
+            screen.blit(g100_lbl, (gift100_btn.x + (gift100_btn.w - g100_lbl.get_width()) // 2, gift100_btn.y + 10))
+
+            # Button 4: Close
+            pygame.draw.rect(screen, (75, 35, 35) if c_hov else (55, 25, 25), close_btn, border_radius=6)
+            pygame.draw.rect(screen, (220, 80, 80), close_btn, 1, border_radius=6)
+            cls_lbl = font_xs.render("CLOSE DOSSIER (ESC)", True, (255, 220, 220))
+            screen.blit(cls_lbl, (close_btn.x + (close_btn.w - cls_lbl.get_width()) // 2, close_btn.y + 10))
+
+            if modal_mouse_clicked:
+                if loc_hov:
+                    state.selected_province = v_pid
+                    if v_obj.get("tiles"):
+                        tc, tr = v_obj["tiles"][0]
+                        state.selected_settlement = (tc, tr)
+                        state.cam_pan_x = VIEWPORT_CENTER_X - (tc * curr_tile_w + curr_tile_w // 2)
+                        state.cam_pan_y = VIEWPORT_CENTER_Y - (tr * curr_tile_h + curr_tile_h // 2)
+                    state.inspecting_vassal = None
+                    state.logs.append(f"Centering camera on {v_obj['name']}'s seat in {p_full}.")
+                elif g50_hov:
+                    if can_g50:
+                        state.player["gold"] = round(state.player["gold"] - 50, 1)
+                        v_obj["gold"] = round(v_obj.get("gold", 0) + 50, 1)
+                        state.logs.append(f"👑 Sent 50g royal subsidy to {v_obj['name']}. Vassal treasury: {fmt_gold(v_obj['gold'])}g.")
+                    else:
+                        state.logs.append(f"⚠️ Need 50 gold to send subsidy to {v_obj['name']}!")
+                elif g100_hov:
+                    if can_g100:
+                        state.player["gold"] = round(state.player["gold"] - 100, 1)
+                        v_obj["gold"] = round(v_obj.get("gold", 0) + 100, 1)
+                        state.logs.append(f"👑 Sent 100g royal subsidy to {v_obj['name']}. Vassal treasury: {fmt_gold(v_obj['gold'])}g.")
+                    else:
+                        state.logs.append(f"⚠️ Need 100 gold to send subsidy to {v_obj['name']}!")
+                elif c_hov:
+                    state.inspecting_vassal = None
+        else:
+            btn_w, btn_h = 340, 38
+            loc_btn = pygame.Rect(pop_x + 40, pop_y + pop_h - 60, btn_w, btn_h)
+            loc_hov = loc_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (40, 85, 130) if loc_hov else (28, 60, 95), loc_btn, border_radius=6)
+            pygame.draw.rect(screen, (100, 180, 255), loc_btn, 1, border_radius=6)
+            screen.blit(font_sm.render("▶ LOCATE SEAT ON MAP", True, COLOR_TEXT_WHITE), (loc_btn.x + (loc_btn.w - font_sm.size("▶ LOCATE SEAT ON MAP")[0]) // 2, loc_btn.y + 10))
+
+            close_btn = pygame.Rect(pop_x + pop_w - 40 - btn_w, pop_y + pop_h - 60, btn_w, btn_h)
+            c_hov = close_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (75, 35, 35) if c_hov else (55, 25, 25), close_btn, border_radius=6)
+            pygame.draw.rect(screen, (220, 80, 80), close_btn, 1, border_radius=6)
+            screen.blit(font_sm.render("CLOSE DOSSIER (ESC)", True, (255, 220, 220)), (close_btn.x + (close_btn.w - font_sm.size("CLOSE DOSSIER (ESC)")[0]) // 2, close_btn.y + 10))
+
+            if modal_mouse_clicked:
+                if loc_hov:
+                    state.selected_province = v_pid
+                    if v_obj.get("tiles"):
+                        tc, tr = v_obj["tiles"][0]
+                        state.selected_settlement = (tc, tr)
+                        state.cam_pan_x = VIEWPORT_CENTER_X - (tc * curr_tile_w + curr_tile_w // 2)
+                        state.cam_pan_y = VIEWPORT_CENTER_Y - (tr * curr_tile_h + curr_tile_h // 2)
+                    state.inspecting_vassal = None
+                    state.logs.append(f"Centering camera on {v_obj['name']}'s seat in {p_full}.")
+                elif c_hov:
+                    state.inspecting_vassal = None
     
     # ---------------------------------------------------------
     # 8. SOVEREIGN RULER DOSSIER MODAL (Player & Enemy High Rulers)
