@@ -66,6 +66,7 @@ maximize_window()
 # Added constant for travel days per tile
 DAYS_PER_TILE = 5  # Number of in‑game days it takes to traverse one province
 DAYS_PER_KOTAK = 1.0  # Number of in-game days it takes to traverse one tile (kotak)
+LEVY_RAISE_COOLDOWN_DAYS = 90  # 3 months cooldown between levy summons (prevents spam)
 
 COLOR_BG = (20, 24, 32)
 COLOR_PANEL_BG = (30, 35, 46)
@@ -1198,6 +1199,8 @@ class GameState:
         # Army management
         self.armies = []
         self.army_id_counter = 1
+        self.player_raise_cooldown = 0   # in days (3 months / 90 days cooldown)
+        self.enemy_raise_cooldown = 0    # in days (3 months / 90 days cooldown)
         
         # AI decision timer
         self.ai_timer = 30
@@ -1282,6 +1285,13 @@ class GameState:
         if not prov or prov["owner"] != self.player_id:
             return
         
+        # 3-Month Cooldown Check
+        cd = prov.get("raise_cooldown_days", 0)
+        if cd > 0:
+            m_left = (cd + 29) // 30
+            self.logs.append(f"Muster Cooldown! {prov['name']} cannot raise levies for {cd}d (~{m_left}m)!")
+            return
+
         available = prov["levies_current"]
         if available <= 0:
             self.logs.append(f"No levies available to raise in {prov['name']}.")
@@ -1335,15 +1345,22 @@ class GameState:
 
         self.armies.append(new_army)
         prov["levies_current"] = 0
+        prov["raise_cooldown_days"] = LEVY_RAISE_COOLDOWN_DAYS
+        self.player_raise_cooldown = max(self.player_raise_cooldown, LEVY_RAISE_COOLDOWN_DAYS)
         self.selected_army_id = army_id
 
     def raise_all_levies(self):
+        if self.player_raise_cooldown > 0:
+            m_left = (self.player_raise_cooldown + 29) // 30
+            self.logs.append(f"Realm Muster Cooldown! Must wait {self.player_raise_cooldown}d (~{m_left}m) before raising all levies again!")
+            return
+
         raised_count = 0
         total_men = 0
         capital_pid = "wessex"
         courier_count = 0
         for pid, prov in PROVINCES.items():
-            if prov["owner"] == self.player_id and prov["levies_current"] > 0:
+            if prov["owner"] == self.player_id and prov["levies_current"] > 0 and prov.get("raise_cooldown_days", 0) <= 0:
                 available = prov["levies_current"]
                 army_id = f"army_{self.army_id_counter}"
                 self.army_id_counter += 1
@@ -1388,28 +1405,35 @@ class GameState:
 
                 self.armies.append(new_army)
                 prov["levies_current"] = 0
+                prov["raise_cooldown_days"] = LEVY_RAISE_COOLDOWN_DAYS
                 raised_count += 1
                 total_men += available
         
         if raised_count > 0:
+            self.player_raise_cooldown = LEVY_RAISE_COOLDOWN_DAYS
             if courier_count > 0:
                 self.logs.append(f"Royal Couriers dispatched from Winchester to {courier_count} shires! ({total_men:,} total men summoned, 30d muster begins as couriers arrive)")
             else:
                 self.logs.append(f"Mobilized royal capital levies: {total_men:,} men! (Mustering for 30 days)")
         else:
-            self.logs.append("All available levies are already raised.")
+            self.logs.append("All available levies are already raised or recovering.")
 
     def raise_all_enemy_levies(self, is_emergency=False):
         """Mobilizes ALL available levies across 100% of Danelaw provinces (All-In with war couriers)."""
+        if self.enemy_raise_cooldown > 0:
+            return 0, 0
+
         raised_count = 0
         total_men = 0
         capital_pid = "jorvik"
         danelaw_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == self.enemy_id]
         has_enemy_field = any(a.owner == self.enemy_id for a in self.armies)
-        min_to_raise = 1 if (is_emergency or not has_enemy_field) else 30
+        min_to_raise = 25 if (is_emergency or not has_enemy_field) else 50
 
         for pid in danelaw_provs:
             prov = PROVINCES[pid]
+            if prov.get("raise_cooldown_days", 0) > 0:
+                continue
             available = prov.get("levies_current", 0)
             if available >= min_to_raise:
                 army_id = f"army_{self.army_id_counter}"
@@ -1456,8 +1480,11 @@ class GameState:
 
                 self.armies.append(new_army)
                 prov["levies_current"] = 0
+                prov["raise_cooldown_days"] = LEVY_RAISE_COOLDOWN_DAYS
                 raised_count += 1
                 total_men += available
+        if raised_count > 0:
+            self.enemy_raise_cooldown = LEVY_RAISE_COOLDOWN_DAYS
         return raised_count, total_men
 
     def rally_all_armies_to(self, target_province_id):
@@ -1642,6 +1669,13 @@ class GameState:
                 self.month = 1
                 self.year += 1
                 self.yearly_tick()
+
+        # Update Muster Cooldown Timers (3 months / 90 days cooldown)
+        self.player_raise_cooldown = max(0, self.player_raise_cooldown - 1)
+        self.enemy_raise_cooldown = max(0, self.enemy_raise_cooldown - 1)
+        for p in PROVINCES.values():
+            if p.get("raise_cooldown_days", 0) > 0:
+                p["raise_cooldown_days"] = max(0, p["raise_cooldown_days"] - 1)
 
         # 1. Update Royal Couriers En Route
         for a in list(self.armies):
@@ -2084,14 +2118,15 @@ class GameState:
         # 3. WAR MOBILIZATION (ALL-IN LEVY SUMMONS)
         # ---------------------------------------------------------
         should_mobilize = False
-        if (has_invasion or has_border_threat) and unraised_enemy_levies > 0:
-            should_mobilize = True
-        elif len(danelaw_armies) == 0 and unraised_enemy_levies > 0:
-            should_mobilize = True
-        elif unraised_enemy_levies >= 150:
-            should_mobilize = True
-        elif total_viking_field < sum(pa.troops for pa in player_armies) * 0.8 and unraised_enemy_levies >= 60:
-            should_mobilize = True
+        if self.enemy_raise_cooldown <= 0:
+            if (has_invasion or has_border_threat) and unraised_enemy_levies >= 50:
+                should_mobilize = True
+            elif len(danelaw_armies) == 0 and unraised_enemy_levies >= 35:
+                should_mobilize = True
+            elif unraised_enemy_levies >= 150:
+                should_mobilize = True
+            elif total_viking_field < sum(pa.troops for pa in player_armies) * 0.8 and unraised_enemy_levies >= 60:
+                should_mobilize = True
 
         if should_mobilize:
             count, men = self.raise_all_enemy_levies(is_emergency=(has_invasion or has_border_threat))
@@ -2884,12 +2919,20 @@ def run_game():
         
         # Raise All Button
         btn_raise_all = pygame.Rect(25, 185, 125, 36)
-        b_hover = btn_raise_all.collidepoint(mouse_pos)
-        pygame.draw.rect(screen, (40, 110, 60) if b_hover else (30, 80, 45), btn_raise_all, border_radius=4)
-        pygame.draw.rect(screen, COLOR_TEXT_GREEN, btn_raise_all, 1, border_radius=4)
-        screen.blit(font_sm.render("RAISE ALL (R)", True, COLOR_TEXT_WHITE), (35, 193))
-        if mouse_clicked and b_hover:
-            state.raise_all_levies()
+        is_all_cd = (state.player_raise_cooldown > 0)
+        b_hover = btn_raise_all.collidepoint(mouse_pos) and not is_all_cd
+        if is_all_cd:
+            m_left = (state.player_raise_cooldown + 29) // 30
+            pygame.draw.rect(screen, (38, 42, 50), btn_raise_all, border_radius=4)
+            pygame.draw.rect(screen, (60, 65, 78), btn_raise_all, 1, border_radius=4)
+            cd_lbl = font_xs.render(f"COOLDOWN ({m_left}m)", True, (135, 145, 160))
+            screen.blit(cd_lbl, (btn_raise_all.x + (btn_raise_all.w - cd_lbl.get_width()) // 2, 196))
+        else:
+            pygame.draw.rect(screen, (40, 110, 60) if b_hover else (30, 80, 45), btn_raise_all, border_radius=4)
+            pygame.draw.rect(screen, COLOR_TEXT_GREEN, btn_raise_all, 1, border_radius=4)
+            screen.blit(font_sm.render("RAISE ALL (R)", True, COLOR_TEXT_WHITE), (35, 193))
+            if mouse_clicked and b_hover:
+                state.raise_all_levies()
 
         # Disband All Button
         btn_disband_all = pygame.Rect(160, 185, 125, 36)
@@ -5135,13 +5178,23 @@ def run_game():
                 if is_player_owned:
                     # Military Orders
                     screen.blit(font_md.render("Military Orders", True, COLOR_GOLD), (880, 320))
+                    p_cd = sel_prov.get("raise_cooldown_days", 0)
+                    is_p_cd = (p_cd > 0)
                     raise_btn = pygame.Rect(880, 345, 290, 40)
-                    b_r_hov = raise_btn.collidepoint(mouse_pos)
-                    pygame.draw.rect(screen, (35, 95, 50) if b_r_hov else (25, 70, 38), raise_btn, border_radius=6)
-                    pygame.draw.rect(screen, COLOR_TEXT_GREEN, raise_btn, 1, border_radius=6)
-                    screen.blit(font_md.render(f"RAISE LOCAL LEVY ({sel_prov['levies_current']} Men)", True, COLOR_TEXT_WHITE), (905, 354))
-                    if mouse_clicked and b_r_hov:
-                        state.raise_province_levy(state.selected_province)
+                    b_r_hov = raise_btn.collidepoint(mouse_pos) and not is_p_cd
+                    if is_p_cd:
+                        m_left = (p_cd + 29) // 30
+                        pygame.draw.rect(screen, (38, 42, 50), raise_btn, border_radius=6)
+                        pygame.draw.rect(screen, (60, 65, 78), raise_btn, 1, border_radius=6)
+                        cd_txt = f"MUSTERING COOLDOWN ({p_cd}d / {m_left}m left)"
+                        cd_surf = font_sm.render(cd_txt, True, (140, 150, 165))
+                        screen.blit(cd_surf, (raise_btn.x + (raise_btn.w - cd_surf.get_width()) // 2, 356))
+                    else:
+                        pygame.draw.rect(screen, (35, 95, 50) if b_r_hov else (25, 70, 38), raise_btn, border_radius=6)
+                        pygame.draw.rect(screen, COLOR_TEXT_GREEN, raise_btn, 1, border_radius=6)
+                        screen.blit(font_md.render(f"RAISE LOCAL LEVY ({sel_prov['levies_current']} Men)", True, COLOR_TEXT_WHITE), (905, 354))
+                        if mouse_clicked and b_r_hov:
+                            state.raise_province_levy(state.selected_province)
 
                     rally_btn = pygame.Rect(880, 395, 290, 40)
                     b_rl_hov = rally_btn.collidepoint(mouse_pos)
