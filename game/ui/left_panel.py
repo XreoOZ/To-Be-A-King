@@ -633,6 +633,66 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             elif mouse_clicked and is_next_hov and state.vassal_page < max_pages - 1: state.vassal_page += 1
 
         # -------------------------------------------------------------
+        # LIEGE SELECTOR: SUBORDINATE DIRECT VASSAL (TRANSFER VASSALAGE)
+        # -------------------------------------------------------------
+        elif getattr(state, "vassal_subordinate_target_id", None):
+            all_v = [v for plist in state.vassals.values() for v in plist]
+            t_v = next((v for v in all_v if v.get("id") == state.vassal_subordinate_target_id), None)
+            t_name = t_v["name"] if t_v else "Vassal"
+            t_prov = PROVINCES.get(t_v.get("province", ""), {}).get("name", "").split()[0] if t_v else ""
+
+            # Header
+            screen.blit(font_md.render("👑 Subordinate Vassal", True, COLOR_GOLD), (25, 298))
+            screen.blit(font_xs.render(f"Demoting to Baron: {t_name} ({t_prov})", True, (255, 200, 140)), (25, 322))
+            screen.blit(font_xs.render("Choose a Direct Liege to place this Baron under:", True, COLOR_TEXT_MUTED), (25, 338))
+
+            avail_lieges = [v for plist in state.vassals.values() for v in plist 
+                            if v.get("is_direct_vassal") and v.get("id") != state.vassal_subordinate_target_id
+                            and PROVINCES.get(v.get("province"), {}).get("owner") == state.player_id]
+
+            vy = 360
+            for lv in avail_lieges:
+                lp_name = PROVINCES.get(lv.get("province", ""), {}).get("name", "").split()[0]
+                l_subs = len(lv.get("sub_vassals", []))
+                
+                l_card = pygame.Rect(content_x, vy, content_w, 50)
+                is_l_hov = l_card.collidepoint(mouse_pos)
+                
+                bg = (48, 56, 74) if is_l_hov else (32, 38, 52)
+                bd = COLOR_GOLD if is_l_hov else (70, 110, 170)
+                pygame.draw.rect(screen, bg, l_card, border_radius=4)
+                pygame.draw.rect(screen, bd, l_card, 1, border_radius=4)
+
+                pw, _ = draw_feudal_pill(screen, font_xs, lv.get("rank", "count"), 32, vy + 6)
+                screen.blit(font_xs.render(lv["name"], True, COLOR_TEXT_WHITE), (32 + pw + 6, vy + 7))
+                screen.blit(font_xs.render(f"◆ {lp_name} • 👥 Retinue: {l_subs} Barons", True, (180, 215, 255)), (32, vy + 28))
+
+                sel_btn = pygame.Rect(content_x + content_w - 95, vy + 12, 85, 26)
+                is_sel_hov = sel_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (35, 80, 50) if is_sel_hov else (25, 60, 38), sel_btn, border_radius=3)
+                pygame.draw.rect(screen, COLOR_TEXT_GREEN, sel_btn, 1, border_radius=3)
+                s_txt = font_xs.render("Select Liege", True, COLOR_TEXT_WHITE)
+                screen.blit(s_txt, (sel_btn.x + (sel_btn.w - s_txt.get_width()) // 2, sel_btn.y + 5))
+
+                if mouse_clicked and (is_l_hov or is_sel_hov):
+                    state.subordinate_vassal(state.vassal_subordinate_target_id, lv["id"])
+                    state.vassal_subordinate_target_id = None
+                    break
+
+                vy += 56
+
+            # Cancel Button at bottom
+            cancel_btn = pygame.Rect(content_x, 645, content_w, 28)
+            is_c_hov = cancel_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (75, 35, 35) if is_c_hov else (55, 25, 25), cancel_btn, border_radius=4)
+            pygame.draw.rect(screen, (220, 80, 80), cancel_btn, 1, border_radius=4)
+            c_lbl = font_xs.render("✖ CANCEL DEMOTION", True, (255, 210, 210))
+            screen.blit(c_lbl, (cancel_btn.x + (cancel_btn.w - c_lbl.get_width()) // 2, 651))
+
+            if mouse_clicked and is_c_hov:
+                state.vassal_subordinate_target_id = None
+
+        # -------------------------------------------------------------
         # LEVEL 1: LIST OF PROVINCES IN THE REALM & DIRECT VASSALS
         # -------------------------------------------------------------
         elif state.vassal_selected_province is None:
@@ -660,9 +720,13 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 p_info = PROVINCES.get(pid, {})
                 p_name = p_info.get("name", pid).split()[0]
 
-                direct_v = next((v for v in prov_v_list if v.get("is_direct_vassal", True)), None)
-                dv_name = direct_v["name"] if direct_v else "Unassigned Lord"
+                # Identify provincial lord (first lord in list)
+                direct_v = prov_v_list[0] if prov_v_list else None
+                is_dv_direct = direct_v.get("is_direct_vassal", False) if direct_v else False
+                dv_name = direct_v["name"] if direct_v else "Royal Demesne"
+                dv_rank = direct_v.get("rank", "crown") if direct_v else "crown"
                 dv_subs = len(direct_v.get("sub_vassals", [])) if direct_v else 0
+
                 # Calculate province total levy & tax paid
                 total_levy = 0
                 total_tax = 0.0
@@ -683,27 +747,48 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
 
                 screen.blit(font_sm.render(f"◆ {p_name}", True, COLOR_GOLD), (34, vy + 4))
                 p_name_w = font_sm.size(f"◆ {p_name}")[0]
-                pw, dv_col = draw_feudal_pill(screen, font_xs, direct_v.get("rank", "count") if direct_v else "count", 34 + p_name_w + 10, vy + 4)
+                pw, dv_col = draw_feudal_pill(screen, font_xs, dv_rank, 34 + p_name_w + 10, vy + 4)
                 
                 dv_parts = dv_name.split(maxsplit=1)
                 dv_name_disp = dv_parts[1] if len(dv_parts) > 1 else dv_name
-                if len(dv_name_disp) > 16: dv_name_disp = dv_name_disp[:14] + ".."
+                if len(dv_name_disp) > 15: dv_name_disp = dv_name_disp[:13] + ".."
                 screen.blit(font_xs.render(dv_name_disp, True, COLOR_TEXT_WHITE), (34 + p_name_w + 10 + pw + 6, vy + 5))
 
-                fief_seat = direct_v.get("city_name") if direct_v else "Fortress"
-                if len(fief_seat) > 24: fief_seat = fief_seat[:22] + ".."
+                fief_seat = direct_v.get("city_name") if direct_v else "Capital Citadel"
+                if len(fief_seat) > 22: fief_seat = fief_seat[:20] + ".."
                 desc_str = f"Seat: {fief_seat} • 👥 {dv_subs} Barons • Fyrd: +{total_levy} • Tax: +{fmt_gold(total_tax)}g/m"
                 screen.blit(font_xs.render(desc_str, True, (210, 230, 255)), (34, vy + 28))
 
-                arr_lbl = font_xs.render("View ›", True, COLOR_GOLD if is_p_hov else (160, 200, 240))
-                screen.blit(arr_lbl, (content_x + content_w - arr_lbl.get_width() - 8, vy + 16))
+                # Buttons on card: [ ⬇ Demote ] (if direct) and [ View › ]
+                dem_btn = None
+                is_dem_hov = False
+                if direct_v and is_dv_direct:
+                    dem_btn = pygame.Rect(content_x + content_w - 130, vy + 14, 58, 24)
+                    is_dem_hov = dem_btn.collidepoint(mouse_pos)
+                    d_bg = (80, 40, 40) if is_dem_hov else (60, 28, 28)
+                    d_bd = (220, 100, 100) if is_dem_hov else (160, 65, 65)
+                    pygame.draw.rect(screen, d_bg, dem_btn, border_radius=3)
+                    pygame.draw.rect(screen, d_bd, dem_btn, 1, border_radius=3)
+                    d_lbl = font_xs.render("⬇ Demote", True, COLOR_TEXT_WHITE if is_dem_hov else (240, 190, 190))
+                    screen.blit(d_lbl, (dem_btn.x + (dem_btn.w - d_lbl.get_width()) // 2, dem_btn.y + 4))
 
-                if mouse_clicked and is_p_hov:
-                    state.vassal_selected_province = pid
-                    state.vassal_inspecting_liege_id = None
-                    state.vassal_page = 0
-                    state.selected_province = pid
-                    state.logs.append(f"Viewing feudal administration of {p_name}.")
+                view_btn = pygame.Rect(content_x + content_w - 65, vy + 14, 58, 24)
+                is_v_hov = view_btn.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (40, 65, 95) if is_v_hov else (28, 45, 68), view_btn, border_radius=3)
+                pygame.draw.rect(screen, COLOR_GOLD if is_v_hov else (70, 120, 180), view_btn, 1, border_radius=3)
+                v_lbl = font_xs.render("View ›", True, COLOR_GOLD if is_v_hov else COLOR_TEXT_WHITE)
+                screen.blit(v_lbl, (view_btn.x + (view_btn.w - v_lbl.get_width()) // 2, view_btn.y + 4))
+
+                if mouse_clicked:
+                    if dem_btn and is_dem_hov:
+                        state.vassal_subordinate_target_id = direct_v["id"]
+                        state.logs.append(f"Demoting {direct_v['name']} to Baron: Select a Direct Liege...")
+                    elif is_v_hov or is_p_hov:
+                        state.vassal_selected_province = pid
+                        state.vassal_inspecting_liege_id = None
+                        state.vassal_page = 0
+                        state.selected_province = pid
+                        state.logs.append(f"Viewing feudal administration of {p_name}.")
 
                 vy += 58
 
@@ -772,18 +857,27 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 v_card = pygame.Rect(content_x, vy, content_w, card_h)
                 is_vc_hov = v_card.collidepoint(mouse_pos)
 
-                # Direct Vassals Drill-down Button (Only on Direct Vassal card!)
+                # Buttons on card: [ 👥 Vassals (N) › ] [ ⬇ Demote ] / [ ⬆ Direct ] [ +50g 🎁 ]
                 is_sub_hov = False
                 sub_btn = None
-                if is_direct:
-                    n_subs = len(v_data.get("sub_vassals", []))
-                    sub_btn = pygame.Rect(content_x + content_w - 180, vy + 4, 106, 20)
-                    is_sub_hov = sub_btn.collidepoint(mouse_pos)
+                is_dem_hov = False
+                dem_btn = None
+                is_prom_hov = False
+                prom_btn = None
 
-                # Quick Gift Gold Button on each card: [ +50g 🎁 ]
-                gift_btn = pygame.Rect(content_x + content_w - 68, vy + 4, 62, 20)
+                gift_btn = pygame.Rect(content_x + content_w - 56, vy + 4, 52, 20)
                 is_g_hov = gift_btn.collidepoint(mouse_pos)
                 can_gift = (state.player["gold"] >= 50)
+
+                if is_direct:
+                    n_subs = len(v_data.get("sub_vassals", []))
+                    dem_btn = pygame.Rect(content_x + content_w - 110, vy + 4, 50, 20)
+                    is_dem_hov = dem_btn.collidepoint(mouse_pos)
+                    sub_btn = pygame.Rect(content_x + content_w - 200, vy + 4, 86, 20)
+                    is_sub_hov = sub_btn.collidepoint(mouse_pos)
+                else:
+                    prom_btn = pygame.Rect(content_x + content_w - 115, vy + 4, 55, 20)
+                    is_prom_hov = prom_btn.collidepoint(mouse_pos)
 
                 # Card styling (Direct Vassal has richer golden tint)
                 if is_direct:
@@ -800,7 +894,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                 pw, rk_col = draw_feudal_pill(screen, font_xs, v_data.get("rank", "count" if is_direct else "baron"), 32, vy + 4)
                 v_parts = v_data["name"].split(maxsplit=1)
                 v_name_disp = v_parts[1] if len(v_parts) > 1 else v_data["name"]
-                max_chars = 18 if is_direct else 24
+                max_chars = 14 if is_direct else 20
                 if len(v_name_disp) > max_chars:
                     v_name_disp = v_name_disp[:max_chars - 2] + ".."
                 screen.blit(font_xs.render(v_name_disp, True, COLOR_TEXT_WHITE), (32 + pw + 6, vy + 5))
@@ -813,6 +907,24 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                     pygame.draw.rect(screen, s_bd, sub_btn, 1, border_radius=3)
                     s_lbl = font_xs.render(f"👥 Vassals ({n_subs}) ›", True, COLOR_TEXT_WHITE if is_sub_hov else (200, 230, 255))
                     screen.blit(s_lbl, (sub_btn.x + (sub_btn.w - s_lbl.get_width()) // 2, sub_btn.y + 2))
+
+                # Render Demote Button for Count (Transfer Vassalage)
+                if is_direct and dem_btn:
+                    d_bg = (90, 45, 45) if is_dem_hov else (65, 30, 30)
+                    d_bd = (220, 110, 110) if is_dem_hov else (160, 70, 70)
+                    pygame.draw.rect(screen, d_bg, dem_btn, border_radius=3)
+                    pygame.draw.rect(screen, d_bd, dem_btn, 1, border_radius=3)
+                    d_lbl = font_xs.render("⬇ Demote", True, COLOR_TEXT_WHITE if is_dem_hov else (240, 190, 190))
+                    screen.blit(d_lbl, (dem_btn.x + (dem_btn.w - d_lbl.get_width()) // 2, dem_btn.y + 2))
+
+                # Render Promote Button for Baron
+                if not is_direct and prom_btn:
+                    p_bg = (40, 75, 55) if is_prom_hov else (25, 50, 38)
+                    p_bd = (110, 210, 140) if is_prom_hov else (70, 150, 95)
+                    pygame.draw.rect(screen, p_bg, prom_btn, border_radius=3)
+                    pygame.draw.rect(screen, p_bd, prom_btn, 1, border_radius=3)
+                    p_lbl = font_xs.render("⬆ Direct", True, COLOR_TEXT_WHITE if is_prom_hov else (190, 240, 205))
+                    screen.blit(p_lbl, (prom_btn.x + (prom_btn.w - p_lbl.get_width()) // 2, prom_btn.y + 2))
 
                 # Draw Gift Button
                 g_bg = (30, 70, 40) if (is_g_hov and can_gift) else ((20, 50, 30) if can_gift else (40, 42, 48))
@@ -837,7 +949,12 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
                     screen.blit(font_xs.render(f"Gold: {fmt_gold(v_data['gold'])}g • Levy: +{st['levy_contribution']} • Tax to {l_short}: +{fmt_gold(st['tax_paid'])}g/m", True, COLOR_TEXT_MUTED), (32, vy + 34))
 
                 if mouse_clicked:
-                    if is_direct and is_sub_hov:
+                    if is_direct and is_dem_hov:
+                        state.vassal_subordinate_target_id = v_data["id"]
+                        state.logs.append(f"Selecting new liege for {v_data['name']} to reduce direct vassals...")
+                    elif not is_direct and is_prom_hov:
+                        state.promote_to_direct_vassal(v_data["id"])
+                    elif is_direct and is_sub_hov:
                         state.vassal_inspecting_liege_id = v_data["id"]
                         state.vassal_page = 0
                         state.logs.append(f"Inspecting direct vassals of {v_data['name']}.")

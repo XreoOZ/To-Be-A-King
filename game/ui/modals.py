@@ -567,18 +567,17 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         # Action Buttons at Bottom
         if not is_enemy:
             btn_h = 36
-            loc_btn = pygame.Rect(pop_x + 30, pop_y + pop_h - 56, 170, btn_h)
-            gift50_btn = pygame.Rect(pop_x + 215, pop_y + pop_h - 56, 155, btn_h)
-            gift100_btn = pygame.Rect(pop_x + 385, pop_y + pop_h - 56, 155, btn_h)
-            close_btn = pygame.Rect(pop_x + 555, pop_y + pop_h - 56, 195, btn_h)
+            loc_btn = pygame.Rect(pop_x + 25, pop_y + pop_h - 56, 145, btn_h)
+            rank_btn = pygame.Rect(pop_x + 180, pop_y + pop_h - 56, 185, btn_h)
+            gift50_btn = pygame.Rect(pop_x + 375, pop_y + pop_h - 56, 155, btn_h)
+            close_btn = pygame.Rect(pop_x + 540, pop_y + pop_h - 56, 185, btn_h)
 
             loc_hov = loc_btn.collidepoint(mouse_pos)
+            rank_hov = rank_btn.collidepoint(mouse_pos)
             g50_hov = gift50_btn.collidepoint(mouse_pos)
-            g100_hov = gift100_btn.collidepoint(mouse_pos)
             c_hov = close_btn.collidepoint(mouse_pos)
 
             can_g50 = (state.player["gold"] >= 50)
-            can_g100 = (state.player["gold"] >= 100)
 
             # Button 1: Locate
             pygame.draw.rect(screen, (40, 85, 130) if loc_hov else (28, 60, 95), loc_btn, border_radius=6)
@@ -586,17 +585,27 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             loc_lbl = font_xs.render("▶ LOCATE SEAT", True, COLOR_TEXT_WHITE)
             screen.blit(loc_lbl, (loc_btn.x + (loc_btn.w - loc_lbl.get_width()) // 2, loc_btn.y + 10))
 
-            # Button 2: Gift 50g
+            # Button 2: Feudal Action: Demote to Baron / Promote to Count
+            if is_direct:
+                r_bg = (85, 40, 40) if rank_hov else (60, 26, 26)
+                r_bd = (230, 90, 90) if rank_hov else (170, 60, 60)
+                r_txt = "⬇ DEMOTE TO BARON"
+                r_col = (255, 210, 210)
+            else:
+                r_bg = (35, 75, 50) if rank_hov else (24, 52, 35)
+                r_bd = (110, 210, 140) if rank_hov else (70, 150, 95)
+                r_txt = "⬆ PROMOTE TO COUNT"
+                r_col = (200, 250, 215)
+            pygame.draw.rect(screen, r_bg, rank_btn, border_radius=6)
+            pygame.draw.rect(screen, r_bd, rank_btn, 1, border_radius=6)
+            r_lbl = font_xs.render(r_txt, True, r_col)
+            screen.blit(r_lbl, (rank_btn.x + (rank_btn.w - r_lbl.get_width()) // 2, rank_btn.y + 10))
+
+            # Button 3: Gift 50g
             pygame.draw.rect(screen, (35, 75, 45) if (g50_hov and can_g50) else ((25, 55, 35) if can_g50 else (40, 42, 48)), gift50_btn, border_radius=6)
             pygame.draw.rect(screen, COLOR_TEXT_GREEN if can_g50 else (80, 85, 95), gift50_btn, 1, border_radius=6)
             g50_lbl = font_xs.render("🎁 GIFT 50g", True, COLOR_TEXT_WHITE if can_g50 else COLOR_TEXT_MUTED)
             screen.blit(g50_lbl, (gift50_btn.x + (gift50_btn.w - g50_lbl.get_width()) // 2, gift50_btn.y + 10))
-
-            # Button 3: Gift 100g
-            pygame.draw.rect(screen, (75, 65, 25) if (g100_hov and can_g100) else ((55, 45, 20) if can_g100 else (40, 42, 48)), gift100_btn, border_radius=6)
-            pygame.draw.rect(screen, COLOR_GOLD if can_g100 else (80, 85, 95), gift100_btn, 1, border_radius=6)
-            g100_lbl = font_xs.render("👑 GIFT 100g", True, COLOR_GOLD if can_g100 else COLOR_TEXT_MUTED)
-            screen.blit(g100_lbl, (gift100_btn.x + (gift100_btn.w - g100_lbl.get_width()) // 2, gift100_btn.y + 10))
 
             # Button 4: Close
             pygame.draw.rect(screen, (75, 35, 35) if c_hov else (55, 25, 25), close_btn, border_radius=6)
@@ -614,6 +623,15 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                         state.cam_pan_y = VIEWPORT_CENTER_Y - (tr * curr_tile_h + curr_tile_h // 2)
                     state.inspecting_vassal = None
                     state.logs.append(f"Centering camera on {v_obj['name']}'s seat in {p_full}.")
+                elif rank_hov:
+                    if is_direct:
+                        state.vassal_subordinate_target_id = v_obj["id"]
+                        state.vassal_selected_province = None
+                        state.inspecting_vassal = None
+                        state.logs.append(f"Demoting {v_obj['name']} to Baron: Select a Direct Liege...")
+                    else:
+                        state.promote_to_direct_vassal(v_obj["id"])
+                        state.inspecting_vassal = None
                 elif g50_hov:
                     if can_g50:
                         state.player["gold"] = round(state.player["gold"] - 50, 1)
@@ -621,13 +639,6 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                         state.logs.append(f"👑 Sent 50g royal subsidy to {v_obj['name']}. Vassal treasury: {fmt_gold(v_obj['gold'])}g.")
                     else:
                         state.logs.append(f"⚠️ Need 50 gold to send subsidy to {v_obj['name']}!")
-                elif g100_hov:
-                    if can_g100:
-                        state.player["gold"] = round(state.player["gold"] - 100, 1)
-                        v_obj["gold"] = round(v_obj.get("gold", 0) + 100, 1)
-                        state.logs.append(f"👑 Sent 100g royal subsidy to {v_obj['name']}. Vassal treasury: {fmt_gold(v_obj['gold'])}g.")
-                    else:
-                        state.logs.append(f"⚠️ Need 100 gold to send subsidy to {v_obj['name']}!")
                 elif c_hov:
                     state.inspecting_vassal = None
         else:
