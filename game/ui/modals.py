@@ -794,7 +794,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         t2 = font_sm.render(f"This land is legally held by your feudal subject, {v_name}.", True, (255, 235, 140))
         t3 = font_xs.render(f"• Under Feudal Law, all holdings founded on vassal fiefs belong to the Vassal.", True, (160, 210, 255))
         t4 = font_xs.render(f"• Lordship and revenue of this {b_spec['name']} will be granted to {v_name}.", True, COLOR_TEXT_GREEN)
-        t5 = font_xs.render(f"• Royal Treasury: -{b_cost:,} Gold  |  Constructs {b_spec['name']} ({b_spec['desc']}).", True, COLOR_GOLD)
+        b_desc = b_spec.get("desc") or b_spec.get("title", "Holding")
+        t5 = font_xs.render(f"• Royal Treasury: -{b_cost:,} Gold  |  Constructs {b_spec['name']} ({b_desc}).", True, COLOR_GOLD)
     
         screen.blit(t1, (pop_x + 25, pop_y + 76))
         screen.blit(t2, (pop_x + 25, pop_y + 98))
