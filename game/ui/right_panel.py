@@ -100,23 +100,37 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
             # Upgrade & Downgrade buttons for Barracks
             is_crown_barrack = s_data.get("is_crown_demesne", False)
             if is_crown_barrack and p_parent and p_parent["owner"] == state.player_id:
-                # Upgrade button
+                # Upgrade button (with free restore for previously unlocked levels)
                 if lvl < 5:
-                    up_cost = BARRACK_UPGRADE_COSTS.get(lvl, 500)
-                    can_afford = state.player["gold"] >= up_cost
+                    max_hist = s_data.get("max_unlocked_level", 0)
+                    next_lvl = lvl + 1
+                    is_free_restore = next_lvl <= max_hist
+                    up_cost = 0 if is_free_restore else BARRACK_UPGRADE_COSTS.get(lvl, 500)
+                    can_afford = True if is_free_restore else (state.player["gold"] >= up_cost)
                     up_btn = pygame.Rect(content_x, cur_y, content_w, 32)
                     up_hov = up_btn.collidepoint(mouse_pos)
-                    pygame.draw.rect(screen, (35, 95, 50) if (up_hov and can_afford) else ((25, 65, 35) if can_afford else (45, 45, 50)), up_btn, border_radius=4)
-                    pygame.draw.rect(screen, COLOR_TEXT_GREEN if can_afford else (90, 90, 95), up_btn, 1, border_radius=4)
-                    up_txt = font_xs.render(f"▲ UPGRADE TO LEVEL {lvl+1} ({up_cost}g  •  +5 Recruits/m)", True, COLOR_TEXT_WHITE if can_afford else COLOR_TEXT_MUTED)
+                    if is_free_restore:
+                        pygame.draw.rect(screen, (30, 80, 100) if up_hov else (20, 60, 80), up_btn, border_radius=4)
+                        pygame.draw.rect(screen, (80, 200, 255), up_btn, 1, border_radius=4)
+                        up_label = f"▲ RESTORE TO LEVEL {next_lvl} (FREE - Previously Unlocked)"
+                    else:
+                        pygame.draw.rect(screen, (35, 95, 50) if (up_hov and can_afford) else ((25, 65, 35) if can_afford else (45, 45, 50)), up_btn, border_radius=4)
+                        pygame.draw.rect(screen, COLOR_TEXT_GREEN if can_afford else (90, 90, 95), up_btn, 1, border_radius=4)
+                        up_label = f"▲ UPGRADE TO LEVEL {next_lvl} ({up_cost}g  •  +5 Recruits/m)"
+                    up_txt = font_xs.render(up_label, True, COLOR_TEXT_WHITE if can_afford else COLOR_TEXT_MUTED)
                     screen.blit(up_txt, (up_btn.x + (up_btn.w - up_txt.get_width()) // 2, cur_y + 8))
                     if mouse_clicked and up_hov and can_afford:
-                        state.player["gold"] -= up_cost
-                        new_lvl = lvl + 1
+                        if not is_free_restore:
+                            state.player["gold"] -= up_cost
+                        new_lvl = next_lvl
                         for tc in h_matching_tiles:
                             state.settlements[tc]["level"] = new_lvl
+                            state.settlements[tc]["max_unlocked_level"] = max(state.settlements[tc].get("max_unlocked_level", 0), new_lvl)
                         sync_province_holdings_stats(state, s_data["province"])
-                        state.logs.append(f"Upgraded {s_data['name']} to Level {new_lvl} (-{up_cost}g)! Now generates +{10 + new_lvl * 5} recruits/mo.")
+                        if is_free_restore:
+                            state.logs.append(f"🔄 Restored {s_data['name']} to Level {new_lvl} (FREE)! Previously unlocked level.")
+                        else:
+                            state.logs.append(f"Upgraded {s_data['name']} to Level {new_lvl} (-{up_cost}g)! Now generates +{10 + new_lvl * 5} recruits/mo.")
                     cur_y += 38
     
                 # Downgrade button

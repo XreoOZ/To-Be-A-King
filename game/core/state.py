@@ -1386,7 +1386,9 @@ class GameState:
                 if b_type == "upgrade_barrack":
                     t = chosen_tiles[0]
                     s_cur = self.settlements[t]
-                    s_cur["level"] = (s_cur.get("level", 1) or 1) + 1
+                    new_vlvl = (s_cur.get("level", 1) or 1) + 1
+                    s_cur["level"] = new_vlvl
+                    s_cur["max_unlocked_level"] = max(s_cur.get("max_unlocked_level", 0), new_vlvl)
                     v["gold"] = round(v["gold"] - b_cost, 1)
                     sync_province_holdings_stats(self, f_pid)
                     st_v = get_vassal_landed_status(self, v, pid)
@@ -1417,7 +1419,8 @@ class GameState:
                         "vassal_id": v["id"],
                         "is_crown_demesne": False,
                         "is_crown_fief": False,
-                        "level": 0
+                        "level": 0,
+                        "max_unlocked_level": 0
                     }
                     if t not in v.get("tiles", []):
                         v.setdefault("tiles", []).append(t)
@@ -1839,7 +1842,8 @@ def setup_province_starter_cities(target_state):
                         "vassal_id": None,
                         "is_crown_demesne": True,
                         "is_crown_fief": True,
-                        "level": h_spec.get("level", 0)
+                        "level": h_spec.get("level", 0),
+                        "max_unlocked_level": h_spec.get("level", 0)
                     }
                 fid = f"fief_{fief_counter}"
                 fief_counter += 1
@@ -1908,6 +1912,7 @@ def setup_province_starter_cities(target_state):
                         "vassal_id": v["id"],
                         "is_crown_demesne": False,
                         "is_crown_fief": False,
+                        "max_unlocked_level": 0,
                         "level": 0
                     }
                 v["city_name"] = holding_name
