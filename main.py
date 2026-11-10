@@ -97,12 +97,56 @@ with open(os.path.join(DATA_DIR, "provinces.json"), "r", encoding="utf-8") as f:
 CHARACTERS = copy.deepcopy(INITIAL_CHARACTERS)
 PROVINCES = copy.deepcopy(INITIAL_PROVINCES)
 
+# Harmonic Provincial Color Palettes per Faction (Distinct, highly readable tones for every province)
+PROVINCE_FACTION_COLORS = {
+    # If owned by Wessex (Kingdom of Wessex / Saxons - rich crimson/burgundy/terracotta palette)
+    "char_alfred": {
+        "wessex": (196, 38, 42),       # Wessex Royal Red
+        "kent_essex": (170, 32, 50),   # Kent Burgundy
+        "mercia": (185, 60, 36),       # Mercia Terracotta Crimson
+        "east_anglia": (205, 52, 36),  # East Anglia Vermilion
+        "cornwall": (175, 42, 60),     # Cornwall Celtic Crimson
+        "wales": (155, 26, 38),        # Wales Dark Dragon Red
+        "jorvik": (168, 46, 46),       # Jorvik Northern Red
+        "deira": (180, 52, 44),        # Deira Northumbrian Red
+        "bernicia": (160, 38, 50),     # Bernicia Coastal Crimson
+        "strathclyde": (172, 48, 55),  # Strathclyde Red
+        "lothian": (184, 55, 48),      # Lothian Red
+        "highlands": (150, 30, 42),    # Highlands Red
+    },
+    # If owned by Danelaw (Vikings - navy/slate/cobalt/storm palette)
+    "char_halfdan": {
+        "jorvik": (44, 68, 98),        # Jorvik Viking Navy
+        "deira": (58, 84, 114),        # Deira Northumbrian Slate Blue
+        "bernicia": (38, 60, 88),      # Bernicia North Sea Cobalt
+        "strathclyde": (52, 76, 104),  # Strathclyde Storm Blue
+        "lothian": (46, 72, 98),       # Lothian Midnight Teal
+        "highlands": (35, 54, 78),     # Scottish Highlands Deep Pine
+        "mercia": (50, 72, 96),        # Mercia Conquered Slate
+        "east_anglia": (62, 86, 112),  # East Anglia Conquered Blue
+        "wessex": (42, 64, 92),        # Wessex Conquered Navy
+        "kent_essex": (48, 70, 96),    # Kent Conquered Navy
+        "cornwall": (40, 58, 84),      # Cornwall Conquered Navy
+        "wales": (36, 56, 82),         # Wales Conquered Blue
+    }
+}
+
+# Apply harmonic colors to initial provinces
+for pid, p in PROVINCES.items():
+    owner = p.get("owner", "char_alfred")
+    if owner in PROVINCE_FACTION_COLORS and pid in PROVINCE_FACTION_COLORS[owner]:
+        p["color"] = list(PROVINCE_FACTION_COLORS[owner][pid])
+
 def reset_global_world_data():
     """Restores PROVINCES and CHARACTERS dictionaries to pristine AD 867 state."""
     CHARACTERS.clear()
     CHARACTERS.update(copy.deepcopy(INITIAL_CHARACTERS))
     PROVINCES.clear()
     PROVINCES.update(copy.deepcopy(INITIAL_PROVINCES))
+    for pid, p in PROVINCES.items():
+        owner = p.get("owner", "char_alfred")
+        if owner in PROVINCE_FACTION_COLORS and pid in PROVINCE_FACTION_COLORS[owner]:
+            p["color"] = list(PROVINCE_FACTION_COLORS[owner][pid])
 
 with open(os.path.join(ASSETS_DIR, "map", "britain_map.json"), "r", encoding="utf-8") as f:
     MAP_DATA = json.load(f)
@@ -1060,7 +1104,7 @@ class GameState:
                         else:
                             # ALL holdings captured! Whole province flips!
                             prov["owner"] = a.owner
-                            prov["color"] = list(COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW)
+                            prov["color"] = list(PROVINCE_FACTION_COLORS.get(a.owner, {}).get(a.province, COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW))
                             a.is_sieging = False
                             a.target_city = None
                             a.siege_target_name = None
@@ -1094,7 +1138,7 @@ class GameState:
                 a.siege_progress += rate
                 if a.siege_progress >= 100:
                     prov["owner"] = a.owner
-                    prov["color"] = list(COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW)
+                    prov["color"] = list(PROVINCE_FACTION_COLORS.get(a.owner, {}).get(a.province, COLOR_WESSEX if a.owner == self.player_id else COLOR_DANELAW))
                     a.is_sieging = False
                     a.siege_progress = 0
                     if a.owner == self.player_id:
@@ -2110,7 +2154,10 @@ def run_game():
 
                 prov_id  = cell_to_prov.get((c, r))
                 prov_info = PROVINCES.get(prov_id)
-                col = tuple(prov_info["color"]) if prov_info else (150, 150, 150)
+                owner = prov_info.get("owner", "char_alfred") if prov_info else "char_alfred"
+                col = PROVINCE_FACTION_COLORS.get(owner, {}).get(prov_id)
+                if not col:
+                    col = tuple(prov_info["color"]) if prov_info else (150, 150, 150)
 
                 is_hovered  = cell_rect.collidepoint(mouse_pos) and map_bg_rect.collidepoint(mouse_pos) and not hud_rect.collidepoint(mouse_pos)
                 is_selected = (prov_id == state.selected_province)
@@ -2191,23 +2238,29 @@ def run_game():
 
         # -----------------------------------------------------------
         # PASS 2: Draw Fiefdom Sub-divisions & Interior Borders
+        #         (Only highlight fiefs of the selected province, or when editing/selecting a fief)
         # -----------------------------------------------------------
+        def get_prov(col_i, row_i):
+            return cell_to_prov.get((col_i, row_i))
+
         fief_palette = [(120, 200, 255), (255, 175, 90), (190, 130, 255), (90, 255, 190), (255, 120, 150), (240, 220, 90)]
         for f_idx, (fid, fdata) in enumerate(state.fiefs.items()):
             f_color = fief_palette[f_idx % len(fief_palette)]
             is_f_sel = (state.selected_fief_id == fid)
             is_f_edit = (state.editing_fief_id == fid)
             is_cur_prov = (fdata.get("province") == state.selected_province)
+            f_prov = fdata.get("province")
             f_tiles_set = set(fdata["tiles"])
-            
+
+            # Keep unselected provinces visually clean and uncluttered so provincial boundaries are prominent
+            if not (is_f_edit or is_f_sel or is_cur_prov):
+                continue
+
             for (fc, fr) in fdata["tiles"]:
                 fx = origin_x + (fc * curr_tile_w)
                 fy = origin_y + (fr * curr_tile_h)
                 
-                # Fief fill tint:
-                # - When editing: vivid golden glow
-                # - When selected: vibrant green glow
-                # - When in selected province: visible distinct color tint so EVERY fief is identifiable at a glance!
+                # Fief fill tint
                 if is_f_edit:
                     f_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
                     f_surf.fill((255, 220, 50, 105))
@@ -2216,68 +2269,93 @@ def run_game():
                     f_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
                     f_surf.fill((100, 255, 120, 85))
                     screen.blit(f_surf, (fx, fy))
-                elif is_cur_prov:
+                elif is_cur_prov and state.right_tab == "fiefs":
                     f_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
                     fill_col = (*f_color, 45) if fdata.get("holder") else (235, 195, 100, 45)
                     f_surf.fill(fill_col)
                     screen.blit(f_surf, (fx, fy))
-                
-                # Draw fief border ONLY on outer boundary edges (no internal seam line between tiles of same fief!)
-                # Every fief gets a bold, distinct border: editing = gold (3px), selected = green (2px), regular = distinct palette color (2px)
-                edge_col = (255, 225, 60) if is_f_edit else ((100, 255, 120) if is_f_sel else f_color)
-                edge_w = 3 if is_f_edit else 2
-                
-                # Right edge
-                if (fc + 1, fr) not in f_tiles_set:
+
+                # Fief border:
+                # CRITICAL: Only draw interior fief borders if the neighbor tile belongs to the SAME province!
+                # If neighbor is outside province, DO NOT draw here; the bold Province Boundary will frame it!
+                edge_col = (255, 225, 60) if is_f_edit else ((100, 255, 120) if is_f_sel else (f_color if state.right_tab == "fiefs" else (180, 200, 225)))
+                edge_w = 3 if is_f_edit else (2 if is_f_sel else 1)
+
+                # Right edge: only if neighbor is in same province but not in this fief
+                if get_prov(fc + 1, fr) == f_prov and (fc + 1, fr) not in f_tiles_set:
                     pygame.draw.line(screen, edge_col, (fx + curr_tile_w - 1, fy), (fx + curr_tile_w - 1, fy + curr_tile_h - 1), edge_w)
                 # Left edge
-                if (fc - 1, fr) not in f_tiles_set:
+                if get_prov(fc - 1, fr) == f_prov and (fc - 1, fr) not in f_tiles_set:
                     pygame.draw.line(screen, edge_col, (fx, fy), (fx, fy + curr_tile_h - 1), edge_w)
                 # Bottom edge
-                if (fc, fr + 1) not in f_tiles_set:
+                if get_prov(fc, fr + 1) == f_prov and (fc, fr + 1) not in f_tiles_set:
                     pygame.draw.line(screen, edge_col, (fx, fy + curr_tile_h - 1), (fx + curr_tile_w - 1, fy + curr_tile_h - 1), edge_w)
                 # Top edge
-                if (fc, fr - 1) not in f_tiles_set:
+                if get_prov(fc, fr - 1) == f_prov and (fc, fr - 1) not in f_tiles_set:
                     pygame.draw.line(screen, edge_col, (fx, fy), (fx + curr_tile_w - 1, fy), edge_w)
 
         # -----------------------------------------------------------
         # PASS 2.5: Draw Outer Province Boundaries Framing All Land
-        #           (Drawn on top of fiefs so province perimeter is solid & crisp!)
+        #           (Bold, Crisp, High-Contrast Provincial Borders)
         # -----------------------------------------------------------
-        BORDER_COL   = (0, 0, 0)      # black line between provinces
-        def get_prov(col_i, row_i):
-            """Return province id for tile, or None if ocean."""
-            return cell_to_prov.get((col_i, row_i))
-
+        # Stage 1: Prominent dark borders (3px) separating all provinces & coasts
         for r, row in enumerate(raw_grid):
             for c, ch in enumerate(row):
                 if ch == ".":
                     continue
                 cell_x = origin_x + (c * curr_tile_w)
                 cell_y = origin_y + (r * curr_tile_h)
-                prov_id    = get_prov(c, r)
-                is_selected = (prov_id == state.selected_province)
-                border_col = COLOR_GOLD if is_selected else BORDER_COL
-                border_w = 3 if is_selected else 2
+                prov_id = get_prov(c, r)
 
-                # Right edge — draw if neighbor is different province (or ocean)
-                if get_prov(c + 1, r) != prov_id:
-                    ex = cell_x + curr_tile_w - 1
-                    pygame.draw.line(screen, border_col,
-                                     (ex, cell_y), (ex, cell_y + curr_tile_h - 1), border_w)
+                # Right edge
+                n_right = get_prov(c + 1, r)
+                if n_right != prov_id:
+                    b_col = (10, 14, 22) if n_right is None else (18, 24, 34)
+                    pygame.draw.line(screen, b_col, (cell_x + curr_tile_w - 1, cell_y), (cell_x + curr_tile_w - 1, cell_y + curr_tile_h - 1), 3)
                 # Bottom edge
-                if get_prov(c, r + 1) != prov_id:
-                    ey = cell_y + curr_tile_h - 1
-                    pygame.draw.line(screen, border_col,
-                                     (cell_x, ey), (cell_x + curr_tile_w - 1, ey), border_w)
+                n_bot = get_prov(c, r + 1)
+                if n_bot != prov_id:
+                    b_col = (10, 14, 22) if n_bot is None else (18, 24, 34)
+                    pygame.draw.line(screen, b_col, (cell_x, cell_y + curr_tile_h - 1), (cell_x + curr_tile_w - 1, cell_y + curr_tile_h - 1), 3)
                 # Left edge
-                if get_prov(c - 1, r) != prov_id:
-                    pygame.draw.line(screen, border_col,
-                                     (cell_x, cell_y), (cell_x, cell_y + curr_tile_h - 1), border_w)
+                n_left = get_prov(c - 1, r)
+                if n_left != prov_id:
+                    b_col = (10, 14, 22) if n_left is None else (18, 24, 34)
+                    pygame.draw.line(screen, b_col, (cell_x, cell_y), (cell_x, cell_y + curr_tile_h - 1), 3)
                 # Top edge
-                if get_prov(c, r - 1) != prov_id:
-                    pygame.draw.line(screen, border_col,
-                                     (cell_x, cell_y), (cell_x + curr_tile_w - 1, cell_y), border_w)
+                n_top = get_prov(c, r - 1)
+                if n_top != prov_id:
+                    b_col = (10, 14, 22) if n_top is None else (18, 24, 34)
+                    pygame.draw.line(screen, b_col, (cell_x, cell_y), (cell_x + curr_tile_w - 1, cell_y), 3)
+
+        # Stage 2: Highlighting hovered and selected provinces on top with glowing borders
+        for target_pid, is_sel, b_col, b_w in [
+            (state.hovered_province, False, (225, 235, 255), 2),
+            (state.selected_province, True, (255, 215, 60), 3)
+        ]:
+            if not target_pid:
+                continue
+            for r, row in enumerate(raw_grid):
+                for c, ch in enumerate(row):
+                    if ch == ".":
+                        continue
+                    if get_prov(c, r) != target_pid:
+                        continue
+                    cell_x = origin_x + (c * curr_tile_w)
+                    cell_y = origin_y + (r * curr_tile_h)
+
+                    # Right edge
+                    if get_prov(c + 1, r) != target_pid:
+                        pygame.draw.line(screen, b_col, (cell_x + curr_tile_w - 1, cell_y), (cell_x + curr_tile_w - 1, cell_y + curr_tile_h - 1), b_w)
+                    # Bottom edge
+                    if get_prov(c, r + 1) != target_pid:
+                        pygame.draw.line(screen, b_col, (cell_x, cell_y + curr_tile_h - 1), (cell_x + curr_tile_w - 1, cell_y + curr_tile_h - 1), b_w)
+                    # Left edge
+                    if get_prov(c - 1, r) != target_pid:
+                        pygame.draw.line(screen, b_col, (cell_x, cell_y), (cell_x, cell_y + curr_tile_h - 1), b_w)
+                    # Top edge
+                    if get_prov(c, r - 1) != target_pid:
+                        pygame.draw.line(screen, b_col, (cell_x, cell_y), (cell_x + curr_tile_w - 1, cell_y), b_w)
 
         # -----------------------------------------------------------
         # PASS 3: Draw Built Settlements / Cities (Unified Holdings)
@@ -2502,15 +2580,29 @@ def run_game():
                 state.logs.append(f"Founded Grand City in {prov_obj['name']} (-1000g, +10 Tax, +500 Levies)!")
                 state.build_mode = False
 
-        # Province Name Labels
+        # Province Name Labels (Medieval Plaque / Banner)
         for pid, (lx, ly) in province_anchors.items():
             p_data = PROVINCES.get(pid)
             if p_data:
                 short_name = p_data["name"].split()[0]
-                lbl_surf = font_sm.render(short_name, True, (245, 245, 245))
-                sh_surf = font_sm.render(short_name, True, (10, 15, 25))
-                screen.blit(sh_surf, (lx - lbl_surf.get_width() // 2 + 1, ly + 1))
-                screen.blit(lbl_surf, (lx - lbl_surf.get_width() // 2, ly))
+                is_sel = (pid == state.selected_province)
+                is_hov = (pid == state.hovered_province)
+                
+                txt_col = (255, 220, 60) if is_sel else ((225, 235, 255) if is_hov else (240, 244, 250))
+                txt_surf = font_xs.render(short_name, True, txt_col)
+                bw = txt_surf.get_width() + 14
+                bh = 18
+                bx = lx - bw // 2
+                by = ly - bh // 2
+                
+                plaque_surf = pygame.Surface((bw, bh), pygame.SRCALPHA)
+                plaque_surf.fill((16, 20, 30, 215))
+                screen.blit(plaque_surf, (bx, by))
+                
+                border_c = (255, 215, 60) if is_sel else ((160, 180, 210) if is_hov else (55, 70, 95))
+                pygame.draw.rect(screen, border_c, (bx, by, bw, bh), 1, border_radius=3)
+                
+                screen.blit(txt_surf, (bx + 7, by + 2))
 
         # ---------------------------------------------------------
         # DRAW MOVEMENT ARROWS (before armies, so badges render on top)
