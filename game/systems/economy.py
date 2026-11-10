@@ -363,15 +363,18 @@ def get_realm_finances(state, char_id=None):
     for pid, prov in PROVINCES.items():
         if prov["owner"] == char_id:
             for v in state.vassals.get(pid, []):
-                # Only direct vassals pay tax directly to Top Liege (King/char_id)
-                if v.get("is_direct_vassal", True) or v.get("liege_id") == char_id:
+                # Strictly: ONLY Counts and Dukes count towards Vassal Limit! Barons do NOT count!
+                if v.get("rank") in ("count", "duke"):
                     direct_vassal_count += 1
+
+                # Both Barons and Counts pay tax directly to King if direct subjects
+                if v.get("is_direct_vassal", True) or v.get("liege_id") == char_id or v.get("rank") == "baron":
                     st = get_vassal_landed_status(state, v, pid)
                     if st["is_landed"] and st["tax_paid"] > 0:
                         total_vassal_tax += st["tax_paid"]
                         vassal_tithes.append({
                             "name": v["name"],
-                            "rank": v.get("rank", "count"),
+                            "rank": v.get("rank", "baron"),
                             "pid": pid,
                             "prov": PROVINCES[pid]["name"].split()[0],
                             "tax_rate": st["tax_rate"],

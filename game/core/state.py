@@ -245,26 +245,16 @@ class GameState:
         self.logs.append(f"Ducal Investiture: {target_v['name']} elevated to High Duke!")
         return True
 
-    def subordinate_vassal(self, vassal_id, new_liege_id):
+    def demote_to_baron(self, vassal_id):
         """
-        Subordinates/demotes a direct vassal under another direct vassal (Transfer Vassalage).
-        Reduces direct vassal count for the top liege and structures the feudal hierarchy.
+        Demotes a Count/Duke directly to Baron. They remain direct vassals of the realm,
+        but as a Baron they NO LONGER count towards the Vassal Limit (Count/Duke only).
         """
         all_vassals = [v for plist in self.vassals.values() for v in plist]
         target_v = next((v for v in all_vassals if v.get("id") == vassal_id), None)
-        new_liege = next((v for v in all_vassals if v.get("id") == new_liege_id), None)
-
-        if not target_v or not new_liege or target_v["id"] == new_liege["id"]:
+        if not target_v:
             return False
 
-        # Remove from old liege's sub_vassals if previously subordinate
-        for v in all_vassals:
-            if vassal_id in v.get("sub_vassals", []):
-                v["sub_vassals"].remove(vassal_id)
-
-        # Update target vassal
-        target_v["is_direct_vassal"] = False
-        target_v["liege_id"] = new_liege["id"]
         target_v["rank"] = "baron"
         target_v["title"] = "Baron"
         if target_v["name"].startswith("Count "):
@@ -276,30 +266,20 @@ class GameState:
         elif target_v["name"].startswith("Warden "):
             target_v["name"] = target_v["name"].replace("Warden ", "Elder ")
 
-        if target_v["id"] not in new_liege.setdefault("sub_vassals", []):
-            new_liege["sub_vassals"].append(target_v["id"])
-
         t_name = target_v["name"]
-        l_name = new_liege["name"]
-        self.logs.append(f"Feudal Charter: {t_name} demoted to Baron under {l_name}. Direct vassals reduced!")
+        self.logs.append(f"Royal Decree: {t_name} demoted to Baron! Vassal limit freed up.")
         return True
 
     def promote_to_direct_vassal(self, vassal_id):
         """
-        Promotes a subordinate baron to a Direct Vassal (Count) reporting to Top Liege.
+        Promotes a Baron directly to Count. They now hold County title and count towards Vassal Limit.
         """
         all_vassals = [v for plist in self.vassals.values() for v in plist]
         target_v = next((v for v in all_vassals if v.get("id") == vassal_id), None)
         if not target_v:
             return False
 
-        old_liege_id = target_v.get("liege_id")
-        old_liege = next((v for v in all_vassals if v.get("id") == old_liege_id), None)
-        if old_liege and target_v["id"] in old_liege.get("sub_vassals", []):
-            old_liege["sub_vassals"].remove(target_v["id"])
-
         prov_owner = PROVINCES.get(target_v.get("province"), {}).get("owner", self.player_id)
-        target_v["is_direct_vassal"] = True
         target_v["liege_id"] = prov_owner
         target_v["rank"] = "count"
         target_v["title"] = "Count"
@@ -310,7 +290,8 @@ class GameState:
         elif target_v["name"].startswith("Elder "):
             target_v["name"] = target_v["name"].replace("Elder ", "Warden ")
 
-        self.logs.append(f"Royal Elevation: {target_v['name']} promoted to Direct Count!")
+        t_name = target_v["name"]
+        self.logs.append(f"Royal Elevation: {t_name} elevated to Count! Now counts towards Vassal Limit.")
         return True
 
     def generate_province_vassals(self):

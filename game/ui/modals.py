@@ -625,12 +625,14 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                     state.logs.append(f"Centering camera on {v_obj['name']}'s seat in {p_full}.")
                 elif rank_hov:
                     if is_direct:
-                        state.vassal_subordinate_target_id = v_obj["id"]
-                        state.vassal_selected_province = None
+                        state.demote_to_baron(v_obj["id"])
+                        v_obj["rank"] = "baron"
+                        v_obj["title"] = "Baron"
                         state.inspecting_vassal = None
-                        state.logs.append(f"Demoting {v_obj['name']} to Baron: Select a Direct Liege...")
                     else:
                         state.promote_to_direct_vassal(v_obj["id"])
+                        v_obj["rank"] = "count"
+                        v_obj["title"] = "Count"
                         state.inspecting_vassal = None
                 elif g50_hov:
                     if can_g50:
