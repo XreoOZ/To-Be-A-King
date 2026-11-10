@@ -496,7 +496,10 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             screen.blit(p_tag, (content_x + content_w - p_tag.get_width() - 8, vy + 4))
             
             st = get_vassal_landed_status(state, v_data, v_pid)
-            h_name = v_data.get("city_name") if st["is_landed"] else "Landless Noble (Unlanded)"
+            if st["is_landed"]:
+                h_name = v_data.get("city_name") or (st["held_fiefs"][0].get("name") if st.get("held_fiefs") else None) or (st["held_settlements"][0].get("name") if st.get("held_settlements") else None) or "Landed Noble"
+            else:
+                h_name = "Landless Noble (Unlanded)"
             screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 17))
             
             levy_txt = f"+{st['levy_contribution']}" if st["is_landed"] else "0"
@@ -693,7 +696,10 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             screen.blit(p_tag, (content_x + content_w - p_tag.get_width() - 8, vy + 4))
     
             st = get_vassal_landed_status(state, v_data, v_pid)
-            h_name = v_data.get("city_name") if st["is_landed"] else "Landless Noble"
+            if st["is_landed"]:
+                h_name = v_data.get("city_name") or (st["held_fiefs"][0].get("name") if st.get("held_fiefs") else None) or (st["held_settlements"][0].get("name") if st.get("held_settlements") else None) or "Landed Noble"
+            else:
+                h_name = "Landless Noble"
             if len(h_name) > 17:
                 h_name = h_name[:15] + ".."
             screen.blit(font_xs.render(f"Fief: {h_name}", True, (200, 215, 230)), (32, vy + 19))

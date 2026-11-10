@@ -570,7 +570,10 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
     
                 screen.blit(font_xs.render(f"♚ {v['name']}", True, COLOR_GOLD if is_v_sel else COLOR_TEXT_WHITE), (content_x + 8, vy + 4))
                 st = get_vassal_landed_status(state, v, state.selected_province)
-                c_info = v.get('city_name') if st["is_landed"] else 'Landless Noble (Unlanded)'
+                if st["is_landed"]:
+                    c_info = v.get('city_name') or (st['held_fiefs'][0].get('name') if st.get('held_fiefs') else None) or (st['held_settlements'][0].get('name') if st.get('held_settlements') else None) or 'Landed Noble'
+                else:
+                    c_info = 'Landless Noble (Unlanded)'
                 screen.blit(font_xs.render(f"Fief: {c_info}", True, (200, 230, 255)), (content_x + 8, vy + 21))
                 levy_txt = f"+{st['levy_contribution']}" if st["is_landed"] else "0"
                 tax_txt = f"+{fmt_gold(st['tax_paid'])}g/m" if st["is_landed"] else "0g/m"
