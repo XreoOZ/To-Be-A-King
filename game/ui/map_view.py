@@ -27,6 +27,94 @@ from game.core.assets import (
 from game.systems.economy import get_all_settlement_holdings, sync_province_holdings_stats
 from game.systems.military import is_province_contested
 
+_HORSE_SPRITE_CACHE = {}
+
+def get_horse_courier_sprite(owner_id, is_player, facing_left, frame_idx):
+    key = (owner_id, is_player, facing_left, frame_idx)
+    if key in _HORSE_SPRITE_CACHE:
+        return _HORSE_SPRITE_CACHE[key]
+
+    w, h = 32, 24
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
+    anim_phase = (frame_idx / 12.0) * (math.pi * 2)
+    bob = int(math.sin(anim_phase * 2) * 1.5)
+
+    # Realm & faction palette
+    if is_player:
+        col_horse = (175, 125, 75)      # Chestnut
+        col_mane = (75, 45, 20)
+        col_rider = (215, 45, 45)       # Crimson Solaris
+        col_trim = (245, 210, 60)       # Gold
+    elif owner_id == "ruler_ironpeak":
+        col_horse = (130, 135, 145)     # Steel-grey
+        col_mane = (50, 55, 65)
+        col_rider = (45, 75, 115)       # Navy / Steel
+        col_trim = (190, 205, 225)      # Silver
+    elif owner_id == "ruler_sylvandell":
+        col_horse = (150, 115, 75)      # Bay
+        col_mane = (45, 65, 40)
+        col_rider = (35, 115, 60)       # Forest Green
+        col_trim = (215, 185, 95)       # Bronze
+    else:
+        col_horse = (140, 130, 120)
+        col_mane = (60, 55, 50)
+        col_rider = (90, 85, 100)
+        col_trim = (200, 200, 200)
+
+    col_skin = (235, 190, 150)
+    cx = 16
+    cy = 13 + bob
+
+    # Galloping leg swings
+    f_leg = math.sin(anim_phase) * 5
+    b_leg = -math.sin(anim_phase) * 5
+
+    # 1. Back legs (shadowed behind body)
+    dark_horse = (max(0, col_horse[0] - 40), max(0, col_horse[1] - 40), max(0, col_horse[2] - 30))
+    pygame.draw.line(surf, dark_horse, (cx - 7, cy + 2), (cx - 10 + int(b_leg), cy + 8), 2)
+    pygame.draw.line(surf, dark_horse, (cx + 5, cy + 2), (cx + 9 + int(f_leg), cy + 8), 2)
+
+    # 2. Tail (flowing back)
+    tail_wave = math.sin(anim_phase + 1.0) * 2.5
+    pygame.draw.line(surf, col_mane, (cx - 9, cy - 1), (cx - 14, cy + int(tail_wave)), 2)
+    pygame.draw.line(surf, col_mane, (cx - 9, cy), (cx - 15, cy + 3 + int(tail_wave)), 2)
+
+    # 3. Horse torso
+    pygame.draw.ellipse(surf, col_horse, (cx - 9, cy - 4, 16, 9))
+
+    # 4. Neck & head
+    pygame.draw.polygon(surf, col_horse, [
+        (cx + 3, cy - 2),
+        (cx + 7, cy - 8),
+        (cx + 12, cy - 7),
+        (cx + 13, cy - 4),
+        (cx + 8, cy + 1)
+    ])
+    # Ears & mane
+    pygame.draw.polygon(surf, col_horse, [(cx + 9, cy - 8), (cx + 11, cy - 12), (cx + 12, cy - 8)])
+    pygame.draw.line(surf, col_mane, (cx + 4, cy - 4), (cx + 6, cy - 7), 2)
+    pygame.draw.line(surf, col_mane, (cx + 6, cy - 6), (cx + 8, cy - 9), 2)
+
+    # 5. Front legs
+    pygame.draw.line(surf, col_horse, (cx - 6, cy + 2), (cx - 11 - int(b_leg), cy + 9), 2)
+    pygame.draw.line(surf, col_horse, (cx + 6, cy + 2), (cx + 12 - int(f_leg), cy + 9), 2)
+
+    # 6. Courier Rider
+    pygame.draw.ellipse(surf, col_rider, (cx - 4, cy - 9, 8, 8))
+    # Cape flutter
+    pygame.draw.polygon(surf, col_rider, [(cx - 4, cy - 7), (cx - 9, cy - 4 + int(tail_wave)), (cx - 3, cy - 3)])
+    # Helmet & face
+    pygame.draw.circle(surf, col_skin, (cx + 1, cy - 10), 3)
+    pygame.draw.circle(surf, col_trim, (cx + 1, cy - 11), 3)
+    # Reins
+    pygame.draw.line(surf, (60, 40, 20), (cx + 2, cy - 6), (cx + 11, cy - 4), 1)
+
+    if facing_left:
+        surf = pygame.transform.flip(surf, True, False)
+
+    _HORSE_SPRITE_CACHE[key] = surf
+    return surf
+
 def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mouse_down, fonts, banner_cloth_large, banner_cloth_small, ticks=0):
     raw_grid = RAW_GRID
     cell_to_prov = CELL_TO_PROV
@@ -954,7 +1042,10 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     # -------------------------------------------------------------
     # DRAW TRAVELLING ROYAL COURIERS (Riders Galloping Between Shires)
     # -------------------------------------------------------------
-    courier_drawn_positions = []
+    anim_ticks = pygame.time.get_ticks()
+    frame_idx = int((anim_ticks // 70) % 12)
+    hop_courier_counts = {}
+
     for army in state.armies:
         if army.courier_en_route and army.courier_current_prov and army.courier_next_prov:
             c_pos = province_anchors.get(army.courier_current_prov)
@@ -966,39 +1057,57 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                 courier_step = 100.0 / max(1.0, float(DAYS_PER_TILE))
                 eff_c_prog = army.courier_progress + (sub_day * courier_step)
                 pct = min(1.0, max(0.0, eff_c_prog / 100.0))
-                mx = int(c_pos[0] + (n_pos[0] - c_pos[0]) * pct)
-                my = int(c_pos[1] + (n_pos[1] - c_pos[1]) * pct)
-                
+                base_x = c_pos[0] + (n_pos[0] - c_pos[0]) * pct
+                base_y = c_pos[1] + (n_pos[1] - c_pos[1]) * pct
+
+                # Spread multiple riders sharing the same path side-by-side cleanly
+                hop_key = (army.courier_current_prov, army.courier_next_prov)
+                c_idx = hop_courier_counts.get(hop_key, 0)
+                hop_courier_counts[hop_key] = c_idx + 1
+
+                dx = float(n_pos[0] - c_pos[0])
+                dy = float(n_pos[1] - c_pos[1])
+                dist = math.hypot(dx, dy)
+                if dist > 0.001 and c_idx > 0:
+                    nx = -dy / dist
+                    ny = dx / dist
+                    tx = dx / dist
+                    ty = dy / dist
+                    spacing_step = 38.0
+                    offset_mag = ((c_idx + 1) // 2) * spacing_step * (1 if c_idx % 2 == 1 else -1)
+                    stagger = (c_idx % 2) * 8
+                    mx = int(base_x + nx * offset_mag + tx * stagger)
+                    my = int(base_y + ny * offset_mag + ty * stagger)
+                else:
+                    mx = int(base_x)
+                    my = int(base_y)
+
                 is_player = (army.owner == state.player_id)
-                dest_name = PROVINCES[army.province]["name"].split()[0]
-                
-                # Subtle guide line connecting courier to destination
+                facing_left = (n_pos[0] < c_pos[0])
+
+                # Subtle dotted/thin guide line connecting courier to destination
                 if dest_pos:
                     guide_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-                    pygame.draw.line(guide_surf, (250, 215, 80, 85) if is_player else (120, 180, 255, 85), (mx, my), dest_pos, 2)
+                    pygame.draw.line(guide_surf, (250, 215, 80, 50) if is_player else (120, 180, 255, 50), (mx, my), dest_pos, 1)
                     screen.blit(guide_surf, (0, 0))
-                
-                # Galloping Courier Pill Badge (with vertical collision offset)
-                c_text = f"✉ Courier -> {dest_name} ({army.courier_days_left}d left)"
-                c_lbl = font_xs.render(c_text, True, (255, 240, 180) if is_player else (220, 240, 255))
-                cw = c_lbl.get_width() + 16
-                ch = 18
-                
-                cur_y_offset = -24
-                for px, py in courier_drawn_positions:
-                    if abs(mx - px) < 90 and abs((my + cur_y_offset) - py) < 22:
-                        cur_y_offset -= 22
-                courier_drawn_positions.append((mx, my + cur_y_offset))
 
-                c_surf = pygame.Surface((cw, ch), pygame.SRCALPHA)
-                c_surf.fill((25, 20, 10, 230) if is_player else (15, 22, 35, 230))
-                pygame.draw.rect(c_surf, COLOR_GOLD if is_player else (100, 160, 240), (0, 0, cw, ch), 1, border_radius=9)
-                c_surf.blit(c_lbl, (8, 1))
-                screen.blit(c_surf, (mx - cw // 2, my + cur_y_offset))
-                
-                # Gold / Blue courier marker pip
-                pygame.draw.circle(screen, COLOR_GOLD if is_player else (100, 160, 240), (mx, my), 5)
-                pygame.draw.circle(screen, (255, 255, 255), (mx, my), 2)
+                # Animated Galloping Horse Sprite
+                horse_surf = get_horse_courier_sprite(army.owner, is_player, facing_left, frame_idx)
+                hw, hh = horse_surf.get_size()
+                screen.blit(horse_surf, (mx - hw // 2, my - hh + 4))
+
+                # Compact Days Left Badge: "Xd left"
+                b_text = f"{army.courier_days_left}d left"
+                b_lbl = font_xs.render(b_text, True, (255, 235, 170) if is_player else (220, 235, 255))
+                bw = b_lbl.get_width() + 8
+                bh = 14
+                badge_y = my + 4
+
+                badge_surf = pygame.Surface((bw, bh), pygame.SRCALPHA)
+                badge_surf.fill((16, 18, 24, 225))
+                pygame.draw.rect(badge_surf, COLOR_GOLD if is_player else (100, 160, 240), (0, 0, bw, bh), 1, border_radius=4)
+                badge_surf.blit(b_lbl, (4, 0))
+                screen.blit(badge_surf, (mx - bw // 2, badge_y))
     
     # (No hard victory / defeat banners: dynamic feudal subjugation replaces game over)
     
