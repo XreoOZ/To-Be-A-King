@@ -781,6 +781,7 @@ class GameState:
         self.granting_fief_id = None     # Fief currently being granted via modal
         self.grant_page = 0              # Pagination index for grant modal
         self.inspecting_vassal = None    # {"province": pid, "vassal": v_dict} when inspecting vassal profile
+        self.inspecting_ruler = None     # char_id when inspecting a sovereign ruler/king profile
         self.vassal_build_confirm = None # Pending confirmation modal to build on vassal fief
         self.pre_popup_speed = None      # Saved game speed before a popup paused the game
         self.popup_was_active = False    # Track whether a popup was active on previous frame
@@ -1923,10 +1924,12 @@ def run_game():
                     box_end   = None
 
             elif event.type == pygame.KEYDOWN:
-                is_popup_open = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.vassal_build_confirm)
+                is_popup_open = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.inspecting_ruler or state.vassal_build_confirm)
                 if is_popup_open:
                     if event.key == pygame.K_ESCAPE:
-                        if state.inspecting_vassal:
+                        if state.inspecting_ruler:
+                            state.inspecting_ruler = None
+                        elif state.inspecting_vassal:
                             state.inspecting_vassal = None
                         elif state.granting_fief_id:
                             state.granting_fief_id = None
@@ -1975,7 +1978,7 @@ def run_game():
         # -------------------------------------------------------------
         # POPUP MODAL AUTO-PAUSE & AUTO-RESUME SYSTEM
         # -------------------------------------------------------------
-        is_popup_active = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.vassal_build_confirm)
+        is_popup_active = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.inspecting_ruler or state.vassal_build_confirm)
         if is_popup_active:
             if not state.popup_was_active:
                 if state.speed > 0:
@@ -2122,16 +2125,23 @@ def run_game():
         pygame.draw.rect(screen, COLOR_PANEL_BG, left_panel, border_radius=6)
         pygame.draw.rect(screen, COLOR_PANEL_BORDER, left_panel, 2, border_radius=6)
 
-        # Portrait & Wessex Shield
+        # Portrait & Wessex Shield (Clickable Ruler Card)
+        r_card_p = pygame.Rect(20, 70, 270, 96)
+        is_rcp_hov = r_card_p.collidepoint(mouse_pos)
+        if is_rcp_hov:
+            pygame.draw.rect(screen, (45, 55, 75), r_card_p, border_radius=6)
+            pygame.draw.rect(screen, COLOR_GOLD, r_card_p, 1, border_radius=6)
+
         p_img = portrait_cache.get(state.player_id)
         if p_img:
             screen.blit(p_img, (25, 75))
+            pygame.draw.rect(screen, COLOR_GOLD, (25, 75, 64, 64), 1)
         c_img = coa_cache.get(state.player_id)
         if c_img:
             screen.blit(c_img, (88, 125))
 
         # Ruler Info
-        name_surf = font_md.render(state.player["name"], True, COLOR_TEXT_WHITE)
+        name_surf = font_md.render(state.player["name"], True, COLOR_GOLD if is_rcp_hov else COLOR_TEXT_WHITE)
         title_surf = font_sm.render(state.player["realm"], True, COLOR_GOLD)
         dynasty_surf = font_sm.render(f"Martial Skill: {state.player['stats']['martial']}", True, COLOR_TEXT_RED)
         age_surf = font_sm.render(f"Age: {state.player['age']} • Gold: {state.player['gold']}", True, COLOR_TEXT_MUTED)
@@ -2140,6 +2150,10 @@ def run_game():
         screen.blit(title_surf, (115, 96))
         screen.blit(dynasty_surf, (115, 116))
         screen.blit(age_surf, (115, 134))
+
+        if mouse_clicked and is_rcp_hov:
+            state.inspecting_ruler = state.player_id
+            state.logs.append(f"Inspecting Sovereign Dossier for {state.player['name']}.")
 
         # Realm Mobilization Buttons
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (25, 172), (285, 172), 1)
@@ -3768,17 +3782,33 @@ def run_game():
             # TAB 1: OVERVIEW
             # -------------------------------------------------------------
             if state.right_tab == "overview":
-                # Owner Info
+                # Owner Info (Clickable Sovereign Ruler Card)
+                r_card = pygame.Rect(876, 156, 298, 58)
+                is_rc_hov = r_card.collidepoint(mouse_pos)
+                if is_rc_hov:
+                    pygame.draw.rect(screen, (48, 55, 75) if is_player_owned else (65, 36, 40), r_card, border_radius=6)
+                    pygame.draw.rect(screen, COLOR_GOLD if is_player_owned else (240, 100, 100), r_card, 1, border_radius=6)
+
                 owner_p = portrait_cache.get(sel_prov["owner"])
                 if owner_p:
                     mini_p = pygame.transform.smoothscale(owner_p, (46, 46))
-                    screen.blit(mini_p, (880, 162))
+                    screen.blit(mini_p, (882, 162))
+                    pygame.draw.rect(screen, COLOR_GOLD if is_player_owned else (220, 80, 80), (882, 162, 46, 46), 1)
                 owner_c = coa_cache.get(sel_prov["owner"])
                 if owner_c:
-                    screen.blit(owner_c, (932, 162))
+                    screen.blit(owner_c, (934, 162))
 
                 screen.blit(font_md.render(owner_char["name"], True, COLOR_GOLD if is_player_owned else COLOR_TEXT_RED), (975, 162))
-                screen.blit(font_xs.render(owner_char["title"], True, COLOR_TEXT_WHITE), (975, 185))
+                screen.blit(font_xs.render(owner_char["title"], True, COLOR_TEXT_WHITE), (975, 182))
+                
+                # Click to inspect hint
+                hint_str = "👑 Click to Inspect Sovereign Dossier"
+                hint_col = (255, 220, 130) if is_player_owned else (255, 180, 180)
+                screen.blit(font_xs.render(hint_str, True, hint_col), (975, 198))
+
+                if mouse_clicked and is_rc_hov:
+                    state.inspecting_ruler = sel_prov["owner"]
+                    state.logs.append(f"Opened royal dossier for Sovereign {owner_char['name']}.")
 
                 # Province Stats Box
                 s_box = pygame.Rect(880, 220, 290, 80)
@@ -4497,10 +4527,18 @@ def run_game():
             if modal_mouse_clicked and x_hov:
                 state.inspecting_vassal = None
 
+            prov_data = PROVINCES.get(v_pid, {})
+            p_owner = prov_data.get("owner", state.player_id)
+            liege_char = CHARACTERS.get(p_owner, state.player)
+            is_enemy = (p_owner != state.player_id)
+
             # Header Title
-            screen.blit(font_lg.render("FEUDAL VASSAL DOSSIER", True, COLOR_GOLD), (pop_x + 25, pop_y + 16))
-            p_full = PROVINCES.get(v_pid, {}).get("name", "Wessex")
-            screen.blit(font_xs.render(f"Feudal Subject of King Alfred • Province of {p_full}", True, COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 44))
+            title_text = "ENEMY VASSAL DOSSIER" if is_enemy else "FEUDAL VASSAL DOSSIER"
+            title_col = (255, 110, 110) if is_enemy else COLOR_GOLD
+            screen.blit(font_lg.render(title_text, True, title_col), (pop_x + 25, pop_y + 16))
+            p_full = prov_data.get("name", "Wessex")
+            sub_text = f"Feudal Subject of {liege_char['name']} ({liege_char['realm']}) • Province of {p_full}"
+            screen.blit(font_xs.render(sub_text, True, (255, 180, 180) if is_enemy else COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 44))
             pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 64), (pop_x + pop_w - 25, pop_y + 64), 1)
 
             # Top Character Banner Section
@@ -4522,27 +4560,31 @@ def run_game():
             levies_contrib = v_status["levy_contribution"]
 
             # Name and Titles
-            screen.blit(font_md.render(f"👑 {v_obj['name']}", True, COLOR_GOLD), (pop_x + 90, pop_y + 74))
-            rank_str = f"Feudal Rank: {v_obj.get('title', 'Thane')} of {p_full.split()[0]}  •  Religion: Catholic"
+            screen.blit(font_md.render(f"👑 {v_obj['name']}", True, (255, 120, 120) if is_enemy else COLOR_GOLD), (pop_x + 90, pop_y + 74))
+            v_religion = "Norse Pagan" if p_owner == state.enemy_id else prov_data.get("faith", "Catholic")
+            v_culture = "Norse" if p_owner == state.enemy_id else prov_data.get("culture", "Anglo-Saxon")
+            rank_str = f"Feudal Rank: {v_obj.get('title', 'Thane')} of {p_full.split()[0]}  •  Religion: {v_religion} ({v_culture})"
             screen.blit(font_xs.render(rank_str, True, COLOR_TEXT_WHITE), (pop_x + 90, pop_y + 98))
             seat_str = f"Seat of Power: {v_obj.get('city_name')}" if is_landed and v_obj.get('city_name') else "Seat of Power: Landless Subject (Awaiting Royal Charter)"
             screen.blit(font_xs.render(seat_str, True, (140, 205, 255)), (pop_x + 90, pop_y + 114))
 
             # Feudal Attributes Grid (Martial, Stewardship, Diplomacy, Feudal Oath)
+            oath_val = f"100% ({liege_char['name'].split()[1]})" if is_enemy else "100%"
+            oath_sub = "(Enemy Vassal)" if is_enemy else "(Faithful Subject)"
             stats_list = [
                 ("⚔ Martial", f"{10 + (levies_contrib // 30)}" if is_landed else "8", "(Commands Fyrd)"),
                 ("💰 Stewardship", f"{11 + (tax_paid * 2)}" if is_landed else "9", "(Manages Estates)"),
-                ("🤝 Diplomacy", "13", "(Royal Harmony)"),
-                ("🛡 Feudal Oath", "100%", "(Faithful Subject)")
+                ("🤝 Diplomacy", "11" if is_enemy else "13", "(Foreign Court)" if is_enemy else "(Royal Harmony)"),
+                ("🛡 Feudal Oath", oath_val, oath_sub)
             ]
             for s_i, (s_name, s_val, s_sub) in enumerate(stats_list):
                 bx = pop_x + 25 + s_i * 158
                 by = pop_y + 138
                 b_rect = pygame.Rect(bx, by, 150, 44)
                 pygame.draw.rect(screen, (34, 40, 54), b_rect, border_radius=4)
-                pygame.draw.rect(screen, COLOR_PANEL_BORDER, b_rect, 1, border_radius=4)
+                pygame.draw.rect(screen, (160, 60, 60) if is_enemy else COLOR_PANEL_BORDER, b_rect, 1, border_radius=4)
                 screen.blit(font_xs.render(s_name, True, COLOR_TEXT_MUTED), (bx + 8, by + 4))
-                screen.blit(font_md.render(s_val, True, COLOR_GOLD), (bx + 8, by + 18))
+                screen.blit(font_md.render(s_val, True, (255, 120, 120) if is_enemy else COLOR_GOLD), (bx + 8, by + 18))
                 screen.blit(font_xs.render(s_sub, True, (120, 160, 200)), (bx + 48, by + 22))
 
             # Two Main Columns: Economy & Treasury (Left), Military & Fiefs (Right)
@@ -4564,13 +4606,13 @@ def run_game():
                 screen.blit(font_xs.render(f"• Gross Domain Income: +{monthly_gross}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 68))
                 screen.blit(font_xs.render("  (From tenant rents, tolls & agricultural yield)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 84))
                 screen.blit(font_xs.render(f"• Feudal Royal Tax ({tax_rate}%): -{tax_paid}g / month", True, COLOR_TEXT_RED), (pop_x + 40, col_y + 104))
-                screen.blit(font_xs.render("  (Directly enriches King Alfred's treasury)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
+                screen.blit(font_xs.render(f"  (Directly enriches {liege_char['name']}'s treasury)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
                 screen.blit(font_xs.render(f"• Net Monthly Savings: +{net_profit}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 140))
             else:
                 screen.blit(font_xs.render("• Gross Domain Income: 0g / month", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 68))
                 screen.blit(font_xs.render("  (Landless noble holds no estates or tolls)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 84))
                 screen.blit(font_xs.render(f"• Feudal Royal Tax ({tax_rate}%): 0g / month", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 104))
-                screen.blit(font_xs.render("  (No domain revenue subject to royal taxation)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
+                screen.blit(font_xs.render(f"  (No domain revenue subject to royal taxation)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
                 screen.blit(font_xs.render("• Net Monthly Savings: 0g / month", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 140))
             
             # Autonomous Charter Status Bar
@@ -4602,7 +4644,8 @@ def run_game():
             if is_landed:
                 screen.blit(font_sm.render(f"Fyrd Levies: +{levies_contrib} Soldiers", True, COLOR_TEXT_GREEN), (pop_x + 365, col_y + 40))
                 screen.blit(font_xs.render(f"• Household Guards / Garrison: {levies_contrib * 2} Men", True, COLOR_TEXT_WHITE), (pop_x + 365, col_y + 68))
-                screen.blit(font_xs.render("• Feudal Service: Ready to march on King's call", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 86))
+                service_text = f"• Feudal Service: Pledged to {liege_char['name'].split()[1]}'s banner" if is_enemy else "• Feudal Service: Ready to march on King's call"
+                screen.blit(font_xs.render(service_text, True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 86))
                 screen.blit(font_xs.render(f"• Fiefdoms Controlled: {len(held_fiefs)} Fief(s) ({total_held_tiles} Tiles)", True, (150, 215, 255)), (pop_x + 365, col_y + 110))
             else:
                 screen.blit(font_sm.render("Fyrd Levies: 0 Soldiers", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 40))
@@ -4649,6 +4692,173 @@ def run_game():
             screen.blit(font_sm.render("CLOSE DOSSIER (ESC)", True, (255, 220, 220)), (pop_x + pop_w - 40 - btn_w + 70, pop_y + pop_h - 50))
             if modal_mouse_clicked and c_hov:
                 state.inspecting_vassal = None
+
+        # ---------------------------------------------------------
+        # 8. SOVEREIGN RULER DOSSIER MODAL (Player & Enemy High Rulers)
+        # ---------------------------------------------------------
+        if state.inspecting_ruler:
+            r_id = state.inspecting_ruler
+            r_char = CHARACTERS.get(r_id, state.player)
+            is_ruler_enemy = (r_id != state.player_id)
+
+            # Dimmed backdrop
+            dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+            dim_surf.fill((0, 0, 0, 185))
+            screen.blit(dim_surf, (0, 0))
+
+            pop_w, pop_h = 680, 500
+            pop_x = (WINDOW_WIDTH - pop_w) // 2
+            pop_y = (WINDOW_HEIGHT - pop_h) // 2
+            pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
+
+            pygame.draw.rect(screen, COLOR_PANEL_BG, pop_rect, border_radius=10)
+            pygame.draw.rect(screen, (220, 70, 70) if is_ruler_enemy else COLOR_GOLD, pop_rect, 2, border_radius=10)
+
+            # Close 'X' Button at top right
+            x_btn = pygame.Rect(pop_x + pop_w - 38, pop_y + 12, 26, 26)
+            x_hov = x_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (85, 30, 30) if x_hov else (48, 22, 22), x_btn, border_radius=4)
+            pygame.draw.rect(screen, (225, 80, 80), x_btn, 1, border_radius=4)
+            x_lbl = font_sm.render("✕", True, COLOR_TEXT_WHITE)
+            screen.blit(x_lbl, (x_btn.x + 7, x_btn.y + 3))
+            if modal_mouse_clicked and x_hov:
+                state.inspecting_ruler = None
+
+            # Header Title
+            title_text = "SOVEREIGN WARLORD DOSSIER" if is_ruler_enemy else "ROYAL SOVEREIGN DOSSIER"
+            screen.blit(font_lg.render(title_text, True, (255, 110, 110) if is_ruler_enemy else COLOR_GOLD), (pop_x + 25, pop_y + 16))
+            screen.blit(font_xs.render(f"Supreme Liege Lord of {r_char['realm']} • AD 867 Campaign", True, COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 44))
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 64), (pop_x + pop_w - 25, pop_y + 64), 1)
+
+            # Top Character Banner Section
+            r_portrait = portrait_cache.get(r_id)
+            if r_portrait:
+                screen.blit(pygame.transform.smoothscale(r_portrait, (50, 56)), (pop_x + 30, pop_y + 72))
+                pygame.draw.rect(screen, (220, 70, 70) if is_ruler_enemy else COLOR_GOLD, (pop_x + 30, pop_y + 72, 50, 56), 2, border_radius=4)
+            r_coa = coa_cache.get(r_id)
+            if r_coa:
+                screen.blit(pygame.transform.smoothscale(r_coa, (38, 44)), (pop_x + 86, pop_y + 84))
+
+            # Name and Titles
+            screen.blit(font_md.render(f"👑 {r_char['name']}", True, (255, 120, 120) if is_ruler_enemy else COLOR_GOLD), (pop_x + 135, pop_y + 72))
+            rank_str = f"Realm Title: {r_char['title']} • {r_char.get('dynasty', '')}"
+            screen.blit(font_xs.render(rank_str, True, COLOR_TEXT_WHITE), (pop_x + 135, pop_y + 96))
+            
+            # Traits string
+            traits_str = "Traits: " + ", ".join(r_char.get("traits", ["Warlord", "Fierce"]))
+            screen.blit(font_xs.render(traits_str, True, (160, 215, 255)), (pop_x + 135, pop_y + 114))
+
+            # Feudal Attributes Grid (Martial, Stewardship, Diplomacy, Intrigue)
+            stats = r_char.get("stats", {})
+            stats_list = [
+                ("⚔ Martial", str(stats.get("martial", 16)), "(Grand Marshal)"),
+                ("💰 Stewardship", str(stats.get("stewardship", 14)), "(Lord Treasurer)"),
+                ("🤝 Diplomacy", str(stats.get("diplomacy", 12)), "(Royal Envoy)"),
+                ("🗡 Intrigue", str(stats.get("intrigue", 13)), "(Spymaster)")
+            ]
+            for s_i, (s_name, s_val, s_sub) in enumerate(stats_list):
+                bx = pop_x + 25 + s_i * 158
+                by = pop_y + 138
+                b_rect = pygame.Rect(bx, by, 150, 44)
+                pygame.draw.rect(screen, (34, 40, 54), b_rect, border_radius=4)
+                pygame.draw.rect(screen, (160, 70, 70) if is_ruler_enemy else COLOR_PANEL_BORDER, b_rect, 1, border_radius=4)
+                screen.blit(font_xs.render(s_name, True, COLOR_TEXT_MUTED), (bx + 8, by + 4))
+                screen.blit(font_md.render(s_val, True, (255, 120, 120) if is_ruler_enemy else COLOR_GOLD), (bx + 8, by + 18))
+                screen.blit(font_xs.render(s_sub, True, (120, 160, 200)), (bx + 48, by + 22))
+
+            # Two Main Columns: Economy & Treasury (Left), Military & Fiefs (Right)
+            col_w = 305
+            col_y = pop_y + 194
+
+            # Calculate ruler's realm stats
+            r_provs = [p for p in PROVINCES.values() if p["owner"] == r_id]
+            r_prov_names = [p["name"].split()[0] for p in r_provs]
+            total_prov_tax = sum(p.get("tax", 0) for p in r_provs)
+            total_garrison = sum(p.get("levies_current", 0) for p in r_provs)
+            total_field = sum(a.troops for a in state.armies if a.owner == r_id)
+            total_armies_count = sum(1 for a in state.armies if a.owner == r_id)
+
+            r_vassals = []
+            for pid, prov in PROVINCES.items():
+                if prov["owner"] == r_id:
+                    r_vassals.extend(state.vassals.get(pid, []))
+
+            total_vassal_tax = sum(get_vassal_landed_status(state, v, v.get("province"))["tax_paid"] for v in r_vassals)
+            crown_holdings_count = sum(1 for s in state.settlements.values() if s.get("is_crown_demesne") and PROVINCES.get(s.get("province"), {}).get("owner") == r_id)
+
+            # LEFT COLUMN: ROYAL TREASURY & REALM ECONOMY
+            left_rect = pygame.Rect(pop_x + 25, col_y, col_w, 235)
+            pygame.draw.rect(screen, (30, 36, 48), left_rect, border_radius=6)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, left_rect, 1, border_radius=6)
+
+            screen.blit(font_md.render("💰 Royal Treasury & Economy", True, COLOR_GOLD), (pop_x + 35, col_y + 10))
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 35, col_y + 32), (pop_x + 35 + col_w - 20, col_y + 32), 1)
+
+            screen.blit(font_sm.render(f"Treasury: {r_char.get('gold', 0):,} Gold", True, COLOR_GOLD), (pop_x + 40, col_y + 40))
+            screen.blit(font_xs.render(f"• Prestige: {r_char.get('prestige', 0)}  •  Piety/Devotion: {r_char.get('piety', 0)}", True, (150, 200, 255)), (pop_x + 40, col_y + 66))
+            screen.blit(font_xs.render(f"• Provincial Tax Income: +{total_prov_tax}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 88))
+            screen.blit(font_xs.render(f"• Feudal Vassal Tithes: +{total_vassal_tax}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 110))
+            screen.blit(font_xs.render(f"• Crown Demesne Holdings: {crown_holdings_count} Direct Seats", True, COLOR_TEXT_WHITE), (pop_x + 40, col_y + 132))
+            screen.blit(font_xs.render(f"• Total Controlled Lands: {len(r_provs)} of 12 Provinces", True, COLOR_GOLD), (pop_x + 40, col_y + 154))
+            
+            p_list_str = ", ".join(r_prov_names[:6]) + ("..." if len(r_prov_names) > 6 else "")
+            screen.blit(font_xs.render(f"  ({p_list_str})", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 174))
+
+            stance_str = "⚔ AT WAR (Invading Britain)" if is_ruler_enemy else "🛡 AT WAR (Defending England)"
+            stance_col = (255, 100, 100) if is_ruler_enemy else COLOR_GOLD
+            screen.blit(font_xs.render(f"• Feudal Stance: {stance_str}", True, stance_col), (pop_x + 40, col_y + 202))
+
+            # RIGHT COLUMN: MILITARY MIGHT & VASSAL LORDS
+            right_rect = pygame.Rect(pop_x + 350, col_y, col_w, 235)
+            pygame.draw.rect(screen, (30, 36, 48), right_rect, border_radius=6)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, right_rect, 1, border_radius=6)
+
+            screen.blit(font_md.render("⚔ Military Might & Feudal Roster", True, COLOR_GOLD), (pop_x + 360, col_y + 10))
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 360, col_y + 32), (pop_x + 360 + col_w - 20, col_y + 32), 1)
+
+            screen.blit(font_sm.render(f"Available Levies: {total_garrison:,} Men", True, COLOR_TEXT_GREEN), (pop_x + 365, col_y + 40))
+            screen.blit(font_xs.render(f"• Active Armies in Field: {total_armies_count} Hosts ({total_field:,} Men)", True, (255, 200, 120)), (pop_x + 365, col_y + 66))
+            screen.blit(font_xs.render(f"• Sworn Feudal Lords: {len(r_vassals)} Vassals", True, COLOR_TEXT_WHITE), (pop_x + 365, col_y + 88))
+            screen.blit(font_xs.render(f"• Capital Province: {'Jorvik (York)' if is_ruler_enemy else 'Wessex (Winchester)'}", True, (150, 215, 255)), (pop_x + 365, col_y + 110))
+            
+            # Vassals preview list
+            screen.blit(font_xs.render("• Key Vassal Lords:", True, COLOR_TEXT_MUTED), (pop_x + 365, col_y + 132))
+            v_preview_y = col_y + 152
+            for v_sample in r_vassals[:3]:
+                screen.blit(font_xs.render(f"  - {v_sample['name'][:28]}", True, COLOR_GOLD if not is_ruler_enemy else (255, 180, 180)), (pop_x + 365, v_preview_y))
+                v_preview_y += 18
+            if len(r_vassals) > 3:
+                screen.blit(font_xs.render(f"  ... and {len(r_vassals) - 3} other feudal lords", True, COLOR_TEXT_MUTED), (pop_x + 365, v_preview_y))
+
+            # Action Buttons at Bottom
+            btn_w, btn_h = 280, 38
+            
+            # Button 1: Locate Capital on Map
+            loc_btn = pygame.Rect(pop_x + 40, pop_y + pop_h - 55, btn_w, btn_h)
+            loc_hov = loc_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (40, 85, 130) if loc_hov else (28, 60, 95), loc_btn, border_radius=6)
+            pygame.draw.rect(screen, (100, 180, 255), loc_btn, 1, border_radius=6)
+            cap_name = "JORVIK" if is_ruler_enemy else "WESSEX"
+            screen.blit(font_sm.render(f"🔍 LOCATE CAPITAL ({cap_name})", True, COLOR_TEXT_WHITE), (pop_x + 75, pop_y + pop_h - 45))
+            if modal_mouse_clicked and loc_hov:
+                cap_prov = "jorvik" if is_ruler_enemy else "wessex"
+                state.selected_province = cap_prov
+                cap_coord = (14, 12) if is_ruler_enemy else (4, 18)
+                curr_tw = max(18, int(BASE_TILE_W * state.zoom))
+                curr_th = max(16, int(BASE_TILE_H * state.zoom))
+                state.cam_pan_x = VIEWPORT_CENTER_X - (cap_coord[0] * curr_tw + curr_tw // 2)
+                state.cam_pan_y = VIEWPORT_CENTER_Y - (cap_coord[1] * curr_th + curr_th // 2)
+                state.inspecting_ruler = None
+                state.logs.append(f"Focusing camera on {r_char['name']}'s seat in {cap_prov.title()}.")
+
+            # Button 2: Close Dossier (ESC)
+            close_btn = pygame.Rect(pop_x + pop_w - 40 - btn_w, pop_y + pop_h - 55, btn_w, btn_h)
+            c_hov = close_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (90, 40, 40) if c_hov else (60, 28, 28), close_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_TEXT_RED, close_btn, 1, border_radius=6)
+            screen.blit(font_sm.render("CLOSE DOSSIER (ESC)", True, (255, 220, 220)), (close_btn.x + 70, pop_y + pop_h - 45))
+            if modal_mouse_clicked and c_hov:
+                state.inspecting_ruler = None
 
         # ---------------------------------------------------------
         # 8. VASSAL FIEF CONSTRUCTION CONFIRMATION MODAL
