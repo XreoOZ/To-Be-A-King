@@ -1007,6 +1007,8 @@ class GameState:
         self.fief_page = 0
         self.laws_page = 0
         self.laws_subtab = "tax"         # "tax" or "levy" sub-tab in Realm Laws
+        self.universal_tax_target = 10   # default realm-wide tax target (0-90%)
+        self.universal_levy_target = 20  # default realm-wide levy target (0-90%)
         self.economy_subtab = "income"   # "income" or "expense" sub-tab in Royal Finances
         self.economy_vassal_page = 0     # Pagination for vassal tithes breakdown
         
@@ -3085,6 +3087,85 @@ def run_game():
                 state.laws_subtab = "levy"
                 state.laws_page = 0
 
+            # -------------------------------------------------------------
+            # Universal Realm Law Enactment Bar ("SAMARATAKAN SEMUA")
+            # -------------------------------------------------------------
+            uni_target = getattr(state, "universal_tax_target", 10) if is_tax_active else getattr(state, "universal_levy_target", 20)
+            
+            uni_rect = pygame.Rect(25, 326, 260, 30)
+            pygame.draw.rect(screen, (32, 38, 50), uni_rect, border_radius=4)
+            pygame.draw.rect(screen, (70, 95, 130), uni_rect, 1, border_radius=4)
+
+            screen.blit(font_xs.render("ALL:", True, COLOR_GOLD), (31, 334))
+            
+            btn_uni_dec = pygame.Rect(58, 331, 18, 20)
+            box_uni_rate = pygame.Rect(78, 331, 38, 20)
+            btn_uni_inc = pygame.Rect(118, 331, 18, 20)
+            btn_uni_apply = pygame.Rect(140, 331, 140, 20)
+
+            hov_uni_dec = btn_uni_dec.collidepoint(mouse_pos)
+            hov_uni_inc = btn_uni_inc.collidepoint(mouse_pos)
+            hov_uni_apply = btn_uni_apply.collidepoint(mouse_pos)
+
+            # [-] button
+            pygame.draw.rect(screen, (60, 70, 90) if hov_uni_dec else (42, 48, 62), btn_uni_dec, border_radius=3)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_uni_dec, 1, border_radius=3)
+            screen.blit(font_xs.render("-", True, COLOR_TEXT_WHITE if hov_uni_dec else (200, 210, 230)), (64, 333))
+
+            # Target Box
+            pygame.draw.rect(screen, (24, 30, 42), box_uni_rate, border_radius=3)
+            pygame.draw.rect(screen, (80, 120, 180), box_uni_rate, 1, border_radius=3)
+            u_lbl = font_xs.render(f"{uni_target}%", True, COLOR_GOLD)
+            screen.blit(u_lbl, (box_uni_rate.x + (box_uni_rate.w - u_lbl.get_width()) // 2, 333))
+
+            # [+] button
+            pygame.draw.rect(screen, (60, 70, 90) if hov_uni_inc else (42, 48, 62), btn_uni_inc, border_radius=3)
+            pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_uni_inc, 1, border_radius=3)
+            screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE if hov_uni_inc else (200, 210, 230)), (123, 333))
+
+            # [ ⚡ SAMARATAKAN ] button
+            pygame.draw.rect(screen, (35, 95, 52) if hov_uni_apply else (25, 72, 40), btn_uni_apply, border_radius=3)
+            pygame.draw.rect(screen, COLOR_TEXT_GREEN, btn_uni_apply, 1, border_radius=3)
+            apply_txt = font_xs.render("⚡ SAMARATAKAN", True, COLOR_TEXT_WHITE)
+            screen.blit(apply_txt, (btn_uni_apply.x + (btn_uni_apply.w - apply_txt.get_width()) // 2, 334))
+
+            if mouse_clicked:
+                if hov_uni_dec:
+                    if is_tax_active:
+                        state.universal_tax_target = max(0, uni_target - 5)
+                    else:
+                        state.universal_levy_target = max(0, uni_target - 5)
+                elif hov_uni_inc:
+                    if is_tax_active:
+                        state.universal_tax_target = min(90, uni_target + 5)
+                    else:
+                        state.universal_levy_target = min(90, uni_target + 5)
+                elif hov_uni_apply:
+                    app_count = 0
+                    lock_count = 0
+                    for r_pid, r_prov in PROVINCES.items():
+                        if r_prov["owner"] == state.player_id:
+                            for v_item in state.vassals.get(r_pid, []):
+                                v_is_locked = v_item.get("tax_locked", False) if is_tax_active else v_item.get("levy_locked", False)
+                                if v_is_locked:
+                                    lock_count += 1
+                                else:
+                                    if is_tax_active:
+                                        v_item["tax_rate"] = uni_target
+                                        st_v = get_vassal_landed_status(state, v_item, r_pid)
+                                        v_item["tax_contribution"] = st_v["tax_paid"]
+                                    else:
+                                        v_item["levy_rate"] = uni_target
+                                        st_v = get_vassal_landed_status(state, v_item, r_pid)
+                                        v_item["levy_contribution"] = st_v["levy_contribution"]
+                                    sync_province_holdings_stats(state, r_pid)
+                                    app_count += 1
+                    law_name = "Tax" if is_tax_active else "Levy"
+                    state.logs.append(f"Samaratakan Hukum: {law_name} diset ke {uni_target}% untuk {app_count} vassal! ({lock_count} vassal terkunci tetap aman).")
+
+            # -------------------------------------------------------------
+            # Vassals List with Individual Settings & LOCK Toggles
+            # -------------------------------------------------------------
             realm_vassals = []
             for pid, prov in PROVINCES.items():
                 if prov["owner"] == state.player_id:
@@ -3094,25 +3175,25 @@ def run_game():
             total_v = len(realm_vassals)
             header_text = f"Tax Laws ({total_v} Lords)" if is_tax_active else f"Levy Laws ({total_v} Lords)"
             header_lbl = font_md.render(header_text, True, COLOR_GOLD)
-            screen.blit(header_lbl, (25, 326))
+            screen.blit(header_lbl, (25, 362))
 
-            per_page = 5
+            per_page = 4
             max_pages = max(1, (total_v + per_page - 1) // per_page)
             state.laws_page = max(0, min(getattr(state, "laws_page", 0), max_pages - 1))
 
-            # Header Top Pagination Controls (< 1/4 >)
-            top_btn_prev = pygame.Rect(216, 326, 18, 18)
-            top_btn_next = pygame.Rect(268, 326, 18, 18)
+            # Header Top Pagination Controls (< 1/5 >)
+            top_btn_prev = pygame.Rect(216, 362, 18, 18)
+            top_btn_next = pygame.Rect(268, 362, 18, 18)
             is_top_prev_hov = top_btn_prev.collidepoint(mouse_pos)
             is_top_next_hov = top_btn_next.collidepoint(mouse_pos)
 
             p_top_prev_col = COLOR_TEXT_WHITE if (state.laws_page > 0 and not is_top_prev_hov) else (COLOR_GOLD if is_top_prev_hov else (70, 75, 85))
             p_top_next_col = COLOR_TEXT_WHITE if (state.laws_page < max_pages - 1 and not is_top_next_hov) else (COLOR_GOLD if is_top_next_hov else (70, 75, 85))
-            screen.blit(font_xs.render("<", True, p_top_prev_col), (221, 328))
+            screen.blit(font_xs.render("<", True, p_top_prev_col), (221, 364))
             p_top_str = f"{state.laws_page + 1}/{max_pages}"
             p_top_lbl = font_xs.render(p_top_str, True, COLOR_TEXT_MUTED)
-            screen.blit(p_top_lbl, (244 - p_top_lbl.get_width() // 2, 328))
-            screen.blit(font_xs.render(">", True, p_top_next_col), (273, 328))
+            screen.blit(p_top_lbl, (244 - p_top_lbl.get_width() // 2, 364))
+            screen.blit(font_xs.render(">", True, p_top_next_col), (273, 364))
 
             if mouse_clicked and is_top_prev_hov and state.laws_page > 0:
                 state.laws_page -= 1
@@ -3122,11 +3203,11 @@ def run_game():
             start_i = state.laws_page * per_page
             cur_page_vassals = realm_vassals[start_i:start_i + per_page]
 
-            vy = 348
+            vy = 384
             for v_pid, v_data in cur_page_vassals:
-                v_card = pygame.Rect(25, vy, 260, 54)
+                v_card = pygame.Rect(25, vy, 260, 52)
                 is_vc_hov = v_card.collidepoint(mouse_pos)
-                pygame.draw.rect(screen, (50, 60, 78) if is_vc_hov else (34, 40, 52), v_card, border_radius=4)
+                pygame.draw.rect(screen, (48, 56, 72) if is_vc_hov else (32, 38, 50), v_card, border_radius=4)
                 pygame.draw.rect(screen, COLOR_GOLD if is_vc_hov else COLOR_PANEL_BORDER, v_card, 1, border_radius=4)
 
                 prov_short = PROVINCES[v_pid]["name"].split()[0]
@@ -3135,44 +3216,60 @@ def run_game():
                 screen.blit(p_tag, (280 - p_tag.get_width(), vy + 3))
 
                 st = get_vassal_landed_status(state, v_data, v_pid)
-                h_name = v_data.get("city_name") if st["is_landed"] else "Landless Noble (Unlanded)"
-                screen.blit(font_xs.render(f"Fief: {h_name}", True, (210, 220, 235)), (32, vy + 17))
+                h_name = v_data.get("city_name") if st["is_landed"] else "Landless Noble"
+                screen.blit(font_xs.render(f"Fief: {h_name}", True, (200, 215, 230)), (32, vy + 16))
 
-                btn_dec = pygame.Rect(32, vy + 32, 20, 18)
-                rate_box = pygame.Rect(54, vy + 32, 44, 18)
-                btn_inc = pygame.Rect(100, vy + 32, 20, 18)
+                # Row 3: [-] [Rate%] [+] [Info] [Lock Button]
+                btn_dec = pygame.Rect(30, vy + 31, 18, 17)
+                rate_box = pygame.Rect(50, vy + 31, 36, 17)
+                btn_inc = pygame.Rect(88, vy + 31, 18, 17)
+                btn_lock = pygame.Rect(196, vy + 31, 84, 17)
 
                 hov_dec = btn_dec.collidepoint(mouse_pos)
                 hov_rate = rate_box.collidepoint(mouse_pos)
                 hov_inc = btn_inc.collidepoint(mouse_pos)
+                hov_lock = btn_lock.collidepoint(mouse_pos)
 
-                # Draw [-] button
-                pygame.draw.rect(screen, (70, 80, 100) if hov_dec else (45, 52, 68), btn_dec, border_radius=3)
+                # Dec
+                pygame.draw.rect(screen, (70, 80, 100) if hov_dec else (42, 48, 62), btn_dec, border_radius=3)
                 pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_dec, 1, border_radius=3)
-                screen.blit(font_xs.render("-", True, COLOR_TEXT_WHITE if hov_dec else COLOR_TEXT_MUTED), (39, vy + 33))
+                screen.blit(font_xs.render("-", True, COLOR_TEXT_WHITE), (36, vy + 31))
 
-                # Draw [+] button
-                pygame.draw.rect(screen, (70, 80, 100) if hov_inc else (45, 52, 68), btn_inc, border_radius=3)
+                # Inc
+                pygame.draw.rect(screen, (70, 80, 100) if hov_inc else (42, 48, 62), btn_inc, border_radius=3)
                 pygame.draw.rect(screen, COLOR_PANEL_BORDER, btn_inc, 1, border_radius=3)
-                screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE if hov_inc else COLOR_TEXT_MUTED), (106, vy + 33))
+                screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE), (93, vy + 31))
 
                 if is_tax_active:
                     cur_rate = v_data.get("tax_rate", 10)
-                    pygame.draw.rect(screen, (30, 38, 50), rate_box, border_radius=3)
+                    is_locked = v_data.get("tax_locked", False)
+                    
+                    # Rate Box
+                    pygame.draw.rect(screen, (28, 34, 46), rate_box, border_radius=3)
                     pygame.draw.rect(screen, (90, 140, 210) if hov_rate else COLOR_PANEL_BORDER, rate_box, 1, border_radius=3)
-                    rate_lbl = font_xs.render(f"{cur_rate}%", True, COLOR_GOLD if cur_rate > 0 else COLOR_TEXT_MUTED)
-                    screen.blit(rate_lbl, (rate_box.x + (rate_box.w - rate_lbl.get_width()) // 2, vy + 33))
+                    r_lbl = font_xs.render(f"{cur_rate}%", True, COLOR_GOLD)
+                    screen.blit(r_lbl, (rate_box.x + (rate_box.w - r_lbl.get_width()) // 2, vy + 31))
 
-                    if st["is_landed"]:
-                        tax_info = f"Tax: +{st['tax_paid']}g/m"
-                        tax_col = COLOR_TEXT_GREEN if st['tax_paid'] > 0 else COLOR_TEXT_MUTED
-                    else:
-                        tax_info = "Tax: 0g (No Land)"
-                        tax_col = COLOR_TEXT_MUTED
-                    screen.blit(font_xs.render(tax_info, True, tax_col), (128, vy + 34))
+                    # Tax Info
+                    info_txt = f"+{st['tax_paid']}g/m" if st["is_landed"] else "0g"
+                    screen.blit(font_xs.render(info_txt, True, COLOR_TEXT_GREEN if st['tax_paid'] > 0 else COLOR_TEXT_MUTED), (110, vy + 32))
+
+                    # Lock Button
+                    lock_bg = (65, 50, 20) if is_locked else ((45, 52, 68) if hov_lock else (28, 34, 46))
+                    lock_bd = COLOR_GOLD if is_locked else ((120, 160, 210) if hov_lock else (70, 80, 95))
+                    pygame.draw.rect(screen, lock_bg, btn_lock, border_radius=3)
+                    pygame.draw.rect(screen, lock_bd, btn_lock, 1, border_radius=3)
+                    l_txt = "◈ LOCKED" if is_locked else "◇ UNLOCK"
+                    l_col = COLOR_GOLD if is_locked else COLOR_TEXT_MUTED
+                    l_lbl = font_xs.render(l_txt, True, l_col)
+                    screen.blit(l_lbl, (btn_lock.x + (btn_lock.w - l_lbl.get_width()) // 2, vy + 31))
 
                     if mouse_clicked:
-                        if hov_dec:
+                        if hov_lock:
+                            v_data["tax_locked"] = not is_locked
+                            st_str = "LOCKED (exempt from realm changes)" if v_data["tax_locked"] else "UNLOCKED"
+                            state.logs.append(f"Feudal Law: {v_data['name']}'s tax rate is now {st_str}.")
+                        elif hov_dec:
                             new_rate = max(0, cur_rate - 5)
                             v_data["tax_rate"] = new_rate
                             st_new = get_vassal_landed_status(state, v_data, v_pid)
@@ -3188,11 +3285,8 @@ def run_game():
                             state.logs.append(f"Increased {v_data['name']}'s tax obligation to {new_rate}%.")
                         elif hov_rate:
                             cycle = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]
-                            if cur_rate in cycle:
-                                next_i = (cycle.index(cur_rate) + 1) % len(cycle)
-                                new_rate = cycle[next_i]
-                            else:
-                                new_rate = 10
+                            next_i = (cycle.index(cur_rate) + 1) % len(cycle) if cur_rate in cycle else 1
+                            new_rate = cycle[next_i]
                             v_data["tax_rate"] = new_rate
                             st_new = get_vassal_landed_status(state, v_data, v_pid)
                             v_data["tax_contribution"] = st_new["tax_paid"]
@@ -3205,48 +3299,58 @@ def run_game():
                                 state.selected_settlement = v_data["tiles"][0]
                             state.logs.append(f"Inspecting feudal dossier for {v_data['name']}.")
 
-                else:  # Levy Laws Sub-tab
+                else:  # Levy Laws
                     cur_rate = v_data.get("levy_rate", 20)
-                    pygame.draw.rect(screen, (30, 38, 50), rate_box, border_radius=3)
+                    is_locked = v_data.get("levy_locked", False)
+                    
+                    # Rate Box
+                    pygame.draw.rect(screen, (28, 34, 46), rate_box, border_radius=3)
                     pygame.draw.rect(screen, (90, 140, 210) if hov_rate else COLOR_PANEL_BORDER, rate_box, 1, border_radius=3)
-                    rate_lbl = font_xs.render(f"{cur_rate}%", True, COLOR_GOLD if cur_rate > 0 else COLOR_TEXT_MUTED)
-                    screen.blit(rate_lbl, (rate_box.x + (rate_box.w - rate_lbl.get_width()) // 2, vy + 33))
+                    r_lbl = font_xs.render(f"{cur_rate}%", True, COLOR_GOLD)
+                    screen.blit(r_lbl, (rate_box.x + (rate_box.w - r_lbl.get_width()) // 2, vy + 31))
 
-                    if st["is_landed"]:
-                        levy_info = f"Levy: +{st['levy_contribution']} Men"
-                        levy_col = COLOR_TEXT_GREEN if st['levy_contribution'] > 0 else COLOR_TEXT_MUTED
-                    else:
-                        levy_info = "Levy: 0 Men (No Land)"
-                        levy_col = COLOR_TEXT_MUTED
-                    screen.blit(font_xs.render(levy_info, True, levy_col), (128, vy + 34))
+                    # Levy Info
+                    info_txt = f"+{st['levy_contribution']}m" if st["is_landed"] else "0m"
+                    screen.blit(font_xs.render(info_txt, True, COLOR_TEXT_GREEN if st['levy_contribution'] > 0 else COLOR_TEXT_MUTED), (110, vy + 32))
+
+                    # Lock Button
+                    lock_bg = (65, 50, 20) if is_locked else ((45, 52, 68) if hov_lock else (28, 34, 46))
+                    lock_bd = COLOR_GOLD if is_locked else ((120, 160, 210) if hov_lock else (70, 80, 95))
+                    pygame.draw.rect(screen, lock_bg, btn_lock, border_radius=3)
+                    pygame.draw.rect(screen, lock_bd, btn_lock, 1, border_radius=3)
+                    l_txt = "◈ LOCKED" if is_locked else "◇ UNLOCK"
+                    l_col = COLOR_GOLD if is_locked else COLOR_TEXT_MUTED
+                    l_lbl = font_xs.render(l_txt, True, l_col)
+                    screen.blit(l_lbl, (btn_lock.x + (btn_lock.w - l_lbl.get_width()) // 2, vy + 31))
 
                     if mouse_clicked:
-                        if hov_dec:
+                        if hov_lock:
+                            v_data["levy_locked"] = not is_locked
+                            st_str = "LOCKED (exempt from realm changes)" if v_data["levy_locked"] else "UNLOCKED"
+                            state.logs.append(f"Feudal Law: {v_data['name']}'s levy rate is now {st_str}.")
+                        elif hov_dec:
                             new_rate = max(0, cur_rate - 5)
                             v_data["levy_rate"] = new_rate
                             st_new = get_vassal_landed_status(state, v_data, v_pid)
                             v_data["levy_contribution"] = st_new["levy_contribution"]
                             sync_province_holdings_stats(state, v_pid)
-                            state.logs.append(f"Decreased {v_data['name']}'s fyrd levy obligation to {new_rate}%.")
+                            state.logs.append(f"Decreased {v_data['name']}'s levy obligation to {new_rate}%.")
                         elif hov_inc:
                             new_rate = min(90, cur_rate + 5)
                             v_data["levy_rate"] = new_rate
                             st_new = get_vassal_landed_status(state, v_data, v_pid)
                             v_data["levy_contribution"] = st_new["levy_contribution"]
                             sync_province_holdings_stats(state, v_pid)
-                            state.logs.append(f"Increased {v_data['name']}'s fyrd levy obligation to {new_rate}%.")
+                            state.logs.append(f"Increased {v_data['name']}'s levy obligation to {new_rate}%.")
                         elif hov_rate:
                             cycle = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]
-                            if cur_rate in cycle:
-                                next_i = (cycle.index(cur_rate) + 1) % len(cycle)
-                                new_rate = cycle[next_i]
-                            else:
-                                new_rate = 20
+                            next_i = (cycle.index(cur_rate) + 1) % len(cycle) if cur_rate in cycle else 2
+                            new_rate = cycle[next_i]
                             v_data["levy_rate"] = new_rate
                             st_new = get_vassal_landed_status(state, v_data, v_pid)
                             v_data["levy_contribution"] = st_new["levy_contribution"]
                             sync_province_holdings_stats(state, v_pid)
-                            state.logs.append(f"Adjusted {v_data['name']}'s levy obligation to {new_rate}%.")
+                            state.logs.append(f"Adjusted {v_data['name']}'s levy rate to {new_rate}%.")
                         elif is_vc_hov:
                             state.selected_province = v_pid
                             state.inspecting_vassal = {"province": v_pid, "vassal": v_data}
@@ -3254,10 +3358,10 @@ def run_game():
                                 state.selected_settlement = v_data["tiles"][0]
                             state.logs.append(f"Inspecting feudal dossier for {v_data['name']}.")
 
-                vy += 58
+                vy += 56
 
-            # Bottom Pagination Controls
-            py_btn = 645
+            # Bottom Pagination Controls (py_btn = 618)
+            py_btn = 618
             btn_prev = pygame.Rect(25, py_btn, 80, 26)
             btn_next = pygame.Rect(205, py_btn, 80, 26)
 
@@ -5510,6 +5614,52 @@ def run_game():
                 screen.blit(font_xs.render(f"• Gross Domain Income: +{monthly_gross}g / month", True, (160, 220, 180)), (pop_x + 40, col_y + 68))
                 screen.blit(font_xs.render("  (From tenant rents, tolls & agricultural yield)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 84))
                 screen.blit(font_xs.render(f"• Feudal Royal Tax ({tax_rate}%): -{tax_paid}g / month", True, COLOR_TEXT_RED), (pop_x + 40, col_y + 104))
+                
+                # Interactive Tax Controls in Dossier (Player only)
+                if not is_enemy:
+                    d_t_dec = pygame.Rect(pop_x + 214, col_y + 102, 16, 16)
+                    d_t_inc = pygame.Rect(pop_x + 232, col_y + 102, 16, 16)
+                    d_t_lock = pygame.Rect(pop_x + 250, col_y + 102, 68, 16)
+
+                    h_t_dec = d_t_dec.collidepoint(mouse_pos)
+                    h_t_inc = d_t_inc.collidepoint(mouse_pos)
+                    h_t_lock = d_t_lock.collidepoint(mouse_pos)
+
+                    is_t_locked = v_obj.get("tax_locked", False)
+                    pygame.draw.rect(screen, (70, 80, 100) if h_t_dec else (42, 48, 62), d_t_dec, border_radius=3)
+                    pygame.draw.rect(screen, COLOR_PANEL_BORDER, d_t_dec, 1, border_radius=3)
+                    screen.blit(font_xs.render("-", True, COLOR_TEXT_WHITE), (pop_x + 219, col_y + 101))
+
+                    pygame.draw.rect(screen, (70, 80, 100) if h_t_inc else (42, 48, 62), d_t_inc, border_radius=3)
+                    pygame.draw.rect(screen, COLOR_PANEL_BORDER, d_t_inc, 1, border_radius=3)
+                    screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE), (pop_x + 236, col_y + 101))
+
+                    l_t_bg = (65, 50, 20) if is_t_locked else ((45, 52, 68) if h_t_lock else (28, 34, 46))
+                    l_t_bd = COLOR_GOLD if is_t_locked else ((120, 160, 210) if h_t_lock else (70, 80, 95))
+                    pygame.draw.rect(screen, l_t_bg, d_t_lock, border_radius=3)
+                    pygame.draw.rect(screen, l_t_bd, d_t_lock, 1, border_radius=3)
+                    l_t_txt = "◈ LOCKED" if is_t_locked else "◇ UNLOCK"
+                    l_t_col = COLOR_GOLD if is_t_locked else COLOR_TEXT_MUTED
+                    l_t_lbl = font_xs.render(l_t_txt, True, l_t_col)
+                    screen.blit(l_t_lbl, (d_t_lock.x + (d_t_lock.w - l_t_lbl.get_width()) // 2, col_y + 102))
+
+                    if modal_mouse_clicked:
+                        if h_t_lock:
+                            v_obj["tax_locked"] = not is_t_locked
+                            state.logs.append(f"Feudal Law: {v_obj['name']}'s tax rate is now {'LOCKED' if v_obj['tax_locked'] else 'UNLOCKED'}.")
+                        elif h_t_dec:
+                            v_obj["tax_rate"] = max(0, tax_rate - 5)
+                            st_new = get_vassal_landed_status(state, v_obj, v_pid)
+                            v_obj["tax_contribution"] = st_new["tax_paid"]
+                            sync_province_holdings_stats(state, v_pid)
+                            state.logs.append(f"Decreased {v_obj['name']}'s tax obligation to {v_obj['tax_rate']}%.")
+                        elif h_t_inc:
+                            v_obj["tax_rate"] = min(90, tax_rate + 5)
+                            st_new = get_vassal_landed_status(state, v_obj, v_pid)
+                            v_obj["tax_contribution"] = st_new["tax_paid"]
+                            sync_province_holdings_stats(state, v_pid)
+                            state.logs.append(f"Increased {v_obj['name']}'s tax obligation to {v_obj['tax_rate']}%.")
+
                 screen.blit(font_xs.render(f"  (Directly enriches {liege_char['name']}'s treasury)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 120))
                 screen.blit(font_xs.render(f"• Net Monthly Savings: +{net_profit}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 140))
             else:
@@ -5547,6 +5697,52 @@ def run_game():
 
             if is_landed:
                 screen.blit(font_sm.render(f"Fyrd Levies ({levy_rate}%): +{levies_contrib} Soldiers", True, COLOR_TEXT_GREEN), (pop_x + 365, col_y + 40))
+
+                # Interactive Levy Controls in Dossier (Player only)
+                if not is_enemy:
+                    d_l_dec = pygame.Rect(pop_x + 538, col_y + 40, 16, 16)
+                    d_l_inc = pygame.Rect(pop_x + 556, col_y + 40, 16, 16)
+                    d_l_lock = pygame.Rect(pop_x + 574, col_y + 40, 68, 16)
+
+                    h_l_dec = d_l_dec.collidepoint(mouse_pos)
+                    h_l_inc = d_l_inc.collidepoint(mouse_pos)
+                    h_l_lock = d_l_lock.collidepoint(mouse_pos)
+
+                    is_l_locked = v_obj.get("levy_locked", False)
+                    pygame.draw.rect(screen, (70, 80, 100) if h_l_dec else (42, 48, 62), d_l_dec, border_radius=3)
+                    pygame.draw.rect(screen, COLOR_PANEL_BORDER, d_l_dec, 1, border_radius=3)
+                    screen.blit(font_xs.render("-", True, COLOR_TEXT_WHITE), (pop_x + 543, col_y + 39))
+
+                    pygame.draw.rect(screen, (70, 80, 100) if h_l_inc else (42, 48, 62), d_l_inc, border_radius=3)
+                    pygame.draw.rect(screen, COLOR_PANEL_BORDER, d_l_inc, 1, border_radius=3)
+                    screen.blit(font_xs.render("+", True, COLOR_TEXT_WHITE), (pop_x + 560, col_y + 39))
+
+                    l_l_bg = (65, 50, 20) if is_l_locked else ((45, 52, 68) if h_l_lock else (28, 34, 46))
+                    l_l_bd = COLOR_GOLD if is_l_locked else ((120, 160, 210) if h_l_lock else (70, 80, 95))
+                    pygame.draw.rect(screen, l_l_bg, d_l_lock, border_radius=3)
+                    pygame.draw.rect(screen, l_l_bd, d_l_lock, 1, border_radius=3)
+                    l_l_txt = "◈ LOCKED" if is_l_locked else "◇ UNLOCK"
+                    l_l_col = COLOR_GOLD if is_l_locked else COLOR_TEXT_MUTED
+                    l_l_lbl = font_xs.render(l_l_txt, True, l_l_col)
+                    screen.blit(l_l_lbl, (d_l_lock.x + (d_l_lock.w - l_l_lbl.get_width()) // 2, col_y + 40))
+
+                    if modal_mouse_clicked:
+                        if h_l_lock:
+                            v_obj["levy_locked"] = not is_l_locked
+                            state.logs.append(f"Feudal Law: {v_obj['name']}'s levy rate is now {'LOCKED' if v_obj['levy_locked'] else 'UNLOCKED'}.")
+                        elif h_l_dec:
+                            v_obj["levy_rate"] = max(0, levy_rate - 5)
+                            st_new = get_vassal_landed_status(state, v_obj, v_pid)
+                            v_obj["levy_contribution"] = st_new["levy_contribution"]
+                            sync_province_holdings_stats(state, v_pid)
+                            state.logs.append(f"Decreased {v_obj['name']}'s levy obligation to {v_obj['levy_rate']}%.")
+                        elif h_l_inc:
+                            v_obj["levy_rate"] = min(90, levy_rate + 5)
+                            st_new = get_vassal_landed_status(state, v_obj, v_pid)
+                            v_obj["levy_contribution"] = st_new["levy_contribution"]
+                            sync_province_holdings_stats(state, v_pid)
+                            state.logs.append(f"Increased {v_obj['name']}'s levy obligation to {v_obj['levy_rate']}%.")
+
                 screen.blit(font_xs.render(f"• Household Guards (Kept): {household_guard} Men", True, COLOR_TEXT_WHITE), (pop_x + 365, col_y + 66))
                 screen.blit(font_xs.render(f"• Total Domain Force: {total_garrison} Men", True, (170, 200, 230)), (pop_x + 365, col_y + 82))
                 service_text = f"• Feudal Service: Pledged to {liege_char['name'].split()[1]}'s banner" if is_enemy else "• Feudal Service: Ready to march on King's call"
