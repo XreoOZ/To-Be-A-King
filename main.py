@@ -2942,6 +2942,11 @@ def run_game():
                     screen.blit(font_xs.render(holder_str, True, h_col), (888, fy + 18))
 
                     # Action buttons on fief card
+                    e_hov = False
+                    g_hov = False
+                    d_hov = False
+                    r_hov = False
+
                     # 1. Edit Tiles Button
                     b_edit = pygame.Rect(888, fy + 36, 75, 20)
                     e_hov = b_edit.collidepoint(mouse_pos)
