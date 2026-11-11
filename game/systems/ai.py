@@ -274,14 +274,18 @@ def run_realm_ai(state, ruler_id):
             if not defense_staging_tile:
                 return
 
-            # Mobilization: Raise full realm fyrd if threatened and field forces are insufficient
-            cooldown = getattr(state, "enemy_raise_cooldown", 0) if ruler_id == state.enemy_id else 0
-            if cooldown <= 0 and (len(my_armies) == 0 or total_my_field < total_neutral_border_troops * 0.9) and unraised_my_levies >= 40:
-                count, men = state.raise_all_realm_levies(ruler_id)
+            # Safe Staging Point: Capital or safe core province
+            cap_pid = state.get_realm_capital(ruler_id)
+            safe_rally_tile = get_province_capital_tile(cap_pid) if cap_pid in realm_provs else defense_staging_tile
+
+            # STEP 1: LIAT THREAT -> LANGSUNG SENT MESSAGE KE SEMUA PROVINSI!
+            # Mobilize 100% of realm provinces immediately with emergency priority (overriding peacetime cooldowns)
+            if (len(my_armies) == 0 or total_my_field < total_neutral_border_troops * 0.9) and unraised_my_levies >= 20:
+                count, men = state.raise_all_realm_levies(ruler_id, is_emergency=True)
                 if count > 0:
                     fp_name = PROVINCES.get(frontier_prov, {}).get("name", "the frontier").split()[0]
                     state.logs.append(f"🛡 Border Alert (SIAGA): Threat sighted near {fp_name}! {r_name} summons {count} hosts (+{men:,} men) to defend the border!")
-                    my_armies = [a for a in state.armies if a.owner == ruler_id and a.troops > 0]
+                    my_armies = [a for a in state.armies if a.owner == ruler_id and a.troops > 0 and not getattr(a, "is_demobilizing", False)]
 
             # CONSOLIDATE & MERGE ARMIES ("gabung biar jadi besar")
             # 1. Merge any co-located friendly armies on any tile
@@ -291,23 +295,41 @@ def run_realm_ai(state, ruler_id):
 
             # Re-evaluate armies after tile merging
             my_armies = [a for a in state.armies if a.owner == ruler_id and a.troops > 0 and not getattr(a, "is_demobilizing", False)]
+            ready_armies = [a for a in my_armies if not a.in_battle and not a.is_mustering and not a.courier_en_route]
 
-            # 2. CONFRONT / BLOCK AT BORDER ("ngehadang di perbatasan")
-            # ALL ready warbands converge directly on defense_staging_tile to unite into one grand deathstack!
-            for a in my_armies:
-                if a.in_battle or a.is_mustering or a.courier_en_route or getattr(a, "is_demobilizing", False):
-                    continue
+            # STEP 2: RALLY DI SATU TITIK PALING AMAN -> KE LOKASI PALING DEKAT DENGAN LAWAN DI PERBATASAN
+            if ready_armies:
+                ready_armies.sort(key=lambda x: x.troops, reverse=True)
+                main_host = ready_armies[0]
 
-                a_tile = getattr(a, "tile", None)
-                if a_tile == defense_staging_tile:
-                    # Standing firm at the border checkpoint: freeze and hold formation!
-                    if a.is_moving:
-                        a.tile_path = []
-                        a.move_progress = 0.0
+                # Concentration check: Once assembled at safe rally point (>= 45% of total field troops or 1 main host),
+                # advance directly to the frontier defense tile to block/guard the border line!
+                main_at_safe = (getattr(main_host, "tile", None) == safe_rally_tile)
+                main_at_border = (getattr(main_host, "tile", None) == defense_staging_tile)
+                is_concentrated = (main_host.troops >= total_my_field * 0.45) or (len(ready_armies) <= 1)
+                should_advance_to_border = is_concentrated or main_at_safe or main_at_border or (safe_rally_tile == defense_staging_tile)
+
+                target_destination = defense_staging_tile if should_advance_to_border else safe_rally_tile
+
+                # Main host leads the march to target destination
+                if getattr(main_host, "tile", None) == target_destination:
+                    if main_host.is_moving:
+                        main_host.tile_path = []
+                        main_host.move_progress = 0.0
                 else:
-                    # March to unite with the border defense host!
-                    if not a.is_moving or (a.tile_path and a.tile_path[-1] != defense_staging_tile):
-                        state.order_army_march_to_tile(a, defense_staging_tile)
+                    if not main_host.is_moving or (main_host.tile_path and main_host.tile_path[-1] != target_destination):
+                        state.order_army_march_to_tile(main_host, target_destination)
+
+                # All other ready detachments march to join main_host directly
+                join_target = getattr(main_host, "tile", None) or target_destination
+                for sub_a in ready_armies[1:]:
+                    if getattr(sub_a, "tile", None) == join_target:
+                        if sub_a.is_moving:
+                            sub_a.tile_path = []
+                            sub_a.move_progress = 0.0
+                    else:
+                        if not sub_a.is_moving or (sub_a.tile_path and sub_a.tile_path[-1] != join_target):
+                            state.order_army_march_to_tile(sub_a, join_target)
 
             return
 

@@ -962,15 +962,16 @@ class GameState:
 
     def raise_all_realm_levies(self, ruler_id, is_emergency=False):
         """Mobilizes ALL available levies across 100% of a ruler's realm provinces."""
-        if ruler_id == self.enemy_id and self.enemy_raise_cooldown > 0:
+        # When under threat / emergency, peacetime cooldowns NEVER block raising!
+        if not is_emergency and ruler_id == self.enemy_id and self.enemy_raise_cooldown > 0:
             return 0, 0
 
         raised_count = 0
         total_men = 0
         capital_pid = self.get_realm_capital(ruler_id)
-        realm_provs = [pid for pid, p in PROVINCES.items() if p["owner"] == ruler_id]
+        realm_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") == ruler_id]
         has_field = any(a.owner == ruler_id for a in self.armies)
-        min_to_raise = 25 if (is_emergency or not has_field) else 50
+        min_to_raise = 1 if is_emergency else (25 if not has_field else 50)
 
         ruler = CHARACTERS.get(ruler_id, {})
         r_name = ruler.get("name", "Ruler").split()[0]
@@ -978,7 +979,8 @@ class GameState:
 
         for pid in realm_provs:
             prov = PROVINCES[pid]
-            if prov.get("raise_cooldown_days", 0) > 0:
+            # Cooldown only blocks regular non-emergency muster
+            if not is_emergency and prov.get("raise_cooldown_days", 0) > 0:
                 continue
             tot_avail, c_troops, v_troops = self.get_available_province_levies(pid, ruler_id)
             if tot_avail < min_to_raise:
@@ -1373,6 +1375,26 @@ class GameState:
                         if any(adj_p in r1_provs for adj_p in ADJACENCY.get(a.province, [])):
                             r2_border_armies.append(a)
 
+                # Check if either AI realm is facing a player threat within 30 tiles / 30 days
+                # If threatened by player, NEVER de-escalate or cancel forces!
+                has_player_threat_r1 = False
+                has_player_threat_r2 = False
+                r1_tiles = [t for rp in r1_provs for t in PROV_TO_TILES.get(rp, [])]
+                r2_tiles = [t for rp in r2_provs for t in PROV_TO_TILES.get(rp, [])]
+
+                for pa in self.armies:
+                    if pa.owner == self.player_id and pa.troops > 0 and not getattr(pa, "is_demobilizing", False):
+                        pa_tile = getattr(pa, "tile", None) or get_province_capital_tile(pa.province)
+                        if pa_tile:
+                            if r1_tiles and min(max(abs(pa_tile[0] - t[0]), abs(pa_tile[1] - t[1])) for t in r1_tiles) <= 30:
+                                has_player_threat_r1 = True
+                            if r2_tiles and min(max(abs(pa_tile[0] - t[0]), abs(pa_tile[1] - t[1])) for t in r2_tiles) <= 30:
+                                has_player_threat_r2 = True
+
+                if has_player_threat_r1 or has_player_threat_r2:
+                    self.ai_standoff_days[pair_key] = 0
+                    continue
+
                 if r1_border_armies and r2_border_armies:
                     curr_days = self.ai_standoff_days.get(pair_key, 0) + 1
                     self.ai_standoff_days[pair_key] = curr_days
@@ -1447,13 +1469,17 @@ class GameState:
             if p.get("raise_cooldown_days", 0) > 0:
                 p["raise_cooldown_days"] = max(0, p["raise_cooldown_days"] - 1)
 
-        # If no player armies remain on the map, ensure raise cooldown resets to 0
-        if not any(a.owner == self.player_id for a in self.armies):
-            if self.player_raise_cooldown > 0:
-                self.player_raise_cooldown = 0
-            for p in PROVINCES.values():
-                if p.get("owner") == self.player_id:
-                    p["raise_cooldown_days"] = 0
+        # If no armies remain for any realm, ensure their raise cooldown resets to 0
+        all_rulers = [self.player_id] + getattr(self, "ai_rulers", [self.enemy_id, "char_sylvan"])
+        for r_id in all_rulers:
+            if not any(a.owner == r_id for a in self.armies):
+                if r_id == self.player_id and self.player_raise_cooldown > 0:
+                    self.player_raise_cooldown = 0
+                elif r_id == self.enemy_id and self.enemy_raise_cooldown > 0:
+                    self.enemy_raise_cooldown = 0
+                for p in PROVINCES.values():
+                    if p.get("owner") == r_id:
+                        p["raise_cooldown_days"] = 0
 
         # 1. Update Royal Couriers En Route
         for a in list(self.armies):
