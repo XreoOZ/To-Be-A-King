@@ -16,6 +16,35 @@ from game.data.buildings import BUILDING_SPECS
 from game.core.assets import prov_flag_cache
 from game.systems.economy import get_vassal_landed_status, sync_province_holdings_stats, fmt_gold
 
+def get_modal_rect(state, modal_name, pop_w, pop_h):
+    if not hasattr(state, "modal_positions"):
+        state.modal_positions = {}
+    if modal_name not in state.modal_positions:
+        state.modal_positions[modal_name] = [(WINDOW_WIDTH - pop_w) // 2, (WINDOW_HEIGHT - pop_h) // 2]
+    pos = state.modal_positions[modal_name]
+    pos[0] = max(10, min(WINDOW_WIDTH - pop_w - 10, pos[0]))
+    pos[1] = max(35, min(WINDOW_HEIGHT - pop_h - 10, pos[1]))
+    return pygame.Rect(pos[0], pos[1], pop_w, pop_h)
+
+def handle_modal_drag(state, modal_name, pop_rect, mouse_pos):
+    """Allows dragging the modal window smoothly across the screen by its top titlebar (CK2 style)."""
+    if not hasattr(state, "modal_drag"):
+        state.modal_drag = None
+    mouse_pressed = pygame.mouse.get_pressed()[0]
+    drag_area = pygame.Rect(pop_rect.x, pop_rect.y, pop_rect.w - 55, 50)
+    if mouse_pressed:
+        if state.modal_drag and state.modal_drag.get("name") == modal_name:
+            ox, oy = state.modal_drag["offset"]
+            state.modal_positions[modal_name] = [mouse_pos[0] - ox, mouse_pos[1] - oy]
+        elif not state.modal_drag and drag_area.collidepoint(mouse_pos):
+            state.modal_drag = {
+                "name": modal_name,
+                "offset": (mouse_pos[0] - pop_rect.x, mouse_pos[1] - pop_rect.y)
+            }
+    else:
+        if state.modal_drag and state.modal_drag.get("name") == modal_name:
+            state.modal_drag = None
+
 def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait_cache, coa_cache):
     font_xs = fonts["xs"]
     font_sm = fonts["sm"]
@@ -27,24 +56,27 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
     curr_tile_h = max(16, int(BASE_TILE_H * state.zoom))
     curr_tw = curr_tile_w
     curr_th = curr_tile_h
+    state.active_modal_rect = None
 
     # ---------------------------------------------------------
     # 5. VASSAL AUTONOMOUS BUILD PETITION POPUP MODAL
     # ---------------------------------------------------------
     if state.vassal_build_requests:
         req = state.vassal_build_requests[0]
-        # Darkened backdrop
-        dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        dim_surf.fill((0, 0, 0, 160))
-        screen.blit(dim_surf, (0, 0))
-    
         pop_w, pop_h = 520, 230
-        pop_x = (WINDOW_WIDTH - pop_w) // 2
-        pop_y = (WINDOW_HEIGHT - pop_h) // 2
-        pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
-    
+        pop_rect = get_modal_rect(state, "vassal_build_petition", pop_w, pop_h)
+        handle_modal_drag(state, "vassal_build_petition", pop_rect, mouse_pos)
+        pop_x, pop_y = pop_rect.x, pop_rect.y
+        state.active_modal_rect = pop_rect
+
+        # Floating window drop shadow
+        shadow_surf = pygame.Surface((pop_w + 12, pop_h + 12), pygame.SRCALPHA)
+        shadow_surf.fill((0, 0, 0, 115))
+        screen.blit(shadow_surf, (pop_x - 3, pop_y - 3))
+
         pygame.draw.rect(screen, COLOR_PANEL_BG, pop_rect, border_radius=8)
         pygame.draw.rect(screen, COLOR_GOLD, pop_rect, 2, border_radius=8)
+        screen.blit(font_xs.render("✥ DRAG", True, (130, 150, 180)), (pop_x + pop_w - 75, pop_y + 20))
     
         screen.blit(font_lg.render("ROYAL PETITION FROM VASSAL", True, COLOR_GOLD), (pop_x + 25, pop_y + 20))
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 55), (pop_x + pop_w - 25, pop_y + 55), 1)
@@ -131,19 +163,20 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
     # ---------------------------------------------------------
     if state.granting_fief_id and state.granting_fief_id in state.fiefs:
         f_target = state.fiefs[state.granting_fief_id]
-        
-        # Dimmed backdrop
-        dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        dim_surf.fill((0, 0, 0, 175))
-        screen.blit(dim_surf, (0, 0))
-    
         pop_w, pop_h = 600, 480
-        pop_x = (WINDOW_WIDTH - pop_w) // 2
-        pop_y = (WINDOW_HEIGHT - pop_h) // 2
-        pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
-    
+        pop_rect = get_modal_rect(state, "grant_fief", pop_w, pop_h)
+        handle_modal_drag(state, "grant_fief", pop_rect, mouse_pos)
+        pop_x, pop_y = pop_rect.x, pop_rect.y
+        state.active_modal_rect = pop_rect
+
+        # Floating window drop shadow
+        shadow_surf = pygame.Surface((pop_w + 12, pop_h + 12), pygame.SRCALPHA)
+        shadow_surf.fill((0, 0, 0, 115))
+        screen.blit(shadow_surf, (pop_x - 3, pop_y - 3))
+
         pygame.draw.rect(screen, COLOR_PANEL_BG, pop_rect, border_radius=8)
         pygame.draw.rect(screen, COLOR_GOLD, pop_rect, 2, border_radius=8)
+        screen.blit(font_xs.render("✥ DRAG", True, (130, 150, 180)), (pop_x + pop_w - 75, pop_y + 18))
     
         # Header
         screen.blit(font_lg.render("ROYAL INVESTITURE: GRANT FIEFDOM", True, COLOR_GOLD), (pop_x + 25, pop_y + 18))
@@ -278,18 +311,20 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         v_pid = state.inspecting_vassal.get("province")
         v_obj = state.inspecting_vassal.get("vassal")
     
-        # Dimmed backdrop
-        dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        dim_surf.fill((0, 0, 0, 185))
-        screen.blit(dim_surf, (0, 0))
-    
         pop_w, pop_h = 780, 540
-        pop_x = (WINDOW_WIDTH - pop_w) // 2
-        pop_y = (WINDOW_HEIGHT - pop_h) // 2
-        pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
-    
+        pop_rect = get_modal_rect(state, "vassal_dossier", pop_w, pop_h)
+        handle_modal_drag(state, "vassal_dossier", pop_rect, mouse_pos)
+        pop_x, pop_y = pop_rect.x, pop_rect.y
+        state.active_modal_rect = pop_rect
+
+        # Floating window drop shadow (game running behind is completely visible!)
+        shadow_surf = pygame.Surface((pop_w + 12, pop_h + 12), pygame.SRCALPHA)
+        shadow_surf.fill((0, 0, 0, 115))
+        screen.blit(shadow_surf, (pop_x - 3, pop_y - 3))
+
         pygame.draw.rect(screen, COLOR_PANEL_BG, pop_rect, border_radius=10)
         pygame.draw.rect(screen, COLOR_GOLD, pop_rect, 2, border_radius=10)
+        screen.blit(font_xs.render("✥ DRAG", True, (130, 150, 180)), (pop_x + pop_w - 95, pop_y + 16))
     
         # Close 'X' Button at top right
         x_btn = pygame.Rect(pop_x + pop_w - 38, pop_y + 12, 26, 26)
@@ -616,13 +651,20 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             if modal_mouse_clicked:
                 if loc_hov:
                     state.selected_province = v_pid
-                    if v_obj.get("tiles"):
-                        tc, tr = v_obj["tiles"][0]
+                    seat_tile = None
+                    for tile_coord, s_data in state.settlements.items():
+                        if s_data.get("vassal_id") == v_obj.get("id"):
+                            seat_tile = tile_coord
+                            break
+                    if not seat_tile and v_obj.get("tiles"):
+                        seat_tile = v_obj["tiles"][0]
+
+                    if seat_tile:
+                        tc, tr = seat_tile
                         state.selected_settlement = (tc, tr)
-                        state.cam_pan_x = VIEWPORT_CENTER_X - (tc * curr_tile_w + curr_tile_w // 2)
-                        state.cam_pan_y = VIEWPORT_CENTER_Y - (tr * curr_tile_h + curr_tile_h // 2)
-                    state.inspecting_vassal = None
-                    state.logs.append(f"Centering camera on {v_obj['name']}'s seat in {p_full}.")
+                        state.cam_pan_x = int((10 - tc) * curr_tile_w - curr_tile_w // 2)
+                        state.cam_pan_y = int((13 - tr) * curr_tile_h - curr_tile_h // 2)
+                        state.logs.append(f"Centering camera on {v_obj['name']}'s seat at ({tc}, {tr}) in {p_full}.")
                 elif rank_hov:
                     if is_direct:
                         state.demote_to_baron(v_obj["id"])
@@ -660,13 +702,20 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             if modal_mouse_clicked:
                 if loc_hov:
                     state.selected_province = v_pid
-                    if v_obj.get("tiles"):
-                        tc, tr = v_obj["tiles"][0]
+                    seat_tile = None
+                    for tile_coord, s_data in state.settlements.items():
+                        if s_data.get("vassal_id") == v_obj.get("id"):
+                            seat_tile = tile_coord
+                            break
+                    if not seat_tile and v_obj.get("tiles"):
+                        seat_tile = v_obj["tiles"][0]
+
+                    if seat_tile:
+                        tc, tr = seat_tile
                         state.selected_settlement = (tc, tr)
-                        state.cam_pan_x = VIEWPORT_CENTER_X - (tc * curr_tile_w + curr_tile_w // 2)
-                        state.cam_pan_y = VIEWPORT_CENTER_Y - (tr * curr_tile_h + curr_tile_h // 2)
-                    state.inspecting_vassal = None
-                    state.logs.append(f"Centering camera on {v_obj['name']}'s seat in {p_full}.")
+                        state.cam_pan_x = int((10 - tc) * curr_tile_w - curr_tile_w // 2)
+                        state.cam_pan_y = int((13 - tr) * curr_tile_h - curr_tile_h // 2)
+                        state.logs.append(f"Centering camera on {v_obj['name']}'s seat at ({tc}, {tr}) in {p_full}.")
                 elif c_hov:
                     state.inspecting_vassal = None
     
@@ -677,19 +726,20 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         r_id = state.inspecting_ruler
         r_char = CHARACTERS.get(r_id, state.player)
         is_ruler_enemy = (r_id != state.player_id)
-    
-        # Dimmed backdrop
-        dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        dim_surf.fill((0, 0, 0, 185))
-        screen.blit(dim_surf, (0, 0))
-    
         pop_w, pop_h = 780, 520
-        pop_x = (WINDOW_WIDTH - pop_w) // 2
-        pop_y = (WINDOW_HEIGHT - pop_h) // 2
-        pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
-    
+        pop_rect = get_modal_rect(state, "ruler_dossier", pop_w, pop_h)
+        handle_modal_drag(state, "ruler_dossier", pop_rect, mouse_pos)
+        pop_x, pop_y = pop_rect.x, pop_rect.y
+        state.active_modal_rect = pop_rect
+
+        # Floating window drop shadow
+        shadow_surf = pygame.Surface((pop_w + 12, pop_h + 12), pygame.SRCALPHA)
+        shadow_surf.fill((0, 0, 0, 115))
+        screen.blit(shadow_surf, (pop_x - 3, pop_y - 3))
+
         pygame.draw.rect(screen, COLOR_PANEL_BG, pop_rect, border_radius=10)
         pygame.draw.rect(screen, (220, 70, 70) if is_ruler_enemy else COLOR_GOLD, pop_rect, 2, border_radius=10)
+        screen.blit(font_xs.render("✥ DRAG", True, (130, 150, 180)), (pop_x + pop_w - 95, pop_y + 16))
     
         # Close 'X' Button at top right
         x_btn = pygame.Rect(pop_x + pop_w - 38, pop_y + 12, 26, 26)
@@ -826,8 +876,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             cap_coord = PROV_CAPITAL_TILES.get(r_cap_pid, (12, 10))
             curr_tw = max(18, int(BASE_TILE_W * state.zoom))
             curr_th = max(16, int(BASE_TILE_H * state.zoom))
-            state.cam_pan_x = VIEWPORT_CENTER_X - (cap_coord[0] * curr_tw + curr_tw // 2)
-            state.cam_pan_y = VIEWPORT_CENTER_Y - (cap_coord[1] * curr_th + curr_th // 2)
+            state.cam_pan_x = int((10 - cap_coord[0]) * curr_tw - curr_tw // 2)
+            state.cam_pan_y = int((13 - cap_coord[1]) * curr_th - curr_th // 2)
             state.inspecting_ruler = None
             state.logs.append(f"Focusing camera on {r_char['name']}'s seat in {r_cap_name}.")
     
@@ -845,17 +895,20 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
     # ---------------------------------------------------------
     if state.vassal_build_confirm:
         conf = state.vassal_build_confirm
-        dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        dim_surf.fill((0, 0, 0, 180))
-        screen.blit(dim_surf, (0, 0))
-    
         pop_w, pop_h = 580, 275
-        pop_x = (WINDOW_WIDTH - pop_w) // 2
-        pop_y = (WINDOW_HEIGHT - pop_h) // 2
-        pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
-    
+        pop_rect = get_modal_rect(state, "vassal_build_confirm", pop_w, pop_h)
+        handle_modal_drag(state, "vassal_build_confirm", pop_rect, mouse_pos)
+        pop_x, pop_y = pop_rect.x, pop_rect.y
+        state.active_modal_rect = pop_rect
+
+        # Floating window drop shadow
+        shadow_surf = pygame.Surface((pop_w + 12, pop_h + 12), pygame.SRCALPHA)
+        shadow_surf.fill((0, 0, 0, 115))
+        screen.blit(shadow_surf, (pop_x - 3, pop_y - 3))
+
         pygame.draw.rect(screen, COLOR_PANEL_BG, pop_rect, border_radius=10)
         pygame.draw.rect(screen, (255, 205, 50), pop_rect, 2, border_radius=10)
+        screen.blit(font_xs.render("✥ DRAG", True, (130, 150, 180)), (pop_x + pop_w - 75, pop_y + 18))
     
         # Close 'X' Button at top right
         x_btn = pygame.Rect(pop_x + pop_w - 36, pop_y + 12, 24, 24)
@@ -968,21 +1021,23 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
     # ---------------------------------------------------------
     if getattr(state, "subjugation_event", None):
         ev = state.subjugation_event
-        # Dark backdrop
-        dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        dim_surf.fill((0, 0, 0, 195))
-        screen.blit(dim_surf, (0, 0))
-
         pop_w, pop_h = 740, 460
-        pop_x = (WINDOW_WIDTH - pop_w) // 2
-        pop_y = (WINDOW_HEIGHT - pop_h) // 2
-        pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
+        pop_rect = get_modal_rect(state, "subjugation_event", pop_w, pop_h)
+        handle_modal_drag(state, "subjugation_event", pop_rect, mouse_pos)
+        pop_x, pop_y = pop_rect.x, pop_rect.y
+        state.active_modal_rect = pop_rect
 
         is_subjugated = (ev.get("type") == "player_vassalized")
         border_col = (235, 140, 45) if is_subjugated else COLOR_GOLD
 
+        # Floating window drop shadow
+        shadow_surf = pygame.Surface((pop_w + 12, pop_h + 12), pygame.SRCALPHA)
+        shadow_surf.fill((0, 0, 0, 115))
+        screen.blit(shadow_surf, (pop_x - 3, pop_y - 3))
+
         pygame.draw.rect(screen, (22, 26, 36), pop_rect, border_radius=10)
         pygame.draw.rect(screen, border_col, pop_rect, 2, border_radius=10)
+        screen.blit(font_xs.render("✥ DRAG", True, (130, 150, 180)), (pop_x + pop_w - 75, pop_y + 18))
 
         # Header Title
         t_col = (255, 190, 80) if is_subjugated else COLOR_GOLD

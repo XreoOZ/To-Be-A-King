@@ -270,23 +270,11 @@ def run_game():
                         pygame.display.toggle_fullscreen()
 
         is_popup_active = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.inspecting_ruler or state.vassal_build_confirm or getattr(state, 'subjugation_event', None))
-        if is_popup_active:
-            if not state.popup_was_active:
-                if state.speed > 0:
-                    state.pre_popup_speed = state.speed
-                    state.speed = 0
-                    state.logs.append("⏸ Royal Council: Game paused for royal decision.")
-                state.popup_was_active = True
-        else:
-            if state.popup_was_active:
-                if state.pre_popup_speed is not None and state.pre_popup_speed > 0:
-                    state.speed = state.pre_popup_speed
-                    state.logs.append(f"▶ Resumed game speed ({state.speed}x).")
-                    state.pre_popup_speed = None
-                state.popup_was_active = False
-
+        
+        # CK2 Style: Floating moveable popups; game continues running in background at state.speed!
         modal_mouse_clicked = mouse_clicked
-        if is_popup_active:
+        active_modal_rect = getattr(state, "active_modal_rect", None)
+        if is_popup_active and active_modal_rect and active_modal_rect.collidepoint(mouse_pos):
             mouse_clicked = False
             box_start = None
             box_end = None
