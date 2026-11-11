@@ -101,6 +101,15 @@ for (c, r) in CELL_TO_PROV:
             if nt in CELL_TO_PROV:
                 TILE_ADJACENCY[(c, r)].add(nt)
 
+# Synchronize full dynamic 8-way province adjacency from the active tile map grid
+try:
+    from game.data.provinces import build_dynamic_province_adjacency, ADJACENCY
+    dyn_adj = build_dynamic_province_adjacency(CELL_TO_PROV, max_reach=1)
+    ADJACENCY.clear()
+    ADJACENCY.update(dyn_adj)
+except Exception:
+    pass
+
 def find_shortest_tile_path(start_tile, goal_tile, owner=None):
     """
     Finds the optimal path between start_tile and goal_tile.

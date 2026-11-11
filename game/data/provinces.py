@@ -4,6 +4,8 @@ Province Data, Faction Coloring, and Adjacency Graphs for Fantasy Realm
 import os
 import json
 import copy
+import math
+import heapq
 from collections import deque
 from game.config import DATA_DIR
 from game.data.characters import CHARACTERS, INITIAL_CHARACTERS
@@ -82,39 +84,63 @@ def build_dynamic_province_adjacency(cell_to_prov, max_reach=2, extra_connection
 
 def find_shortest_path(start_prov, goal_prov, owner=None):
     """
-    Finds the shortest province sequence between two provinces using BFS.
-    If owner is provided (or inferable from start_prov) and start & goal are in the
-    same realm, restricts the sequence to strictly domestic provinces!
+    Finds the optimal province sequence between start_prov and goal_prov using A* pathfinding
+    based on true Euclidean distance between provincial capitals/centroids.
+    This guarantees messengers and AI take the geometrically shortest, fastest, and most direct route.
     """
     if start_prov == goal_prov:
         return [start_prov]
     if start_prov not in ADJACENCY or goal_prov not in ADJACENCY:
         return None
 
-    if owner is None:
-        owner = PROVINCES.get(start_prov, {}).get("owner")
-    goal_owner = PROVINCES.get(goal_prov, {}).get("owner")
+    def get_coords(pid):
+        p = PROVINCES.get(pid, {})
+        if "capital_tile" in p and p["capital_tile"]:
+            return float(p["capital_tile"][0]), float(p["capital_tile"][1])
+        coords = p.get("coords", [])
+        if coords:
+            return float(sum(c[0] for c in coords) / len(coords)), float(sum(c[1] for c in coords) / len(coords))
+        return (0.0, 0.0)
 
-    restrict_to_owner = (owner is not None and goal_owner == owner)
+    goal_c = get_coords(goal_prov)
 
-    visited = {start_prov}
-    queue = deque([[start_prov]])
+    def heuristic(pid):
+        c = get_coords(pid)
+        return math.hypot(c[0] - goal_c[0], c[1] - goal_c[1])
 
-    while queue:
-        path = queue.popleft()
-        node = path[-1]
+    open_set = []
+    # (f_score, g_score, counter, current_node, path)
+    heapq.heappush(open_set, (heuristic(start_prov), 0.0, 0, start_prov, [start_prov]))
+    g_scores = {start_prov: 0.0}
+    counter = 0
 
-        for neighbor in ADJACENCY.get(node, []):
-            if restrict_to_owner and PROVINCES.get(neighbor, {}).get("owner") != owner:
-                continue
-            if neighbor == goal_prov:
-                return path + [neighbor]
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append(path + [neighbor])
+    while open_set:
+        f, g, _, current, path = heapq.heappop(open_set)
 
-    # Fallback to unrestricted if terrain demands it
-    if restrict_to_owner:
-        return find_shortest_path(start_prov, goal_prov, owner=False)
+        if current == goal_prov:
+            return path
+
+        if g > g_scores.get(current, float('inf')):
+            continue
+
+        for neighbor in ADJACENCY.get(current, []):
+            c_curr = get_coords(current)
+            c_next = get_coords(neighbor)
+            base_dist = math.hypot(c_next[0] - c_curr[0], c_next[1] - c_curr[1])
+
+            multiplier = 1.0
+            if owner is not None:
+                n_owner = PROVINCES.get(neighbor, {}).get("owner")
+                if n_owner != owner:
+                    multiplier = 1.15
+
+            step_cost = max(1.0, base_dist) * multiplier
+            tentative_g = g + step_cost
+
+            if tentative_g < g_scores.get(neighbor, float('inf')):
+                g_scores[neighbor] = tentative_g
+                h = heuristic(neighbor)
+                counter += 1
+                heapq.heappush(open_set, (tentative_g + h, tentative_g, counter, neighbor, path + [neighbor]))
 
     return None

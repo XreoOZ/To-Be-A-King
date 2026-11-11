@@ -14,7 +14,11 @@
     "neighbors": [
       "high_crag",
       "high_crest",
+      "iron_gate",
       "kings_reach",
+      "riverbend",
+      "southwatch",
+      "sunhaven",
       "valoria"
     ],
     "coords": [
@@ -102,10 +106,14 @@
       45
     ],
     "neighbors": [
+      "amber_vale",
+      "black_ridge",
       "forgeheim",
       "golden_plains",
+      "grizzly_pass",
       "high_crag",
-      "kings_reach"
+      "kings_reach",
+      "solaris_prime"
     ],
     "coords": [
       [
@@ -193,8 +201,12 @@
     ],
     "neighbors": [
       "amber_vale",
+      "elder_glade",
       "eloria_heart",
+      "emerald_fen",
+      "forgeheim",
       "grizzly_pass",
+      "kings_reach",
       "sunhaven"
     ],
     "coords": [
@@ -282,6 +294,8 @@
       45
     ],
     "neighbors": [
+      "high_crag",
+      "high_crest",
       "iron_gate",
       "riverbend",
       "solaris_prime"
@@ -372,9 +386,13 @@
     ],
     "neighbors": [
       "amber_vale",
+      "golden_plains",
+      "high_crag",
+      "high_crest",
       "solaris_prime",
       "southwatch",
-      "sunhaven"
+      "sunhaven",
+      "white_harbor"
     ],
     "coords": [
       [
@@ -461,9 +479,13 @@
       40
     ],
     "neighbors": [
+      "eloria_heart",
       "emerald_fen",
       "golden_plains",
+      "green_haven",
       "kings_reach",
+      "southwatch",
+      "sunhaven",
       "white_harbor"
     ],
     "coords": [
@@ -552,6 +574,7 @@
     ],
     "neighbors": [
       "high_crest",
+      "solaris_prime",
       "valoria"
     ],
     "coords": [
@@ -639,9 +662,11 @@
       48
     ],
     "neighbors": [
+      "kings_reach",
       "riverbend",
       "solaris_prime",
-      "southwatch"
+      "southwatch",
+      "valoria"
     ],
     "coords": [
       [
@@ -728,8 +753,10 @@
       42
     ],
     "neighbors": [
+      "amber_vale",
       "high_crest",
       "kings_reach",
+      "solaris_prime",
       "white_harbor"
     ],
     "coords": [
@@ -818,7 +845,9 @@
     ],
     "neighbors": [
       "amber_vale",
+      "emerald_fen",
       "green_haven",
+      "kings_reach",
       "southwatch"
     ],
     "coords": [
@@ -908,7 +937,9 @@
     "neighbors": [
       "black_ridge",
       "deep_anvil",
-      "frostpeak"
+      "forgeheim",
+      "frostpeak",
+      "thunder_crag"
     ],
     "coords": [
       [
@@ -995,6 +1026,7 @@
       84
     ],
     "neighbors": [
+      "black_ridge",
       "iron_citadel",
       "thunder_crag"
     ],
@@ -1083,7 +1115,9 @@
       102
     ],
     "neighbors": [
+      "black_ridge",
       "forgeheim",
+      "grizzly_pass",
       "iron_citadel",
       "stonegard"
     ],
@@ -1173,6 +1207,8 @@
     ],
     "neighbors": [
       "deep_anvil",
+      "elder_glade",
+      "forgeheim",
       "grizzly_pass",
       "whispering_woods"
     ],
@@ -1263,6 +1299,8 @@
     "neighbors": [
       "black_ridge",
       "frostpeak",
+      "high_crag",
+      "iron_citadel",
       "iron_gate"
     ],
     "coords": [
@@ -1350,9 +1388,13 @@
       88
     ],
     "neighbors": [
+      "deep_anvil",
       "forgeheim",
+      "frostpeak",
       "high_crag",
       "iron_citadel",
+      "iron_gate",
+      "sunhaven",
       "thunder_crag"
     ],
     "coords": [
@@ -1442,7 +1484,11 @@
     "neighbors": [
       "black_ridge",
       "deep_anvil",
+      "golden_plains",
       "grizzly_pass",
+      "high_crag",
+      "iron_citadel",
+      "stonegard",
       "sunhaven"
     ],
     "coords": [
@@ -1530,10 +1576,14 @@
       80
     ],
     "neighbors": [
+      "deep_anvil",
       "elder_glade",
+      "eloria_heart",
       "forgeheim",
       "golden_plains",
-      "stonegard"
+      "stonegard",
+      "sunhaven",
+      "whispering_woods"
     ],
     "coords": [
       [
@@ -1620,7 +1670,9 @@
       105
     ],
     "neighbors": [
+      "black_ridge",
       "high_crag",
+      "solaris_prime",
       "thunder_crag",
       "valoria"
     ],
@@ -1710,9 +1762,13 @@
     ],
     "neighbors": [
       "black_ridge",
+      "forgeheim",
       "iron_gate",
+      "kings_reach",
       "solaris_prime",
-      "sunhaven"
+      "sunhaven",
+      "thunder_crag",
+      "valoria"
     ],
     "coords": [
       [
@@ -1799,10 +1855,14 @@
       52
     ],
     "neighbors": [
+      "amber_vale",
       "elder_glade",
       "emerald_fen",
       "golden_plains",
-      "moon_grove"
+      "grizzly_pass",
+      "moon_grove",
+      "moss_reach",
+      "starfall_vale"
     ],
     "coords": [
       [
@@ -1890,7 +1950,9 @@
     ],
     "neighbors": [
       "elder_glade",
+      "grizzly_pass",
       "silver_leaf",
+      "starfall_vale",
       "stonegard"
     ],
     "coords": [
@@ -1978,6 +2040,7 @@
       58
     ],
     "neighbors": [
+      "elder_glade",
       "starfall_vale",
       "whispering_woods"
     ],
@@ -2067,8 +2130,12 @@
     ],
     "neighbors": [
       "eloria_heart",
+      "golden_plains",
       "grizzly_pass",
+      "moon_grove",
+      "silver_leaf",
       "starfall_vale",
+      "stonegard",
       "whispering_woods"
     ],
     "coords": [
@@ -2157,8 +2224,10 @@
     ],
     "neighbors": [
       "elder_glade",
+      "eloria_heart",
       "moon_grove",
-      "silver_leaf"
+      "silver_leaf",
+      "whispering_woods"
     ],
     "coords": [
       [
@@ -2245,7 +2314,9 @@
       48
     ],
     "neighbors": [
+      "elder_glade",
       "eloria_heart",
+      "emerald_fen",
       "moss_reach",
       "starfall_vale"
     ],
@@ -2336,8 +2407,12 @@
     "neighbors": [
       "amber_vale",
       "eloria_heart",
+      "golden_plains",
       "green_haven",
-      "moss_reach"
+      "moon_grove",
+      "moss_reach",
+      "shadow_bough",
+      "white_harbor"
     ],
     "coords": [
       [
@@ -2424,7 +2499,9 @@
       42
     ],
     "neighbors": [
+      "eloria_heart",
       "emerald_fen",
+      "green_haven",
       "moon_grove",
       "shadow_bough"
     ],
@@ -2513,7 +2590,9 @@
       60
     ],
     "neighbors": [
+      "amber_vale",
       "emerald_fen",
+      "moss_reach",
       "shadow_bough",
       "white_harbor"
     ],
@@ -2602,6 +2681,7 @@
       47
     ],
     "neighbors": [
+      "emerald_fen",
       "green_haven",
       "moss_reach"
     ],
