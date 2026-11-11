@@ -1423,10 +1423,35 @@ class GameState:
                         self.logs.append(f"📜 Frontier Diplomacy (Day 20): {short1} sends envoy to {short2}: 'DE-ESCALATE?' -> {short2} responds: 'OK'.")
                         self.logs.append(f"🕊 Treaty of De-escalation: {realm1} and {realm2} simultaneously stand down border hosts!")
 
-                        # Both AIs simultaneously disband border armies!
+                        # Both AIs simultaneously disband border armies facing each other
                         for a in list(r1_border_armies + r2_border_armies):
                             if a in self.armies and not getattr(a, "is_demobilizing", False) and not a.in_battle:
                                 self.disband_army(a)
+
+                        # Auto-cancel any couriers/messengers and mustering hosts for both AIs
+                        for r in (r1, r2):
+                            r_provs = set(p for p, pdata in PROVINCES.items() if pdata.get("owner") == r)
+                            r_tiles = [t for rp in r_provs for t in PROV_TO_TILES.get(rp, [])]
+                            
+                            has_player_threat = False
+                            for pa in self.armies:
+                                if pa.owner == self.player_id and pa.troops > 0 and not getattr(pa, "is_demobilizing", False):
+                                    pa_tile = getattr(pa, "tile", None) or get_province_capital_tile(pa.province)
+                                    if pa_tile and r_tiles:
+                                        d = min(max(abs(pa_tile[0] - t[0]), abs(pa_tile[1] - t[1])) for t in r_tiles)
+                                        if d <= 30:
+                                            has_player_threat = True
+                                            break
+                            
+                            # If no direct player threat within 30 tiles/days, cancel all messengers and muster
+                            if not has_player_threat:
+                                for a in list(self.armies):
+                                    if a.owner == r and (a.courier_en_route or a.is_mustering):
+                                        self.disband_army(a)
+                                if hasattr(self, "ai_border_vigilance") and r in self.ai_border_vigilance:
+                                    self.ai_border_vigilance[r] = 0
+                                if hasattr(self, "ai_vigilance_provs") and r in self.ai_vigilance_provs:
+                                    self.ai_vigilance_provs.pop(r, None)
 
                         self.ai_standoff_days[pair_key] = 0
                         self.ai_standoff_cooldown[pair_key] = 30

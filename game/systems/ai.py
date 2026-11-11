@@ -171,39 +171,81 @@ def run_realm_ai(state, ruler_id):
             foreign_armies = [a for a in state.armies if a.owner != ruler_id and a.troops > 0 and not a.is_demobilizing]
             border_standoff_provs = set()
             total_neutral_border_troops = 0
+            has_player_threat = False
+
+            # Collect all realm tiles for tile-distance calculations
+            realm_tiles = [t for rp in realm_provs for t in PROV_TO_TILES.get(rp, [])]
 
             for fa in foreign_armies:
+                is_player = (fa.owner == state.player_id)
                 pair_key = frozenset({ruler_id, fa.owner})
-                # If currently in mutual de-escalation cooldown, ignore
-                if pair_key in getattr(state, "ai_standoff_cooldown", {}):
-                    continue
-                fa_loc = fa.province
-                is_direct = False
-                for rp in realm_provs:
-                    if fa_loc in ADJACENCY.get(rp, []):
-                        border_standoff_provs.add(rp)
-                        total_neutral_border_troops += fa.troops
-                        is_direct = True
 
-                # 2-hop extended radar (detects staging foreign hosts up to 2 provinces away)
-                if not is_direct and fa.troops >= 80:
+                if is_player:
+                    # PLAYER THREAT RULE (30 tiles or 30 days):
+                    # "Selama pasukan lawan [player] ada dijarak 30 tiles atau 30 days, statusnya akan siaga terus.
+                    # Kan rally nya 30 days, jadi kalau dia masuk ke area 30 tiles/days jaraknya, AI otomatis siaga."
+                    fa_tile = getattr(fa, "tile", None) or get_province_capital_tile(fa.province)
+                    if fa_tile and realm_tiles:
+                        min_dist_tiles = min(max(abs(fa_tile[0] - t[0]), abs(fa_tile[1] - t[1])) for t in realm_tiles)
+                    else:
+                        min_dist_tiles = 999
+
+                    # If player army is within 30 tiles or 30 days march:
+                    if min_dist_tiles <= 30:
+                        has_player_threat = True
+                        total_neutral_border_troops += fa.troops
+
+                        # Find the closest frontier provinces facing the player host
+                        prov_dists = []
+                        for rp in realm_provs:
+                            p_tiles = PROV_TO_TILES.get(rp, [])
+                            if p_tiles and fa_tile:
+                                d = min(max(abs(fa_tile[0] - t[0]), abs(fa_tile[1] - t[1])) for t in p_tiles)
+                                prov_dists.append((d, rp))
+                        
+                        if prov_dists:
+                            prov_dists.sort()
+                            min_d = prov_dists[0][0]
+                            for d, rp in prov_dists:
+                                if d <= min_d + 4:
+                                    border_standoff_provs.add(rp)
+                else:
+                    # AI-to-AI: If currently in mutual de-escalation cooldown, ignore
+                    if pair_key in getattr(state, "ai_standoff_cooldown", {}):
+                        continue
+                    fa_loc = fa.province
+                    is_direct = False
                     for rp in realm_provs:
-                        neighbors = ADJACENCY.get(rp, [])
-                        if any(fa_loc in ADJACENCY.get(nb, []) for nb in neighbors):
+                        if fa_loc in ADJACENCY.get(rp, []):
                             border_standoff_provs.add(rp)
-                            total_neutral_border_troops += int(fa.troops * 0.7)
+                            total_neutral_border_troops += fa.troops
+                            is_direct = True
+
+                    # 2-hop extended radar for AI-to-AI
+                    if not is_direct and fa.troops >= 80:
+                        for rp in realm_provs:
+                            neighbors = ADJACENCY.get(rp, [])
+                            if any(fa_loc in ADJACENCY.get(nb, []) for nb in neighbors):
+                                border_standoff_provs.add(rp)
+                                total_neutral_border_troops += int(fa.troops * 0.7)
 
             if not hasattr(state, "ai_border_vigilance"):
                 state.ai_border_vigilance = {}
             if not hasattr(state, "ai_vigilance_provs"):
                 state.ai_vigilance_provs = {}
 
-            if border_standoff_provs:
-                # Active foreign host in radar: maintain / reset vigilance timer to 20 days
+            if has_player_threat:
+                # PLAYER THREAT ACTIVE WITHIN 30 TILES / 30 DAYS:
+                # "statusnya akan siaga terus" -> Constantly maintain / lock SIAGA!
+                # AI will NEVER demobilize or stand down while player army exists in range!
+                state.ai_border_vigilance[ruler_id] = 30
+                state.ai_vigilance_provs[ruler_id] = set(border_standoff_provs)
+            elif border_standoff_provs:
+                # Active foreign AI host in radar: maintain vigilance timer to 20 days
                 state.ai_border_vigilance[ruler_id] = 20
                 state.ai_vigilance_provs[ruler_id] = set(border_standoff_provs)
             else:
-                # No forces in radar, check if still within sustained 20-day vigilance countdown
+                # No forces in radar, check if still within sustained vigilance countdown
                 vigilance_remaining = state.ai_border_vigilance.get(ruler_id, 0)
                 if vigilance_remaining > 0:
                     state.ai_border_vigilance[ruler_id] = vigilance_remaining - 1
@@ -212,16 +254,16 @@ def run_realm_ai(state, ruler_id):
                     if not border_standoff_provs:
                         border_standoff_provs = set(realm_provs)
 
-                    if vigilance_remaining == 20:
-                        state.logs.append(f"👁 High Alert: Foreign troops withdrew from sight, but {r_name} maintains border vigilance (20d countdown)...")
+                    if vigilance_remaining in (30, 20):
+                        state.logs.append(f"👁 High Alert: Foreign troops withdrew from sight, but {r_name} maintains border vigilance ({vigilance_remaining}d countdown)...")
 
             if not border_standoff_provs:
-                # Stand Down: Frontier quiet, 20-day vigilance expired. Demobilize!
+                # Stand Down: Frontier quiet, vigilance expired. Demobilize!
                 if my_armies:
                     for a in list(my_armies):
                         if not getattr(a, "is_demobilizing", False) and not a.in_battle:
                             state.disband_army(a)
-                    state.logs.append(f"🕊 Stand Down: Frontier peaceful for 20 days. {r_name} demobilizes border guards.")
+                    state.logs.append(f"🕊 Stand Down: Frontier peaceful for 30 days. {r_name} demobilizes border guards.")
                 return
 
             # SIAGA Alert: Foreign hosts sighted near border. Mobilize and hold border line ("diam membeku")
