@@ -7,7 +7,7 @@ from game.config import (
     WINDOW_WIDTH, WINDOW_HEIGHT, BASE_TILE_H, VIEWPORT_CENTER_Y, COLOR_PANEL_BG, COLOR_PANEL_BORDER,
     COLOR_GOLD, COLOR_TEXT_WHITE, COLOR_TEXT_MUTED, COLOR_TEXT_RED,
     COLOR_TEXT_GREEN, COLOR_BUTTON_NORMAL, COLOR_BUTTON_HOVER,
-    COLOR_BUTTON_ACTIVE, BASE_TILE_W, VIEWPORT_CENTER_X
+    COLOR_BUTTON_ACTIVE, BASE_TILE_W, VIEWPORT_CENTER_X, MAP_CENTER_COL, MAP_CENTER_ROW
 )
 from game.data.characters import CHARACTERS
 from game.data.provinces import PROVINCES
@@ -662,8 +662,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                     if seat_tile:
                         tc, tr = seat_tile
                         state.selected_settlement = (tc, tr)
-                        state.cam_pan_x = int((10 - tc) * curr_tile_w - curr_tile_w // 2)
-                        state.cam_pan_y = int((13 - tr) * curr_tile_h - curr_tile_h // 2)
+                        state.cam_pan_x = int((MAP_CENTER_COL - tc) * curr_tile_w - curr_tile_w // 2)
+                        state.cam_pan_y = int((MAP_CENTER_ROW - tr) * curr_tile_h - curr_tile_h // 2)
                         state.logs.append(f"Centering camera on {v_obj['name']}'s seat at ({tc}, {tr}) in {p_full}.")
                 elif rank_hov:
                     if is_direct:
@@ -713,8 +713,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                     if seat_tile:
                         tc, tr = seat_tile
                         state.selected_settlement = (tc, tr)
-                        state.cam_pan_x = int((10 - tc) * curr_tile_w - curr_tile_w // 2)
-                        state.cam_pan_y = int((13 - tr) * curr_tile_h - curr_tile_h // 2)
+                        state.cam_pan_x = int((MAP_CENTER_COL - tc) * curr_tile_w - curr_tile_w // 2)
+                        state.cam_pan_y = int((MAP_CENTER_ROW - tr) * curr_tile_h - curr_tile_h // 2)
                         state.logs.append(f"Centering camera on {v_obj['name']}'s seat at ({tc}, {tr}) in {p_full}.")
                 elif c_hov:
                     state.inspecting_vassal = None
@@ -876,8 +876,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             cap_coord = PROV_CAPITAL_TILES.get(r_cap_pid, (12, 10))
             curr_tw = max(18, int(BASE_TILE_W * state.zoom))
             curr_th = max(16, int(BASE_TILE_H * state.zoom))
-            state.cam_pan_x = int((10 - cap_coord[0]) * curr_tw - curr_tw // 2)
-            state.cam_pan_y = int((13 - cap_coord[1]) * curr_th - curr_th // 2)
+            state.cam_pan_x = int((MAP_CENTER_COL - cap_coord[0]) * curr_tw - curr_tw // 2)
+            state.cam_pan_y = int((MAP_CENTER_ROW - cap_coord[1]) * curr_th - curr_th // 2)
             state.inspecting_ruler = None
             state.logs.append(f"Focusing camera on {r_char['name']}'s seat in {r_cap_name}.")
     

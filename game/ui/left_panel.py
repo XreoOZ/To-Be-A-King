@@ -678,8 +678,7 @@ def render_left_panel(screen, state, mouse_pos, mouse_clicked, fonts, portrait_c
             avail_counts = [
                 v for plist in state.vassals.values() for v in plist 
                 if v.get("rank") in ("count", "duke")
-                and v.get("province") != "solaris_prime"
-                and v.get("id") != state.vassal_subordinate_target_id
+                                and v.get("id") != state.vassal_subordinate_target_id
                 and PROVINCES.get(v.get("province"), {}).get("owner") == state.player_id
             ]
 

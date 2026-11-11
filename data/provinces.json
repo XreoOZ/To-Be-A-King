@@ -1,9 +1,9 @@
 {
   "solaris_prime": {
     "id": "solaris_prime",
-    "name": "Solaris Prime",
+    "name": "Solaris Realm",
     "owner": "char_human",
-    "tax": 12,
+    "tax": 25,
     "culture": "Solaris Human",
     "faith": "Church of Light",
     "color": [
@@ -12,2749 +12,423 @@
       42
     ],
     "neighbors": [
-      "high_crag",
-      "high_crest",
-      "iron_gate",
-      "kings_reach",
-      "riverbend",
-      "southwatch",
-      "sunhaven",
-      "valoria"
+      "iron_citadel",
+      "eloria_heart"
     ],
     "coords": [
       [
-        4,
-        12
-      ],
-      [
-        5,
-        12
-      ],
-      [
-        6,
-        12
-      ],
-      [
-        7,
-        12
+        3,
+        5
       ],
       [
         4,
-        13
+        5
       ],
       [
-        5,
-        13
+        2,
+        6
       ],
       [
-        6,
-        13
-      ],
-      [
-        7,
-        13
+        3,
+        6
       ],
       [
         4,
-        14
+        6
       ],
       [
         5,
-        14
+        6
       ],
       [
         6,
-        14
+        6
       ],
       [
-        7,
-        14
+        2,
+        7
+      ],
+      [
+        3,
+        7
       ],
       [
         4,
-        15
+        7
       ],
       [
         5,
-        15
+        7
       ],
       [
         6,
-        15
+        7
       ],
       [
         7,
-        15
-      ]
-    ],
-    "capital_tile": [
-      5,
-      13
-    ],
-    "religion": "Church of Light"
-  },
-  "sunhaven": {
-    "id": "sunhaven",
-    "name": "Sunhaven Valley",
-    "owner": "char_human",
-    "tax": 10,
-    "culture": "Solaris Human",
-    "faith": "Church of Light",
-    "color": [
-      210,
-      50,
-      45
-    ],
-    "neighbors": [
-      "amber_vale",
-      "black_ridge",
-      "forgeheim",
-      "golden_plains",
-      "grizzly_pass",
-      "high_crag",
-      "kings_reach",
-      "solaris_prime"
-    ],
-    "coords": [
+        7
+      ],
       [
-        8,
+        1,
         8
       ],
       [
-        9,
+        2,
         8
       ],
       [
-        10,
+        3,
         8
       ],
       [
-        11,
+        4,
         8
       ],
       [
-        8,
+        5,
+        8
+      ],
+      [
+        6,
+        8
+      ],
+      [
+        7,
+        8
+      ],
+      [
+        2,
         9
       ],
       [
-        9,
+        3,
         9
       ],
       [
-        10,
+        4,
         9
       ],
       [
-        11,
+        5,
         9
       ],
       [
-        8,
+        6,
+        9
+      ],
+      [
+        3,
         10
       ],
       [
-        9,
+        4,
         10
       ],
       [
-        10,
+        5,
         10
       ],
       [
-        11,
-        10
-      ],
-      [
-        8,
+        3,
         11
       ],
       [
-        9,
-        11
-      ],
-      [
-        10,
-        11
-      ],
-      [
-        11,
+        4,
         11
       ]
     ],
     "capital_tile": [
-      9,
-      9
-    ],
-    "religion": "Church of Light"
-  },
-  "golden_plains": {
-    "id": "golden_plains",
-    "name": "Golden Plains",
-    "owner": "char_human",
-    "tax": 10,
-    "culture": "Solaris Human",
-    "faith": "Church of Light",
-    "color": [
-      185,
-      35,
-      38
-    ],
-    "neighbors": [
-      "amber_vale",
-      "elder_glade",
-      "eloria_heart",
-      "emerald_fen",
-      "forgeheim",
-      "grizzly_pass",
-      "kings_reach",
-      "sunhaven"
-    ],
-    "coords": [
-      [
-        12,
-        8
-      ],
-      [
-        13,
-        8
-      ],
-      [
-        14,
-        8
-      ],
-      [
-        15,
-        8
-      ],
-      [
-        12,
-        9
-      ],
-      [
-        13,
-        9
-      ],
-      [
-        14,
-        9
-      ],
-      [
-        15,
-        9
-      ],
-      [
-        12,
-        10
-      ],
-      [
-        13,
-        10
-      ],
-      [
-        14,
-        10
-      ],
-      [
-        15,
-        10
-      ],
-      [
-        12,
-        11
-      ],
-      [
-        13,
-        11
-      ],
-      [
-        14,
-        11
-      ],
-      [
-        15,
-        11
-      ]
-    ],
-    "capital_tile": [
-      13,
-      9
-    ],
-    "religion": "Church of Light"
-  },
-  "valoria": {
-    "id": "valoria",
-    "name": "Valoria",
-    "owner": "char_human",
-    "tax": 10,
-    "culture": "Solaris Human",
-    "faith": "Church of Light",
-    "color": [
-      200,
-      55,
-      45
-    ],
-    "neighbors": [
-      "high_crag",
-      "high_crest",
-      "iron_gate",
-      "riverbend",
-      "solaris_prime"
-    ],
-    "coords": [
-      [
-        0,
-        12
-      ],
-      [
-        1,
-        12
-      ],
-      [
-        2,
-        12
-      ],
-      [
-        3,
-        12
-      ],
-      [
-        0,
-        13
-      ],
-      [
-        1,
-        13
-      ],
-      [
-        2,
-        13
-      ],
-      [
-        3,
-        13
-      ],
-      [
-        0,
-        14
-      ],
-      [
-        1,
-        14
-      ],
-      [
-        2,
-        14
-      ],
-      [
-        3,
-        14
-      ],
-      [
-        0,
-        15
-      ],
-      [
-        1,
-        15
-      ],
-      [
-        2,
-        15
-      ],
-      [
-        3,
-        15
-      ]
-    ],
-    "capital_tile": [
-      1,
-      13
-    ],
-    "religion": "Church of Light"
-  },
-  "kings_reach": {
-    "id": "kings_reach",
-    "name": "King's Reach",
-    "owner": "char_human",
-    "tax": 10,
-    "culture": "Solaris Human",
-    "faith": "Church of Light",
-    "color": [
-      175,
-      30,
-      40
-    ],
-    "neighbors": [
-      "amber_vale",
-      "golden_plains",
-      "high_crag",
-      "high_crest",
-      "solaris_prime",
-      "southwatch",
-      "sunhaven",
-      "white_harbor"
-    ],
-    "coords": [
-      [
-        8,
-        12
-      ],
-      [
-        9,
-        12
-      ],
-      [
-        10,
-        12
-      ],
-      [
-        11,
-        12
-      ],
-      [
-        8,
-        13
-      ],
-      [
-        9,
-        13
-      ],
-      [
-        10,
-        13
-      ],
-      [
-        11,
-        13
-      ],
-      [
-        8,
-        14
-      ],
-      [
-        9,
-        14
-      ],
-      [
-        10,
-        14
-      ],
-      [
-        11,
-        14
-      ],
-      [
-        8,
-        15
-      ],
-      [
-        9,
-        15
-      ],
-      [
-        10,
-        15
-      ],
-      [
-        11,
-        15
-      ]
-    ],
-    "capital_tile": [
-      9,
-      13
-    ],
-    "religion": "Church of Light"
-  },
-  "amber_vale": {
-    "id": "amber_vale",
-    "name": "Amber Vale",
-    "owner": "char_human",
-    "tax": 10,
-    "culture": "Solaris Human",
-    "faith": "Church of Light",
-    "color": [
-      215,
-      65,
-      40
-    ],
-    "neighbors": [
-      "eloria_heart",
-      "emerald_fen",
-      "golden_plains",
-      "green_haven",
-      "kings_reach",
-      "southwatch",
-      "sunhaven",
-      "white_harbor"
-    ],
-    "coords": [
-      [
-        12,
-        12
-      ],
-      [
-        13,
-        12
-      ],
-      [
-        14,
-        12
-      ],
-      [
-        15,
-        12
-      ],
-      [
-        12,
-        13
-      ],
-      [
-        13,
-        13
-      ],
-      [
-        14,
-        13
-      ],
-      [
-        15,
-        13
-      ],
-      [
-        12,
-        14
-      ],
-      [
-        13,
-        14
-      ],
-      [
-        14,
-        14
-      ],
-      [
-        15,
-        14
-      ],
-      [
-        12,
-        15
-      ],
-      [
-        13,
-        15
-      ],
-      [
-        14,
-        15
-      ],
-      [
-        15,
-        15
-      ]
-    ],
-    "capital_tile": [
-      13,
-      13
-    ],
-    "religion": "Church of Light"
-  },
-  "riverbend": {
-    "id": "riverbend",
-    "name": "Riverbend",
-    "owner": "char_human",
-    "tax": 10,
-    "culture": "Solaris Human",
-    "faith": "Church of Light",
-    "color": [
-      190,
-      45,
-      35
-    ],
-    "neighbors": [
-      "high_crest",
-      "solaris_prime",
-      "valoria"
-    ],
-    "coords": [
-      [
-        0,
-        16
-      ],
-      [
-        1,
-        16
-      ],
-      [
-        2,
-        16
-      ],
-      [
-        3,
-        16
-      ],
-      [
-        0,
-        17
-      ],
-      [
-        1,
-        17
-      ],
-      [
-        2,
-        17
-      ],
-      [
-        3,
-        17
-      ],
-      [
-        0,
-        18
-      ],
-      [
-        1,
-        18
-      ],
-      [
-        2,
-        18
-      ],
-      [
-        3,
-        18
-      ],
-      [
-        0,
-        19
-      ],
-      [
-        1,
-        19
-      ],
-      [
-        2,
-        19
-      ],
-      [
-        3,
-        19
-      ]
-    ],
-    "capital_tile": [
-      1,
-      17
-    ],
-    "religion": "Church of Light"
-  },
-  "high_crest": {
-    "id": "high_crest",
-    "name": "High Crest",
-    "owner": "char_human",
-    "tax": 10,
-    "culture": "Solaris Human",
-    "faith": "Church of Light",
-    "color": [
-      205,
-      58,
-      48
-    ],
-    "neighbors": [
-      "kings_reach",
-      "riverbend",
-      "solaris_prime",
-      "southwatch",
-      "valoria"
-    ],
-    "coords": [
-      [
-        4,
-        16
-      ],
-      [
-        5,
-        16
-      ],
-      [
-        6,
-        16
-      ],
-      [
-        7,
-        16
-      ],
-      [
-        4,
-        17
-      ],
-      [
-        5,
-        17
-      ],
-      [
-        6,
-        17
-      ],
-      [
-        7,
-        17
-      ],
-      [
-        4,
-        18
-      ],
-      [
-        5,
-        18
-      ],
-      [
-        6,
-        18
-      ],
-      [
-        7,
-        18
-      ],
-      [
-        4,
-        19
-      ],
-      [
-        5,
-        19
-      ],
-      [
-        6,
-        19
-      ],
-      [
-        7,
-        19
-      ]
-    ],
-    "capital_tile": [
-      5,
-      17
-    ],
-    "religion": "Church of Light"
-  },
-  "southwatch": {
-    "id": "southwatch",
-    "name": "Southwatch",
-    "owner": "char_human",
-    "tax": 10,
-    "culture": "Solaris Human",
-    "faith": "Church of Light",
-    "color": [
-      180,
-      38,
-      42
-    ],
-    "neighbors": [
-      "amber_vale",
-      "high_crest",
-      "kings_reach",
-      "solaris_prime",
-      "white_harbor"
-    ],
-    "coords": [
-      [
-        8,
-        16
-      ],
-      [
-        9,
-        16
-      ],
-      [
-        10,
-        16
-      ],
-      [
-        11,
-        16
-      ],
-      [
-        8,
-        17
-      ],
-      [
-        9,
-        17
-      ],
-      [
-        10,
-        17
-      ],
-      [
-        11,
-        17
-      ],
-      [
-        8,
-        18
-      ],
-      [
-        9,
-        18
-      ],
-      [
-        10,
-        18
-      ],
-      [
-        11,
-        18
-      ],
-      [
-        8,
-        19
-      ],
-      [
-        9,
-        19
-      ],
-      [
-        10,
-        19
-      ],
-      [
-        11,
-        19
-      ]
-    ],
-    "capital_tile": [
-      9,
-      17
-    ],
-    "religion": "Church of Light"
-  },
-  "white_harbor": {
-    "id": "white_harbor",
-    "name": "White Harbor",
-    "owner": "char_human",
-    "tax": 10,
-    "culture": "Solaris Human",
-    "faith": "Church of Light",
-    "color": [
-      195,
-      50,
-      40
-    ],
-    "neighbors": [
-      "amber_vale",
-      "emerald_fen",
-      "green_haven",
-      "kings_reach",
-      "southwatch"
-    ],
-    "coords": [
-      [
-        12,
-        16
-      ],
-      [
-        13,
-        16
-      ],
-      [
-        14,
-        16
-      ],
-      [
-        15,
-        16
-      ],
-      [
-        12,
-        17
-      ],
-      [
-        13,
-        17
-      ],
-      [
-        14,
-        17
-      ],
-      [
-        15,
-        17
-      ],
-      [
-        12,
-        18
-      ],
-      [
-        13,
-        18
-      ],
-      [
-        14,
-        18
-      ],
-      [
-        15,
-        18
-      ],
-      [
-        12,
-        19
-      ],
-      [
-        13,
-        19
-      ],
-      [
-        14,
-        19
-      ],
-      [
-        15,
-        19
-      ]
-    ],
-    "capital_tile": [
-      13,
-      17
+      4,
+      8
     ],
     "religion": "Church of Light"
   },
   "iron_citadel": {
     "id": "iron_citadel",
-    "name": "Iron Citadel",
+    "name": "Ironpeak Realm",
     "owner": "char_ironpeak",
-    "tax": 12,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
+    "tax": 25,
+    "culture": "Ironpeak Dwarf",
+    "faith": "Mountain Ancestors",
     "color": [
       52,
-      70,
-      92
+      72,
+      95
     ],
     "neighbors": [
-      "black_ridge",
-      "deep_anvil",
-      "forgeheim",
-      "frostpeak",
-      "thunder_crag"
-    ],
-    "coords": [
-      [
-        4,
-        0
-      ],
-      [
-        5,
-        0
-      ],
-      [
-        6,
-        0
-      ],
-      [
-        7,
-        0
-      ],
-      [
-        4,
-        1
-      ],
-      [
-        5,
-        1
-      ],
-      [
-        6,
-        1
-      ],
-      [
-        7,
-        1
-      ],
-      [
-        4,
-        2
-      ],
-      [
-        5,
-        2
-      ],
-      [
-        6,
-        2
-      ],
-      [
-        7,
-        2
-      ],
-      [
-        4,
-        3
-      ],
-      [
-        5,
-        3
-      ],
-      [
-        6,
-        3
-      ],
-      [
-        7,
-        3
-      ]
-    ],
-    "capital_tile": [
-      5,
-      1
-    ],
-    "religion": "Ancestor Forge"
-  },
-  "frostpeak": {
-    "id": "frostpeak",
-    "name": "Frostpeak Crags",
-    "owner": "char_ironpeak",
-    "tax": 10,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
-    "color": [
-      45,
-      62,
-      84
-    ],
-    "neighbors": [
-      "black_ridge",
-      "iron_citadel",
-      "thunder_crag"
-    ],
-    "coords": [
-      [
-        0,
-        0
-      ],
-      [
-        1,
-        0
-      ],
-      [
-        2,
-        0
-      ],
-      [
-        3,
-        0
-      ],
-      [
-        0,
-        1
-      ],
-      [
-        1,
-        1
-      ],
-      [
-        2,
-        1
-      ],
-      [
-        3,
-        1
-      ],
-      [
-        0,
-        2
-      ],
-      [
-        1,
-        2
-      ],
-      [
-        2,
-        2
-      ],
-      [
-        3,
-        2
-      ],
-      [
-        0,
-        3
-      ],
-      [
-        1,
-        3
-      ],
-      [
-        2,
-        3
-      ],
-      [
-        3,
-        3
-      ]
-    ],
-    "capital_tile": [
-      1,
-      1
-    ],
-    "religion": "Ancestor Forge"
-  },
-  "deep_anvil": {
-    "id": "deep_anvil",
-    "name": "Deep Anvil",
-    "owner": "char_ironpeak",
-    "tax": 10,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
-    "color": [
-      58,
-      78,
-      102
-    ],
-    "neighbors": [
-      "black_ridge",
-      "forgeheim",
-      "grizzly_pass",
-      "iron_citadel",
-      "stonegard"
-    ],
-    "coords": [
-      [
-        8,
-        0
-      ],
-      [
-        9,
-        0
-      ],
-      [
-        10,
-        0
-      ],
-      [
-        11,
-        0
-      ],
-      [
-        8,
-        1
-      ],
-      [
-        9,
-        1
-      ],
-      [
-        10,
-        1
-      ],
-      [
-        11,
-        1
-      ],
-      [
-        8,
-        2
-      ],
-      [
-        9,
-        2
-      ],
-      [
-        10,
-        2
-      ],
-      [
-        11,
-        2
-      ],
-      [
-        8,
-        3
-      ],
-      [
-        9,
-        3
-      ],
-      [
-        10,
-        3
-      ],
-      [
-        11,
-        3
-      ]
-    ],
-    "capital_tile": [
-      9,
-      1
-    ],
-    "religion": "Ancestor Forge"
-  },
-  "stonegard": {
-    "id": "stonegard",
-    "name": "Stonegard Peak",
-    "owner": "char_ironpeak",
-    "tax": 10,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
-    "color": [
-      40,
-      56,
-      76
-    ],
-    "neighbors": [
-      "deep_anvil",
-      "elder_glade",
-      "forgeheim",
-      "grizzly_pass",
-      "whispering_woods"
-    ],
-    "coords": [
-      [
-        12,
-        0
-      ],
-      [
-        13,
-        0
-      ],
-      [
-        14,
-        0
-      ],
-      [
-        15,
-        0
-      ],
-      [
-        12,
-        1
-      ],
-      [
-        13,
-        1
-      ],
-      [
-        14,
-        1
-      ],
-      [
-        15,
-        1
-      ],
-      [
-        12,
-        2
-      ],
-      [
-        13,
-        2
-      ],
-      [
-        14,
-        2
-      ],
-      [
-        15,
-        2
-      ],
-      [
-        12,
-        3
-      ],
-      [
-        13,
-        3
-      ],
-      [
-        14,
-        3
-      ],
-      [
-        15,
-        3
-      ]
-    ],
-    "capital_tile": [
-      13,
-      1
-    ],
-    "religion": "Ancestor Forge"
-  },
-  "thunder_crag": {
-    "id": "thunder_crag",
-    "name": "Thunder Crag",
-    "owner": "char_ironpeak",
-    "tax": 10,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
-    "color": [
-      62,
-      84,
-      110
-    ],
-    "neighbors": [
-      "black_ridge",
-      "frostpeak",
-      "high_crag",
-      "iron_citadel",
-      "iron_gate"
-    ],
-    "coords": [
-      [
-        0,
-        4
-      ],
-      [
-        1,
-        4
-      ],
-      [
-        2,
-        4
-      ],
-      [
-        3,
-        4
-      ],
-      [
-        0,
-        5
-      ],
-      [
-        1,
-        5
-      ],
-      [
-        2,
-        5
-      ],
-      [
-        3,
-        5
-      ],
-      [
-        0,
-        6
-      ],
-      [
-        1,
-        6
-      ],
-      [
-        2,
-        6
-      ],
-      [
-        3,
-        6
-      ],
-      [
-        0,
-        7
-      ],
-      [
-        1,
-        7
-      ],
-      [
-        2,
-        7
-      ],
-      [
-        3,
-        7
-      ]
-    ],
-    "capital_tile": [
-      1,
-      5
-    ],
-    "religion": "Ancestor Forge"
-  },
-  "black_ridge": {
-    "id": "black_ridge",
-    "name": "Black Ridge",
-    "owner": "char_ironpeak",
-    "tax": 10,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
-    "color": [
-      48,
-      65,
-      88
-    ],
-    "neighbors": [
-      "deep_anvil",
-      "forgeheim",
-      "frostpeak",
-      "high_crag",
-      "iron_citadel",
-      "iron_gate",
-      "sunhaven",
-      "thunder_crag"
-    ],
-    "coords": [
-      [
-        4,
-        4
-      ],
-      [
-        5,
-        4
-      ],
-      [
-        6,
-        4
-      ],
-      [
-        7,
-        4
-      ],
-      [
-        4,
-        5
-      ],
-      [
-        5,
-        5
-      ],
-      [
-        6,
-        5
-      ],
-      [
-        7,
-        5
-      ],
-      [
-        4,
-        6
-      ],
-      [
-        5,
-        6
-      ],
-      [
-        6,
-        6
-      ],
-      [
-        7,
-        6
-      ],
-      [
-        4,
-        7
-      ],
-      [
-        5,
-        7
-      ],
-      [
-        6,
-        7
-      ],
-      [
-        7,
-        7
-      ]
-    ],
-    "capital_tile": [
-      5,
-      5
-    ],
-    "religion": "Ancestor Forge"
-  },
-  "forgeheim": {
-    "id": "forgeheim",
-    "name": "Forgeheim",
-    "owner": "char_ironpeak",
-    "tax": 10,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
-    "color": [
-      55,
-      75,
-      98
-    ],
-    "neighbors": [
-      "black_ridge",
-      "deep_anvil",
-      "golden_plains",
-      "grizzly_pass",
-      "high_crag",
-      "iron_citadel",
-      "stonegard",
-      "sunhaven"
-    ],
-    "coords": [
-      [
-        8,
-        4
-      ],
-      [
-        9,
-        4
-      ],
-      [
-        10,
-        4
-      ],
-      [
-        11,
-        4
-      ],
-      [
-        8,
-        5
-      ],
-      [
-        9,
-        5
-      ],
-      [
-        10,
-        5
-      ],
-      [
-        11,
-        5
-      ],
-      [
-        8,
-        6
-      ],
-      [
-        9,
-        6
-      ],
-      [
-        10,
-        6
-      ],
-      [
-        11,
-        6
-      ],
-      [
-        8,
-        7
-      ],
-      [
-        9,
-        7
-      ],
-      [
-        10,
-        7
-      ],
-      [
-        11,
-        7
-      ]
-    ],
-    "capital_tile": [
-      9,
-      5
-    ],
-    "religion": "Ancestor Forge"
-  },
-  "grizzly_pass": {
-    "id": "grizzly_pass",
-    "name": "Grizzly Pass",
-    "owner": "char_ironpeak",
-    "tax": 10,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
-    "color": [
-      42,
-      58,
-      80
-    ],
-    "neighbors": [
-      "deep_anvil",
-      "elder_glade",
-      "eloria_heart",
-      "forgeheim",
-      "golden_plains",
-      "stonegard",
-      "sunhaven",
-      "whispering_woods"
-    ],
-    "coords": [
-      [
-        12,
-        4
-      ],
-      [
-        13,
-        4
-      ],
-      [
-        14,
-        4
-      ],
-      [
-        15,
-        4
-      ],
-      [
-        12,
-        5
-      ],
-      [
-        13,
-        5
-      ],
-      [
-        14,
-        5
-      ],
-      [
-        15,
-        5
-      ],
-      [
-        12,
-        6
-      ],
-      [
-        13,
-        6
-      ],
-      [
-        14,
-        6
-      ],
-      [
-        15,
-        6
-      ],
-      [
-        12,
-        7
-      ],
-      [
-        13,
-        7
-      ],
-      [
-        14,
-        7
-      ],
-      [
-        15,
-        7
-      ]
-    ],
-    "capital_tile": [
-      13,
-      5
-    ],
-    "religion": "Ancestor Forge"
-  },
-  "iron_gate": {
-    "id": "iron_gate",
-    "name": "Iron Gate",
-    "owner": "char_ironpeak",
-    "tax": 10,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
-    "color": [
-      60,
-      80,
-      105
-    ],
-    "neighbors": [
-      "black_ridge",
-      "high_crag",
       "solaris_prime",
-      "thunder_crag",
-      "valoria"
+      "eloria_heart"
     ],
     "coords": [
       [
-        0,
-        8
+        6,
+        1
       ],
       [
-        1,
-        8
+        7,
+        1
       ],
       [
-        2,
-        8
+        8,
+        1
       ],
       [
-        3,
-        8
+        5,
+        2
       ],
       [
-        0,
-        9
+        6,
+        2
       ],
       [
-        1,
-        9
+        7,
+        2
       ],
       [
-        2,
-        9
+        8,
+        2
       ],
       [
-        3,
-        9
+        9,
+        2
       ],
       [
-        0,
-        10
+        4,
+        3
       ],
       [
-        1,
-        10
+        5,
+        3
       ],
       [
-        2,
-        10
+        6,
+        3
       ],
       [
-        3,
-        10
+        7,
+        3
       ],
       [
-        0,
-        11
+        8,
+        3
       ],
       [
-        1,
-        11
+        9,
+        3
       ],
       [
-        2,
-        11
+        10,
+        3
       ],
       [
-        3,
-        11
+        4,
+        4
+      ],
+      [
+        5,
+        4
+      ],
+      [
+        6,
+        4
+      ],
+      [
+        7,
+        4
+      ],
+      [
+        8,
+        4
+      ],
+      [
+        9,
+        4
+      ],
+      [
+        10,
+        4
+      ],
+      [
+        11,
+        4
+      ],
+      [
+        5,
+        5
+      ],
+      [
+        6,
+        5
+      ],
+      [
+        7,
+        5
+      ],
+      [
+        8,
+        5
+      ],
+      [
+        9,
+        5
+      ],
+      [
+        10,
+        5
+      ],
+      [
+        7,
+        6
       ]
     ],
     "capital_tile": [
-      1,
-      9
+      7,
+      3
     ],
-    "religion": "Ancestor Forge"
-  },
-  "high_crag": {
-    "id": "high_crag",
-    "name": "High Crag",
-    "owner": "char_ironpeak",
-    "tax": 10,
-    "culture": "Mountain Dwarf",
-    "faith": "Ancestor Forge",
-    "color": [
-      50,
-      68,
-      90
-    ],
-    "neighbors": [
-      "black_ridge",
-      "forgeheim",
-      "iron_gate",
-      "kings_reach",
-      "solaris_prime",
-      "sunhaven",
-      "thunder_crag",
-      "valoria"
-    ],
-    "coords": [
-      [
-        4,
-        8
-      ],
-      [
-        5,
-        8
-      ],
-      [
-        6,
-        8
-      ],
-      [
-        7,
-        8
-      ],
-      [
-        4,
-        9
-      ],
-      [
-        5,
-        9
-      ],
-      [
-        6,
-        9
-      ],
-      [
-        7,
-        9
-      ],
-      [
-        4,
-        10
-      ],
-      [
-        5,
-        10
-      ],
-      [
-        6,
-        10
-      ],
-      [
-        7,
-        10
-      ],
-      [
-        4,
-        11
-      ],
-      [
-        5,
-        11
-      ],
-      [
-        6,
-        11
-      ],
-      [
-        7,
-        11
-      ]
-    ],
-    "capital_tile": [
-      5,
-      9
-    ],
-    "religion": "Ancestor Forge"
+    "religion": "Mountain Ancestors"
   },
   "eloria_heart": {
     "id": "eloria_heart",
-    "name": "Eloria Heart",
+    "name": "Sylvandell Realm",
     "owner": "char_sylvan",
-    "tax": 12,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
+    "tax": 25,
+    "culture": "Sylvandell Elf",
+    "faith": "Sylvan Ancients",
     "color": [
       32,
-      95,
+      100,
       52
     ],
     "neighbors": [
-      "amber_vale",
-      "elder_glade",
-      "emerald_fen",
-      "golden_plains",
-      "grizzly_pass",
-      "moon_grove",
-      "moss_reach",
-      "starfall_vale"
+      "solaris_prime",
+      "iron_citadel"
     ],
     "coords": [
       [
-        16,
-        8
-      ],
-      [
-        17,
-        8
-      ],
-      [
-        18,
-        8
-      ],
-      [
-        19,
-        8
-      ],
-      [
-        16,
-        9
-      ],
-      [
-        17,
-        9
-      ],
-      [
-        18,
-        9
-      ],
-      [
-        19,
-        9
-      ],
-      [
-        16,
-        10
-      ],
-      [
-        17,
-        10
-      ],
-      [
-        18,
-        10
-      ],
-      [
-        19,
-        10
-      ],
-      [
-        16,
-        11
-      ],
-      [
-        17,
-        11
-      ],
-      [
-        18,
-        11
-      ],
-      [
-        19,
-        11
-      ]
-    ],
-    "capital_tile": [
-      17,
-      9
-    ],
-    "religion": "World Tree"
-  },
-  "whispering_woods": {
-    "id": "whispering_woods",
-    "name": "Whispering Woods",
-    "owner": "char_sylvan",
-    "tax": 10,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
-    "color": [
-      26,
-      85,
-      46
-    ],
-    "neighbors": [
-      "elder_glade",
-      "grizzly_pass",
-      "silver_leaf",
-      "starfall_vale",
-      "stonegard"
-    ],
-    "coords": [
-      [
-        16,
-        0
-      ],
-      [
-        17,
-        0
-      ],
-      [
-        18,
-        0
-      ],
-      [
-        19,
-        0
-      ],
-      [
-        16,
-        1
-      ],
-      [
-        17,
-        1
-      ],
-      [
-        18,
-        1
-      ],
-      [
-        19,
-        1
-      ],
-      [
-        16,
-        2
-      ],
-      [
-        17,
-        2
-      ],
-      [
-        18,
-        2
-      ],
-      [
-        19,
-        2
-      ],
-      [
-        16,
-        3
-      ],
-      [
-        17,
-        3
-      ],
-      [
-        18,
-        3
-      ],
-      [
-        19,
-        3
-      ]
-    ],
-    "capital_tile": [
-      17,
-      1
-    ],
-    "religion": "World Tree"
-  },
-  "silver_leaf": {
-    "id": "silver_leaf",
-    "name": "Silverleaf Forest",
-    "owner": "char_sylvan",
-    "tax": 10,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
-    "color": [
-      38,
-      105,
-      58
-    ],
-    "neighbors": [
-      "elder_glade",
-      "starfall_vale",
-      "whispering_woods"
-    ],
-    "coords": [
-      [
-        20,
-        0
-      ],
-      [
-        21,
-        0
-      ],
-      [
-        22,
-        0
-      ],
-      [
-        23,
-        0
-      ],
-      [
-        20,
-        1
-      ],
-      [
-        21,
-        1
-      ],
-      [
-        22,
-        1
-      ],
-      [
-        23,
-        1
-      ],
-      [
-        20,
-        2
-      ],
-      [
-        21,
-        2
-      ],
-      [
-        22,
-        2
-      ],
-      [
-        23,
-        2
-      ],
-      [
-        20,
-        3
-      ],
-      [
-        21,
-        3
-      ],
-      [
-        22,
-        3
-      ],
-      [
-        23,
-        3
-      ]
-    ],
-    "capital_tile": [
-      21,
-      1
-    ],
-    "religion": "World Tree"
-  },
-  "elder_glade": {
-    "id": "elder_glade",
-    "name": "Elder Glade",
-    "owner": "char_sylvan",
-    "tax": 10,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
-    "color": [
-      22,
-      76,
-      40
-    ],
-    "neighbors": [
-      "eloria_heart",
-      "golden_plains",
-      "grizzly_pass",
-      "moon_grove",
-      "silver_leaf",
-      "starfall_vale",
-      "stonegard",
-      "whispering_woods"
-    ],
-    "coords": [
-      [
-        16,
-        4
-      ],
-      [
-        17,
-        4
-      ],
-      [
-        18,
-        4
-      ],
-      [
-        19,
-        4
-      ],
-      [
-        16,
+        11,
         5
       ],
       [
-        17,
+        12,
         5
       ],
       [
-        18,
-        5
-      ],
-      [
-        19,
-        5
-      ],
-      [
-        16,
+        8,
         6
       ],
       [
-        17,
+        9,
         6
       ],
       [
-        18,
+        10,
         6
       ],
       [
-        19,
+        11,
         6
       ],
       [
-        16,
-        7
-      ],
-      [
-        17,
-        7
-      ],
-      [
-        18,
-        7
-      ],
-      [
-        19,
-        7
-      ]
-    ],
-    "capital_tile": [
-      17,
-      5
-    ],
-    "religion": "World Tree"
-  },
-  "starfall_vale": {
-    "id": "starfall_vale",
-    "name": "Starfall Vale",
-    "owner": "char_sylvan",
-    "tax": 10,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
-    "color": [
-      44,
-      115,
-      64
-    ],
-    "neighbors": [
-      "elder_glade",
-      "eloria_heart",
-      "moon_grove",
-      "silver_leaf",
-      "whispering_woods"
-    ],
-    "coords": [
-      [
-        20,
-        4
-      ],
-      [
-        21,
-        4
-      ],
-      [
-        22,
-        4
-      ],
-      [
-        23,
-        4
-      ],
-      [
-        20,
-        5
-      ],
-      [
-        21,
-        5
-      ],
-      [
-        22,
-        5
-      ],
-      [
-        23,
-        5
-      ],
-      [
-        20,
+        12,
         6
       ],
       [
-        21,
+        13,
         6
       ],
       [
-        22,
-        6
-      ],
-      [
-        23,
-        6
-      ],
-      [
-        20,
+        8,
         7
       ],
       [
-        21,
+        9,
         7
       ],
       [
-        22,
+        10,
         7
       ],
       [
-        23,
+        11,
         7
-      ]
-    ],
-    "capital_tile": [
-      21,
-      5
-    ],
-    "religion": "World Tree"
-  },
-  "moon_grove": {
-    "id": "moon_grove",
-    "name": "Moon Grove",
-    "owner": "char_sylvan",
-    "tax": 10,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
-    "color": [
-      30,
-      90,
-      48
-    ],
-    "neighbors": [
-      "elder_glade",
-      "eloria_heart",
-      "emerald_fen",
-      "moss_reach",
-      "starfall_vale"
-    ],
-    "coords": [
+      ],
       [
-        20,
+        12,
+        7
+      ],
+      [
+        13,
+        7
+      ],
+      [
+        8,
         8
       ],
       [
-        21,
+        9,
         8
       ],
       [
-        22,
+        10,
         8
       ],
       [
-        23,
+        11,
         8
       ],
       [
-        20,
+        12,
+        8
+      ],
+      [
+        13,
+        8
+      ],
+      [
+        14,
+        8
+      ],
+      [
+        8,
         9
       ],
       [
-        21,
+        9,
         9
       ],
       [
-        22,
+        10,
         9
       ],
       [
-        23,
+        11,
         9
       ],
       [
-        20,
+        12,
+        9
+      ],
+      [
+        9,
         10
       ],
       [
-        21,
+        10,
         10
       ],
       [
-        22,
+        11,
         10
       ],
       [
-        23,
-        10
-      ],
-      [
-        20,
-        11
-      ],
-      [
-        21,
-        11
-      ],
-      [
-        22,
-        11
-      ],
-      [
-        23,
+        10,
         11
       ]
     ],
     "capital_tile": [
-      21,
-      9
+      11,
+      8
     ],
-    "religion": "World Tree"
-  },
-  "emerald_fen": {
-    "id": "emerald_fen",
-    "name": "Emerald Fen",
-    "owner": "char_sylvan",
-    "tax": 10,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
-    "color": [
-      35,
-      100,
-      55
-    ],
-    "neighbors": [
-      "amber_vale",
-      "eloria_heart",
-      "golden_plains",
-      "green_haven",
-      "moon_grove",
-      "moss_reach",
-      "shadow_bough",
-      "white_harbor"
-    ],
-    "coords": [
-      [
-        16,
-        12
-      ],
-      [
-        17,
-        12
-      ],
-      [
-        18,
-        12
-      ],
-      [
-        19,
-        12
-      ],
-      [
-        16,
-        13
-      ],
-      [
-        17,
-        13
-      ],
-      [
-        18,
-        13
-      ],
-      [
-        19,
-        13
-      ],
-      [
-        16,
-        14
-      ],
-      [
-        17,
-        14
-      ],
-      [
-        18,
-        14
-      ],
-      [
-        19,
-        14
-      ],
-      [
-        16,
-        15
-      ],
-      [
-        17,
-        15
-      ],
-      [
-        18,
-        15
-      ],
-      [
-        19,
-        15
-      ]
-    ],
-    "capital_tile": [
-      17,
-      13
-    ],
-    "religion": "World Tree"
-  },
-  "moss_reach": {
-    "id": "moss_reach",
-    "name": "Moss Reach",
-    "owner": "char_sylvan",
-    "tax": 10,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
-    "color": [
-      24,
-      80,
-      42
-    ],
-    "neighbors": [
-      "eloria_heart",
-      "emerald_fen",
-      "green_haven",
-      "moon_grove",
-      "shadow_bough"
-    ],
-    "coords": [
-      [
-        20,
-        12
-      ],
-      [
-        21,
-        12
-      ],
-      [
-        22,
-        12
-      ],
-      [
-        23,
-        12
-      ],
-      [
-        20,
-        13
-      ],
-      [
-        21,
-        13
-      ],
-      [
-        22,
-        13
-      ],
-      [
-        23,
-        13
-      ],
-      [
-        20,
-        14
-      ],
-      [
-        21,
-        14
-      ],
-      [
-        22,
-        14
-      ],
-      [
-        23,
-        14
-      ],
-      [
-        20,
-        15
-      ],
-      [
-        21,
-        15
-      ],
-      [
-        22,
-        15
-      ],
-      [
-        23,
-        15
-      ]
-    ],
-    "capital_tile": [
-      21,
-      13
-    ],
-    "religion": "World Tree"
-  },
-  "green_haven": {
-    "id": "green_haven",
-    "name": "Greenhaven",
-    "owner": "char_sylvan",
-    "tax": 10,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
-    "color": [
-      40,
-      110,
-      60
-    ],
-    "neighbors": [
-      "amber_vale",
-      "emerald_fen",
-      "moss_reach",
-      "shadow_bough",
-      "white_harbor"
-    ],
-    "coords": [
-      [
-        16,
-        16
-      ],
-      [
-        17,
-        16
-      ],
-      [
-        18,
-        16
-      ],
-      [
-        19,
-        16
-      ],
-      [
-        16,
-        17
-      ],
-      [
-        17,
-        17
-      ],
-      [
-        18,
-        17
-      ],
-      [
-        19,
-        17
-      ],
-      [
-        16,
-        18
-      ],
-      [
-        17,
-        18
-      ],
-      [
-        18,
-        18
-      ],
-      [
-        19,
-        18
-      ],
-      [
-        16,
-        19
-      ],
-      [
-        17,
-        19
-      ],
-      [
-        18,
-        19
-      ],
-      [
-        19,
-        19
-      ]
-    ],
-    "capital_tile": [
-      17,
-      17
-    ],
-    "religion": "World Tree"
-  },
-  "shadow_bough": {
-    "id": "shadow_bough",
-    "name": "Shadowbough",
-    "owner": "char_sylvan",
-    "tax": 10,
-    "culture": "Sylvan Elf",
-    "faith": "World Tree",
-    "color": [
-      28,
-      88,
-      47
-    ],
-    "neighbors": [
-      "emerald_fen",
-      "green_haven",
-      "moss_reach"
-    ],
-    "coords": [
-      [
-        20,
-        16
-      ],
-      [
-        21,
-        16
-      ],
-      [
-        22,
-        16
-      ],
-      [
-        23,
-        16
-      ],
-      [
-        20,
-        17
-      ],
-      [
-        21,
-        17
-      ],
-      [
-        22,
-        17
-      ],
-      [
-        23,
-        17
-      ],
-      [
-        20,
-        18
-      ],
-      [
-        21,
-        18
-      ],
-      [
-        22,
-        18
-      ],
-      [
-        23,
-        18
-      ],
-      [
-        20,
-        19
-      ],
-      [
-        21,
-        19
-      ],
-      [
-        22,
-        19
-      ],
-      [
-        23,
-        19
-      ]
-    ],
-    "capital_tile": [
-      21,
-      17
-    ],
-    "religion": "World Tree"
+    "religion": "Sylvan Ancients"
   }
 }

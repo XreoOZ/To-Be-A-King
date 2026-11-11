@@ -26,6 +26,8 @@ BASE_TILE_W = 44
 BASE_TILE_H = 42
 VIEWPORT_CENTER_X = MAP_VIEWPORT_X + MAP_VIEWPORT_W // 2  # 960
 VIEWPORT_CENTER_Y = PANEL_Y + PANEL_H // 2                # 566
+MAP_CENTER_COL = 8
+MAP_CENTER_ROW = 7
 
 # Travel & Simulation Constants
 DAYS_PER_TILE = 5  # Number of in-game days it takes to traverse one province

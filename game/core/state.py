@@ -380,114 +380,101 @@ class GameState:
                 f_pool, ep_pool = human_first, human_ep
                 c_title, b_title = "Count", "Baron"
 
-            cap_pid = capital_pids.get(owner)
-            non_cap_pids = [p for p in p_list if p != cap_pid]
+            pid = capital_pids.get(owner, p_list[0])
 
-            # 4 Direct Counts allocated from non-capital provinces (staying within Vassal Limit <= 5)
-            direct_pids = set(non_cap_pids[:4])
-            direct_counts = []
+            # 2 Direct Vassals (Counts) under the Sovereign King
+            c1_fn, c1_ep = random.choice(f_pool), random.choice(ep_pool)
+            c2_fn, c2_ep = random.choice(f_pool), random.choice(ep_pool)
+            c1_id = f"{pid}_count_1"
+            c2_id = f"{pid}_count_2"
 
-            # 1. Capital Province: NO Count! Ruler is direct sovereign. Generates 2 Crown Barons.
-            if cap_pid:
-                cb1_fn = random.choice(f_pool)
-                cb1_ep = random.choice(ep_pool)
-                cb2_fn = random.choice(f_pool)
-                cb2_ep = random.choice(ep_pool)
-                self.vassals[cap_pid] = [
-                    {
-                        "id": f"{cap_pid}_baron_1",
-                        "name": f"{b_title} {cb1_fn} '{cb1_ep}'",
-                        "rank": "baron",
-                        "title": b_title,
-                        "province": cap_pid,
-                        "is_direct_vassal": False,
-                        "liege_id": owner,
-                        "sub_vassals": [],
-                        "levy_contribution": 0,
-                        "tax_contribution": 0,
-                        "tax_rate": 20 if is_ai else 10,
-                        "levy_rate": 20,
-                        "tax_locked": is_ai,
-                        "levy_locked": is_ai,
-                        "gold": random.randint(35, 65),
-                        "city_name": None,
-                        "tiles": []
-                    },
-                    {
-                        "id": f"{cap_pid}_baron_2",
-                        "name": f"{b_title} {cb2_fn} '{cb2_ep}'",
-                        "rank": "baron",
-                        "title": b_title,
-                        "province": cap_pid,
-                        "is_direct_vassal": False,
-                        "liege_id": owner,
-                        "sub_vassals": [],
-                        "levy_contribution": 0,
-                        "tax_contribution": 0,
-                        "tax_rate": 20 if is_ai else 10,
-                        "levy_rate": 20,
-                        "tax_locked": is_ai,
-                        "levy_locked": is_ai,
-                        "gold": random.randint(30, 60),
-                        "city_name": None,
-                        "tiles": []
-                    }
-                ]
+            # 2 Sub-Vassals (Barons) - each strictly residing under their respective Direct Count
+            b1_fn, b1_ep = random.choice(f_pool), random.choice(ep_pool)
+            b2_fn, b2_ep = random.choice(f_pool), random.choice(ep_pool)
+            b1_id = f"{pid}_baron_1"
+            b2_id = f"{pid}_baron_2"
 
-            # 2. For EVERY non-capital province: exactly 1 Count and 2 Local Barons (strictly residing in that province)
-            for pid in non_cap_pids:
-                c_fn = random.choice(f_pool)
-                c_ep = random.choice(ep_pool)
-                count_id = f"{pid}_count"
-                count_vassal = {
-                    "id": count_id,
-                    "name": f"{c_title} {c_fn} '{c_ep}'",
-                    "rank": "count",
-                    "title": c_title,
-                    "province": pid,
-                    "is_direct_vassal": True,
-                    "liege_id": owner,
-                    "sub_vassals": [],
-                    "levy_contribution": 0,
-                    "tax_contribution": 0,
-                    "tax_rate": 20 if is_ai else 10,
-                    "levy_rate": 20,
-                    "tax_locked": is_ai,
-                    "levy_locked": is_ai,
-                    "gold": random.randint(55, 95),
-                    "city_name": None,
-                    "tiles": []
-                }
+            count_1 = {
+                "id": c1_id,
+                "name": f"{c_title} {c1_fn} '{c1_ep}'",
+                "rank": "count",
+                "title": c_title,
+                "province": pid,
+                "is_direct_vassal": True,
+                "liege_id": owner,
+                "sub_vassals": [b1_id],
+                "levy_contribution": 0,
+                "tax_contribution": 0,
+                "tax_rate": 20 if is_ai else 10,
+                "levy_rate": 20,
+                "tax_locked": is_ai,
+                "levy_locked": is_ai,
+                "gold": random.randint(60, 95),
+                "city_name": None,
+                "tiles": []
+            }
 
-                # Add 2 Local Barons residing strictly in this same province
-                local_barons = []
-                for b_idx in (1, 2):
-                    b_fn = random.choice(f_pool)
-                    b_ep = random.choice(ep_pool)
-                    baron_id = f"{pid}_baron_{b_idx}"
-                    baron_vassal = {
-                        "id": baron_id,
-                        "name": f"{b_title} {b_fn} '{b_ep}'",
-                        "rank": "baron",
-                        "title": b_title,
-                        "province": pid,
-                        "is_direct_vassal": False,
-                        "liege_id": count_id,
-                        "sub_vassals": [],
-                        "levy_contribution": 0,
-                        "tax_contribution": 0,
-                        "tax_rate": 20 if is_ai else 10,
-                        "levy_rate": 20,
-                        "tax_locked": is_ai,
-                        "levy_locked": is_ai,
-                        "gold": random.randint(25, 55),
-                        "city_name": None,
-                        "tiles": []
-                    }
-                    count_vassal["sub_vassals"].append(baron_id)
-                    local_barons.append(baron_vassal)
+            count_2 = {
+                "id": c2_id,
+                "name": f"{c_title} {c2_fn} '{c2_ep}'",
+                "rank": "count",
+                "title": c_title,
+                "province": pid,
+                "is_direct_vassal": True,
+                "liege_id": owner,
+                "sub_vassals": [b2_id],
+                "levy_contribution": 0,
+                "tax_contribution": 0,
+                "tax_rate": 20 if is_ai else 10,
+                "levy_rate": 20,
+                "tax_locked": is_ai,
+                "levy_locked": is_ai,
+                "gold": random.randint(60, 95),
+                "city_name": None,
+                "tiles": []
+            }
 
-                self.vassals[pid] = [count_vassal] + local_barons
+            baron_1 = {
+                "id": b1_id,
+                "name": f"{b_title} {b1_fn} '{b1_ep}'",
+                "rank": "baron",
+                "title": b_title,
+                "province": pid,
+                "is_direct_vassal": False,
+                "liege_id": c1_id,
+                "sub_vassals": [],
+                "levy_contribution": 0,
+                "tax_contribution": 0,
+                "tax_rate": 20 if is_ai else 10,
+                "levy_rate": 20,
+                "tax_locked": is_ai,
+                "levy_locked": is_ai,
+                "gold": random.randint(40, 70),
+                "city_name": None,
+                "tiles": []
+            }
+
+            baron_2 = {
+                "id": b2_id,
+                "name": f"{b_title} {b2_fn} '{b2_ep}'",
+                "rank": "baron",
+                "title": b_title,
+                "province": pid,
+                "is_direct_vassal": False,
+                "liege_id": c2_id,
+                "sub_vassals": [],
+                "levy_contribution": 0,
+                "tax_contribution": 0,
+                "tax_rate": 20 if is_ai else 10,
+                "levy_rate": 20,
+                "tax_locked": is_ai,
+                "levy_locked": is_ai,
+                "gold": random.randint(40, 70),
+                "city_name": None,
+                "tiles": []
+            }
+
+            self.vassals[pid] = [count_1, count_2, baron_1, baron_2]
 
     @property
     def player(self):
@@ -2169,83 +2156,30 @@ prov_tile_list = {}
 for (c, r), pid in CELL_TO_PROV.items():
     prov_tile_list.setdefault(pid, []).append((c, r))
 
-def partition_16_tiles_randomized(raw_tiles):
-    """Partitions a 4x4 province (16 tiles) into 1 lord piece (8 tiles) and 2 baron pieces (4 tiles each)."""
-    s_tiles = sorted(raw_tiles, key=lambda t: (t[1], t[0]))
-    c0 = min(t[0] for t in s_tiles)
-    r0 = min(t[1] for t in s_tiles)
-    grid = {(t[0] - c0, t[1] - r0): t for t in s_tiles}
-
-    patterns = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
-    pat = random.choice(patterns)
-    
-    lord_t, b1_t, b2_t = [], [], []
-    if pat == 'A': # Top half lord, bottom quadrants barons
-        for (x, y), t in grid.items():
-            if y < 2: lord_t.append(t)
-            elif x < 2: b1_t.append(t)
-            else: b2_t.append(t)
-    elif pat == 'B': # Bottom half lord, top quadrants barons
-        for (x, y), t in grid.items():
-            if y >= 2: lord_t.append(t)
-            elif x < 2: b1_t.append(t)
-            else: b2_t.append(t)
-    elif pat == 'C': # Left half lord, right quadrants barons
-        for (x, y), t in grid.items():
-            if x < 2: lord_t.append(t)
-            elif y < 2: b1_t.append(t)
-            else: b2_t.append(t)
-    elif pat == 'D': # Right half lord, left quadrants barons
-        for (x, y), t in grid.items():
-            if x >= 2: lord_t.append(t)
-            elif y < 2: b1_t.append(t)
-            else: b2_t.append(t)
-    elif pat == 'E': # Middle columns lord, side columns barons
-        for (x, y), t in grid.items():
-            if x in (1, 2): lord_t.append(t)
-            elif x == 0: b1_t.append(t)
-            else: b2_t.append(t)
-    elif pat == 'F': # Middle rows lord, top/bottom rows barons
-        for (x, y), t in grid.items():
-            if y in (1, 2): lord_t.append(t)
-            elif y == 0: b1_t.append(t)
-            else: b2_t.append(t)
-    elif pat == 'G': # NW/SE barons, SW/NE lord
-        for (x, y), t in grid.items():
-            if x < 2 and y < 2: b1_t.append(t)
-            elif x >= 2 and y >= 2: b2_t.append(t)
-            else: lord_t.append(t)
-    else: # NE/SW barons, NW/SE lord
-        for (x, y), t in grid.items():
-            if x >= 2 and y < 2: b1_t.append(t)
-            elif x < 2 and y >= 2: b2_t.append(t)
-            else: lord_t.append(t)
-
-    if len(lord_t) != 8 or len(b1_t) != 4 or len(b2_t) != 4:
-        lord_t = list(s_tiles[0:8])
-        b1_t = list(s_tiles[8:12])
-        b2_t = list(s_tiles[12:16])
-
-    return lord_t, b1_t, b2_t
+def cluster_30_tiles(tiles, cap_tile):
+    rem_tiles = list(tiles)
+    rem_tiles.sort(key=lambda t: (t[0]-cap_tile[0])**2 + (t[1]-cap_tile[1])**2)
+    crown_tiles = rem_tiles[:10]
+    rem_20 = rem_tiles[10:]
+    rem_20.sort(key=lambda t: (t[0] + t[1]))
+    grp_1 = rem_20[:10]
+    grp_2 = rem_20[10:]
+    c1_tiles = grp_1[:6]
+    b1_tiles = grp_1[6:]
+    c2_tiles = grp_2[:6]
+    b2_tiles = grp_2[6:]
+    return crown_tiles, c1_tiles, b1_tiles, c2_tiles, b2_tiles
 
 def setup_province_starter_cities(target_state):
     """
-    Completely partitions all 16 tiles of every province into complete feudal fiefdoms:
-    1 Province = 1 Complete Fiefdom Cake (16 tiles total, 100% sliced, NO unpartitioned tiles).
-    Randomized, organic partition patterns and building placements so every province looks unique!
-    - Capital Province:
-      - 8 tiles -> Crown Demesne (Royal City lvl 0, Citadel lvl 0 (2t), Royal Barracks lvl 0 (1t), 4 domain tiles)
-      - 4 tiles -> Crown Baron 1 Barony (Keep lvl 0)
-      - 4 tiles -> Crown Baron 2 Barony (Burgh lvl 0)
-    - Non-Capital Provinces:
-      - 8 tiles -> County Seat of the Provincial Lord:
-                   Fortress (2 tiles, Level 0)
-                   Starter City (1 tile, Level 0)
-                   Barracks (1 tile, Level 0)
-                   4 open arable domain tiles
-      - 4 tiles -> Local Baron 1 Barony (Town/Burgh, Level 0, 1t + 3 domain tiles)
-      - 4 tiles -> Local Baron 2 Barony (Keep, Level 0, 1t + 3 domain tiles)
-      Total = 8 + 4 + 4 = 16 tiles!
+    Partitions all 30 tiles of every realm province into complete feudal fiefdoms:
+    1 Province = 1 Complete Kingdom (30 tiles total, 100% sliced into fiefs):
+    - Crown Demesne (10 tiles): Royal City (Lvl 0), Royal Citadel (Lvl 0), Royal Barracks (Lvl 0)
+    - Direct Vassal Count 1 (6 tiles): Fort (Lvl 0), Starter City (Lvl 0), Barracks (Lvl 0)
+    - Sub-Vassal Baron 1 (4 tiles): Burgh/Town (Lvl 0)
+    - Direct Vassal Count 2 (6 tiles): Fort (Lvl 0), Starter City (Lvl 0), Barracks (Lvl 0)
+    - Sub-Vassal Baron 2 (4 tiles): Keep (Lvl 0)
+    Total = 10 + 6 + 4 + 6 + 4 = 30 tiles!
     """
     target_state.settlements = {}
     target_state.fiefs = {}
@@ -2253,350 +2187,251 @@ def setup_province_starter_cities(target_state):
     settlement_counter = 1
 
     capital_pids = {
-        "char_human": ("solaris_prime", "Solaria", "Sunspire Citadel", "Solaris Dawn Barracks"),
-        "char_ironpeak": ("iron_citadel", "Great Anvil", "Ironpeak Fortress", "Ironbreaker Barracks"),
-        "char_sylvan": ("eloria_heart", "Eloria", "Elder Tree Sanctuary", "Sylvan Ranger Barracks")
+        "char_human": "solaris_prime",
+        "char_ironpeak": "iron_citadel",
+        "char_sylvan": "eloria_heart"
     }
-    capital_lookup = {v[0]: (owner, v[1], v[2], v[3]) for owner, v in capital_pids.items()}
 
-    for pid in sorted(prov_tile_list.keys()):
-        raw_tiles = prov_tile_list[pid]
+    for pid in list(PROVINCES.keys()):
+        p_name = PROVINCES[pid]["name"].split()[0]
+        p_owner = PROVINCES[pid].get("owner", target_state.player_id)
+        ruler_char = CHARACTERS.get(p_owner, target_state.player)
+        p_tiles = list(PROV_TO_TILES.get(pid, []))
+        cap_tile = PROV_CAPITAL_TILES.get(pid, p_tiles[0] if p_tiles else (8, 7))
+
+        crown_tiles, c1_tiles, b1_tiles, c2_tiles, b2_tiles = cluster_30_tiles(p_tiles, cap_tile)
+
+        # 1. CROWN DEMESNE FIEF (10 TILES) - Held by the Sovereign Ruler
+        fid_crown = f"fief_{fief_counter}"
+        fief_counter += 1
+        target_state.fiefs[fid_crown] = {
+            "id": fid_crown,
+            "province": pid,
+            "tiles": crown_tiles,
+            "name": f"Crown Demesne of {p_name}",
+            "holder": ruler_char["name"],
+            "owner": p_owner,
+            "vassal_id": None,
+            "is_crown_demesne": True
+        }
+
+        # Crown City (1 tile, Level 0) at Capital Tile
+        sb_city = f"settlement_{settlement_counter}"
+        settlement_counter += 1
+        target_state.settlements[cap_tile] = {
+            "id": sb_city,
+            "province": pid,
+            "type": "city",
+            "name": f"Royal City of {p_name}",
+            "lord": ruler_char["name"],
+            "owner": p_owner,
+            "vassal_id": None,
+            "is_crown_demesne": True,
+            "is_crown_fief": True,
+            "level": 0,
+            "max_unlocked_level": 0
+        }
+
+        # Crown Citadel (1 tile, Level 0)
+        free_crown = [t for t in crown_tiles if t != cap_tile]
+        cit_tile = free_crown.pop(0) if free_crown else cap_tile
+        sb_cit = f"settlement_{settlement_counter}"
+        settlement_counter += 1
+        target_state.settlements[cit_tile] = {
+            "id": sb_cit,
+            "province": pid,
+            "type": "fort",
+            "name": f"Citadel of {p_name}",
+            "lord": ruler_char["name"],
+            "owner": p_owner,
+            "vassal_id": None,
+            "is_crown_demesne": True,
+            "is_crown_fief": True,
+            "level": 0,
+            "max_unlocked_level": 0
+        }
+
+        # Crown Barracks (1 tile, Level 0)
+        barr_tile = free_crown.pop(0) if free_crown else cap_tile
+        sb_barr = f"settlement_{settlement_counter}"
+        settlement_counter += 1
+        target_state.settlements[barr_tile] = {
+            "id": sb_barr,
+            "province": pid,
+            "type": "barrack",
+            "name": f"Royal {p_name} Barracks",
+            "lord": ruler_char["name"],
+            "owner": p_owner,
+            "vassal_id": None,
+            "is_crown_demesne": True,
+            "is_crown_fief": True,
+            "level": 0,
+            "max_unlocked_level": 0
+        }
+
         v_list = target_state.vassals.get(pid, [])
-        p_name = PROVINCES.get(pid, {}).get("name", pid).split()[0]
-        p_owner = PROVINCES.get(pid, {}).get("owner", target_state.player_id)
-        ruler_name = CHARACTERS.get(p_owner, {}).get("name", "Royal Crown")
+        c1 = v_list[0] if len(v_list) > 0 else None
+        c2 = v_list[1] if len(v_list) > 1 else None
+        b1 = v_list[2] if len(v_list) > 2 else None
+        b2 = v_list[3] if len(v_list) > 3 else None
 
-        # Partition 16 tiles into 8, 4, 4 using organic randomized patterns
-        lord_tiles, b1_tiles, b2_tiles = partition_16_tiles_randomized(raw_tiles)
-
-        if pid in capital_lookup:
-            # ---------------------------------------------------------
-            # CAPITAL PROVINCE (16 TILES PARTITIONED)
-            # ---------------------------------------------------------
-            c_owner, cap_city_n, cap_fort_n, cap_barr_n = capital_lookup[pid]
-            fid_c = f"fief_{fief_counter}"
+        # 2. DIRECT VASSAL 1 (COUNT 1, 6 TILES)
+        if c1:
+            fid_c1 = f"fief_{fief_counter}"
             fief_counter += 1
-            target_state.fiefs[fid_c] = {
-                "id": fid_c,
+            c1_lbl = c1["name"].split()[1] if len(c1["name"].split()) > 1 else c1["name"]
+            c1_fief_name = f"County of {c1_lbl}"
+            target_state.fiefs[fid_c1] = {
+                "id": fid_c1,
                 "province": pid,
-                "tiles": lord_tiles,
-                "name": f"Crown Demesne of {cap_city_n}",
-                "holder": ruler_name,
-                "owner": c_owner,
-                "vassal_id": None,
-                "is_crown_demesne": True
-            }
-
-            # Find adjacent pair for Citadel (2 tiles) in lord_tiles
-            adj_pairs = []
-            for i in range(len(lord_tiles)):
-                for j in range(i + 1, len(lord_tiles)):
-                    t1, t2 = lord_tiles[i], lord_tiles[j]
-                    if (abs(t1[0] - t2[0]) == 1 and t1[1] == t2[1]) or (abs(t1[1] - t2[1]) == 1 and t1[0] == t2[0]):
-                        adj_pairs.append((t1, t2))
-            fort_pair = random.choice(adj_pairs) if adj_pairs else (lord_tiles[0], lord_tiles[1])
-
-            s2_id = f"settlement_{settlement_counter}"
-            settlement_counter += 1
-            for t in fort_pair:
-                target_state.settlements[t] = {
-                    "id": s2_id,
-                    "province": pid,
-                    "type": "fort",
-                    "name": cap_fort_n,
-                    "lord": f"{ruler_name} (Crown)",
-                    "owner": c_owner,
-                    "vassal_id": None,
-                    "is_crown_demesne": True,
-                    "is_crown_fief": True,
-                    "level": 0,
-                    "max_unlocked_level": 0
-                }
-
-            free_c_tiles = [t for t in lord_tiles if t not in fort_pair]
-            random.shuffle(free_c_tiles)
-
-            # City (1 tile, Level 0)
-            city_tile = free_c_tiles.pop(0)
-            s1_id = f"settlement_{settlement_counter}"
-            settlement_counter += 1
-            target_state.settlements[city_tile] = {
-                "id": s1_id,
-                "province": pid,
-                "type": "city",
-                "name": f"Royal City of {cap_city_n}",
-                "lord": f"{ruler_name} (Crown)",
-                "owner": c_owner,
-                "vassal_id": None,
-                "is_crown_demesne": True,
-                "is_crown_fief": True,
-                "level": 0,
-                "max_unlocked_level": 0
-            }
-
-            # Royal Barracks (1 tile, Level 0!)
-            barrack_tile = free_c_tiles.pop(0)
-            s3_id = f"settlement_{settlement_counter}"
-            settlement_counter += 1
-            target_state.settlements[barrack_tile] = {
-                "id": s3_id,
-                "province": pid,
-                "type": "barrack",
-                "name": cap_barr_n,
-                "lord": f"{ruler_name} (Crown)",
-                "owner": c_owner,
-                "vassal_id": None,
-                "is_crown_demesne": True,
-                "is_crown_fief": True,
-                "level": 0,
-                "max_unlocked_level": 0
-            }
-
-            # Crown Baron 1 (4 tiles)
-            if len(v_list) > 0:
-                b1 = v_list[0]
-                b1_lbl = b1["name"].split()[1] if len(b1["name"].split()) > 1 else b1["name"]
-                fid_b1 = f"fief_{fief_counter}"
-                fief_counter += 1
-                target_state.fiefs[fid_b1] = {
-                    "id": fid_b1,
-                    "province": pid,
-                    "tiles": b1_tiles,
-                    "name": f"Barony of {b1_lbl}",
-                    "holder": b1["name"],
-                    "owner": c_owner,
-                    "vassal_id": b1["id"],
-                    "is_crown_demesne": False
-                }
-                sb1_id = f"settlement_{settlement_counter}"
-                settlement_counter += 1
-                b1_holding = f"{b1_lbl}'s Keep"
-                b1_t_pick = random.choice(b1_tiles)
-                target_state.settlements[b1_t_pick] = {
-                    "id": sb1_id,
-                    "province": pid,
-                    "type": "fort",
-                    "name": b1_holding,
-                    "lord": b1["name"],
-                    "owner": c_owner,
-                    "vassal_id": b1["id"],
-                    "is_crown_demesne": False,
-                    "is_crown_fief": False,
-                    "level": 0,
-                    "max_unlocked_level": 0
-                }
-                b1["city_name"] = b1_holding
-                b1["tiles"] = b1_tiles
-
-            # Crown Baron 2 (4 tiles)
-            if len(v_list) > 1:
-                b2 = v_list[1]
-                b2_lbl = b2["name"].split()[1] if len(b2["name"].split()) > 1 else b2["name"]
-                fid_b2 = f"fief_{fief_counter}"
-                fief_counter += 1
-                target_state.fiefs[fid_b2] = {
-                    "id": fid_b2,
-                    "province": pid,
-                    "tiles": b2_tiles,
-                    "name": f"Barony of {b2_lbl}",
-                    "holder": b2["name"],
-                    "owner": c_owner,
-                    "vassal_id": b2["id"],
-                    "is_crown_demesne": False
-                }
-                sb2_id = f"settlement_{settlement_counter}"
-                settlement_counter += 1
-                b2_holding = f"{b2_lbl}'s Burgh"
-                b2_t_pick = random.choice(b2_tiles)
-                target_state.settlements[b2_t_pick] = {
-                    "id": sb2_id,
-                    "province": pid,
-                    "type": "city",
-                    "name": b2_holding,
-                    "lord": b2["name"],
-                    "owner": c_owner,
-                    "vassal_id": b2["id"],
-                    "is_crown_demesne": False,
-                    "is_crown_fief": False,
-                    "level": 0,
-                    "max_unlocked_level": 0
-                }
-                b2["city_name"] = b2_holding
-                b2["tiles"] = b2_tiles
-
-        else:
-            # ---------------------------------------------------------
-            # NON-CAPITAL PROVINCE (16 TILES PARTITIONED)
-            # Count (8 tiles: 1 Fort 2t, 1 City 1t, 1 Barrack 1t, 4 domain)
-            # Baron 1 (4 tiles: 1 Burgh/Town 1t, 3 domain)
-            # Baron 2 (4 tiles: 1 Keep 1t, 3 domain)
-            # ---------------------------------------------------------
-            if not v_list:
-                continue
-
-            prov_lord = v_list[0]
-            lord_lbl = prov_lord["name"].split()[1] if len(prov_lord["name"].split()) > 1 else prov_lord["name"]
-            is_count = (prov_lord.get("rank") == "count")
-            fief_title = f"County of {p_name}" if is_count else f"Barony of {p_name}"
-
-            fid_lord = f"fief_{fief_counter}"
-            fief_counter += 1
-            target_state.fiefs[fid_lord] = {
-                "id": fid_lord,
-                "province": pid,
-                "tiles": lord_tiles,
-                "name": fief_title,
-                "holder": prov_lord["name"],
+                "tiles": c1_tiles,
+                "name": c1_fief_name,
+                "holder": c1["name"],
                 "owner": p_owner,
-                "vassal_id": prov_lord["id"],
+                "vassal_id": c1["id"],
                 "is_crown_demesne": False
             }
+            c1_free = list(c1_tiles)
+            random.shuffle(c1_free)
 
-            # 1. Fort (2 tiles, Level 0) placed on a randomized adjacent pair
-            adj_pairs = []
-            for i in range(len(lord_tiles)):
-                for j in range(i + 1, len(lord_tiles)):
-                    t1, t2 = lord_tiles[i], lord_tiles[j]
-                    if (abs(t1[0] - t2[0]) == 1 and t1[1] == t2[1]) or (abs(t1[1] - t2[1]) == 1 and t1[0] == t2[0]):
-                        adj_pairs.append((t1, t2))
-            fort_pair = random.choice(adj_pairs) if adj_pairs else (lord_tiles[0], lord_tiles[1])
-
-            sl_id = f"settlement_{settlement_counter}"
+            t_fort = c1_free.pop(0)
+            c1_seat_name = f"{c1_lbl}'s Fortress"
+            sb_c1_f = f"settlement_{settlement_counter}"
             settlement_counter += 1
-            fort_name = f"{lord_lbl}'s Fortress"
-            for t in fort_pair:
-                target_state.settlements[t] = {
-                    "id": sl_id,
-                    "province": pid,
-                    "type": "fort",
-                    "name": fort_name,
-                    "lord": prov_lord["name"],
-                    "owner": p_owner,
-                    "vassal_id": prov_lord["id"],
-                    "is_crown_demesne": False,
-                    "is_crown_fief": False,
-                    "level": 0,
-                    "max_unlocked_level": 0
-                }
-            prov_lord["city_name"] = fort_name
-            prov_lord["tiles"] = lord_tiles
+            target_state.settlements[t_fort] = {
+                "id": sb_c1_f, "province": pid, "type": "fort", "name": c1_seat_name,
+                "lord": c1["name"], "owner": p_owner, "vassal_id": c1["id"],
+                "is_crown_demesne": False, "is_crown_fief": False, "level": 0, "max_unlocked_level": 0
+            }
+            c1["city_name"] = c1_seat_name
+            c1["tiles"] = c1_tiles
 
-            free_l_tiles = [t for t in lord_tiles if t not in fort_pair]
-            random.shuffle(free_l_tiles)
-
-            # 2. Starter City (1 tile, Level 0)
-            city_tile = free_l_tiles.pop(0)
-            sc_id = f"settlement_{settlement_counter}"
+            t_city = c1_free.pop(0)
+            sb_c1_c = f"settlement_{settlement_counter}"
             settlement_counter += 1
-            target_state.settlements[city_tile] = {
-                "id": sc_id,
-                "province": pid,
-                "type": "city",
-                "name": f"{p_name} Borough",
-                "lord": prov_lord["name"],
-                "owner": p_owner,
-                "vassal_id": prov_lord["id"],
-                "is_crown_demesne": False,
-                "is_crown_fief": False,
-                "level": 0,
-                "max_unlocked_level": 0
+            target_state.settlements[t_city] = {
+                "id": sb_c1_c, "province": pid, "type": "city", "name": f"{c1_lbl}'s City",
+                "lord": c1["name"], "owner": p_owner, "vassal_id": c1["id"],
+                "is_crown_demesne": False, "is_crown_fief": False, "level": 0, "max_unlocked_level": 0
             }
 
-            # 3. Barracks (1 tile, Level 0)
-            barr_tile = free_l_tiles.pop(0)
-            sb_id = f"settlement_{settlement_counter}"
+            t_barr = c1_free.pop(0)
+            sb_c1_b = f"settlement_{settlement_counter}"
             settlement_counter += 1
-            target_state.settlements[barr_tile] = {
-                "id": sb_id,
-                "province": pid,
-                "type": "barrack",
-                "name": f"{p_name} Garrison Barracks",
-                "lord": prov_lord["name"],
-                "owner": p_owner,
-                "vassal_id": prov_lord["id"],
-                "is_crown_demesne": False,
-                "is_crown_fief": False,
-                "level": 0,
-                "max_unlocked_level": 0
+            target_state.settlements[t_barr] = {
+                "id": sb_c1_b, "province": pid, "type": "barrack", "name": f"{c1_lbl}'s Barracks",
+                "lord": c1["name"], "owner": p_owner, "vassal_id": c1["id"],
+                "is_crown_demesne": False, "is_crown_fief": False, "level": 0, "max_unlocked_level": 0
             }
 
-            # Local Baron 1 (4 tiles: 1 Burgh/Town 1t, 3 domain)
-            if len(v_list) > 1:
-                b1 = v_list[1]
-                b1_lbl = b1["name"].split()[1] if len(b1["name"].split()) > 1 else b1["name"]
-                fid_b1 = f"fief_{fief_counter}"
-                fief_counter += 1
-                target_state.fiefs[fid_b1] = {
-                    "id": fid_b1,
-                    "province": pid,
-                    "tiles": b1_tiles,
-                    "name": f"Barony of {b1_lbl}",
-                    "holder": b1["name"],
-                    "owner": p_owner,
-                    "vassal_id": b1["id"],
-                    "is_crown_demesne": False
-                }
-                sb1_id = f"settlement_{settlement_counter}"
-                settlement_counter += 1
-                b1_holding = f"{b1_lbl}'s Burgh"
-                b1_t_pick = random.choice(b1_tiles)
-                target_state.settlements[b1_t_pick] = {
-                    "id": sb1_id,
-                    "province": pid,
-                    "type": "city",
-                    "name": b1_holding,
-                    "lord": b1["name"],
-                    "owner": p_owner,
-                    "vassal_id": b1["id"],
-                    "is_crown_demesne": False,
-                    "is_crown_fief": False,
-                    "level": 0,
-                    "max_unlocked_level": 0
-                }
-                b1["city_name"] = b1_holding
-                b1["tiles"] = b1_tiles
+        # 3. SUB-VASSAL 1 (BARON 1 under Count 1, 4 TILES)
+        if b1:
+            fid_b1 = f"fief_{fief_counter}"
+            fief_counter += 1
+            b1_lbl = b1["name"].split()[1] if len(b1["name"].split()) > 1 else b1["name"]
+            b1_fief_name = f"Barony of {b1_lbl}"
+            target_state.fiefs[fid_b1] = {
+                "id": fid_b1,
+                "province": pid,
+                "tiles": b1_tiles,
+                "name": b1_fief_name,
+                "holder": b1["name"],
+                "owner": p_owner,
+                "vassal_id": b1["id"],
+                "is_crown_demesne": False
+            }
+            b1_t_pick = random.choice(b1_tiles)
+            b1_seat = f"{b1_lbl}'s Burgh"
+            sb_b1 = f"settlement_{settlement_counter}"
+            settlement_counter += 1
+            target_state.settlements[b1_t_pick] = {
+                "id": sb_b1, "province": pid, "type": "city", "name": b1_seat,
+                "lord": b1["name"], "owner": p_owner, "vassal_id": b1["id"],
+                "is_crown_demesne": False, "is_crown_fief": False, "level": 0, "max_unlocked_level": 0
+            }
+            b1["city_name"] = b1_seat
+            b1["tiles"] = b1_tiles
 
-            # Local Baron 2 (4 tiles: 1 Keep 1t, 3 domain)
-            if len(v_list) > 2:
-                b2 = v_list[2]
-                b2_lbl = b2["name"].split()[1] if len(b2["name"].split()) > 1 else b2["name"]
-                fid_b2 = f"fief_{fief_counter}"
-                fief_counter += 1
-                target_state.fiefs[fid_b2] = {
-                    "id": fid_b2,
-                    "province": pid,
-                    "tiles": b2_tiles,
-                    "name": f"Barony of {b2_lbl}",
-                    "holder": b2["name"],
-                    "owner": p_owner,
-                    "vassal_id": b2["id"],
-                    "is_crown_demesne": False
-                }
-                sb2_id = f"settlement_{settlement_counter}"
-                settlement_counter += 1
-                b2_holding = f"{b2_lbl}'s Keep"
-                b2_t_pick = random.choice(b2_tiles)
-                target_state.settlements[b2_t_pick] = {
-                    "id": sb2_id,
-                    "province": pid,
-                    "type": "fort",
-                    "name": b2_holding,
-                    "lord": b2["name"],
-                    "owner": p_owner,
-                    "vassal_id": b2["id"],
-                    "is_crown_demesne": False,
-                    "is_crown_fief": False,
-                    "level": 0,
-                    "max_unlocked_level": 0
-                }
-                b2["city_name"] = b2_holding
-                b2["tiles"] = b2_tiles
+        # 4. DIRECT VASSAL 2 (COUNT 2, 6 TILES)
+        if c2:
+            fid_c2 = f"fief_{fief_counter}"
+            fief_counter += 1
+            c2_lbl = c2["name"].split()[1] if len(c2["name"].split()) > 1 else c2["name"]
+            c2_fief_name = f"County of {c2_lbl}"
+            target_state.fiefs[fid_c2] = {
+                "id": fid_c2,
+                "province": pid,
+                "tiles": c2_tiles,
+                "name": c2_fief_name,
+                "holder": c2["name"],
+                "owner": p_owner,
+                "vassal_id": c2["id"],
+                "is_crown_demesne": False
+            }
+            c2_free = list(c2_tiles)
+            random.shuffle(c2_free)
 
-    # Synchronize target_state's counter so newly carved fiefs never collide with starter fiefs!
+            t_fort2 = c2_free.pop(0)
+            c2_seat_name = f"{c2_lbl}'s Keep"
+            sb_c2_f = f"settlement_{settlement_counter}"
+            settlement_counter += 1
+            target_state.settlements[t_fort2] = {
+                "id": sb_c2_f, "province": pid, "type": "fort", "name": c2_seat_name,
+                "lord": c2["name"], "owner": p_owner, "vassal_id": c2["id"],
+                "is_crown_demesne": False, "is_crown_fief": False, "level": 0, "max_unlocked_level": 0
+            }
+            c2["city_name"] = c2_seat_name
+            c2["tiles"] = c2_tiles
+
+            t_city2 = c2_free.pop(0)
+            sb_c2_c = f"settlement_{settlement_counter}"
+            settlement_counter += 1
+            target_state.settlements[t_city2] = {
+                "id": sb_c2_c, "province": pid, "type": "city", "name": f"{c2_lbl}'s Town",
+                "lord": c2["name"], "owner": p_owner, "vassal_id": c2["id"],
+                "is_crown_demesne": False, "is_crown_fief": False, "level": 0, "max_unlocked_level": 0
+            }
+
+            t_barr2 = c2_free.pop(0)
+            sb_c2_b = f"settlement_{settlement_counter}"
+            settlement_counter += 1
+            target_state.settlements[t_barr2] = {
+                "id": sb_c2_b, "province": pid, "type": "barrack", "name": f"{c2_lbl}'s Barracks",
+                "lord": c2["name"], "owner": p_owner, "vassal_id": c2["id"],
+                "is_crown_demesne": False, "is_crown_fief": False, "level": 0, "max_unlocked_level": 0
+            }
+
+        # 5. SUB-VASSAL 2 (BARON 2 under Count 2, 4 TILES)
+        if b2:
+            fid_b2 = f"fief_{fief_counter}"
+            fief_counter += 1
+            b2_lbl = b2["name"].split()[1] if len(b2["name"].split()) > 1 else b2["name"]
+            b2_fief_name = f"Barony of {b2_lbl}"
+            target_state.fiefs[fid_b2] = {
+                "id": fid_b2,
+                "province": pid,
+                "tiles": b2_tiles,
+                "name": b2_fief_name,
+                "holder": b2["name"],
+                "owner": p_owner,
+                "vassal_id": b2["id"],
+                "is_crown_demesne": False
+            }
+            b2_t_pick = random.choice(b2_tiles)
+            b2_seat = f"{b2_lbl}'s Castle"
+            sb_b2 = f"settlement_{settlement_counter}"
+            settlement_counter += 1
+            target_state.settlements[b2_t_pick] = {
+                "id": sb_b2, "province": pid, "type": "fort", "name": b2_seat,
+                "lord": b2["name"], "owner": p_owner, "vassal_id": b2["id"],
+                "is_crown_demesne": False, "is_crown_fief": False, "level": 0, "max_unlocked_level": 0
+            }
+            b2["city_name"] = b2_seat
+            b2["tiles"] = b2_tiles
+
     target_state.fief_id_counter = fief_counter + 100
     target_state.settlement_id_counter = settlement_counter + 100
 
-    # Refresh tax and levy contributions
     for plist in target_state.vassals.values():
         for v in plist:
             pid = v.get("province")
@@ -2604,10 +2439,8 @@ def setup_province_starter_cities(target_state):
             v["tax_contribution"] = st["tax_paid"]
             v["levy_contribution"] = st["levy_contribution"]
 
-    # Synchronize provincial holdings statistics immediately upon initialization
     from game.systems.economy import sync_province_holdings_stats
     sync_province_holdings_stats(target_state, is_init=True)
-
     standardize_enemy_ai_laws(target_state)
 
 def carve_new_fief(target_state, province_id):

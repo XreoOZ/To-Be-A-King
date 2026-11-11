@@ -30,7 +30,7 @@ from game.config import (
     COLOR_GOLD, COLOR_PRESTIGE, COLOR_PIETY, COLOR_TEXT_WHITE,
     COLOR_TEXT_MUTED, COLOR_TEXT_RED, COLOR_TEXT_GREEN, COLOR_BUTTON_NORMAL,
     COLOR_BUTTON_HOVER, COLOR_BUTTON_ACTIVE, COLOR_OCEAN, COLOR_WESSEX,
-    COLOR_DANELAW, BASE_TILE_W, BASE_TILE_H, VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y,
+    COLOR_DANELAW, BASE_TILE_W, BASE_TILE_H, VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y, MAP_CENTER_COL, MAP_CENTER_ROW,
     PANEL_L_X, PANEL_L_W, PANEL_R_X, PANEL_R_W, MAP_VIEWPORT_X, MAP_VIEWPORT_W, PANEL_Y, PANEL_H,
     maximize_window, get_fonts
 )
@@ -112,8 +112,8 @@ def run_game():
 
         curr_tile_w = max(18, int(BASE_TILE_W * state.zoom))
         curr_tile_h = max(16, int(BASE_TILE_H * state.zoom))
-        default_ox = VIEWPORT_CENTER_X - int(10 * curr_tile_w)
-        default_oy = VIEWPORT_CENTER_Y - int(13 * curr_tile_h)
+        default_ox = VIEWPORT_CENTER_X - int(MAP_CENTER_COL * curr_tile_w)
+        default_oy = VIEWPORT_CENTER_Y - int(MAP_CENTER_ROW * curr_tile_h)
         origin_x = default_ox + state.cam_pan_x
         origin_y = default_oy + state.cam_pan_y
 
@@ -156,8 +156,8 @@ def run_game():
                     if new_zoom != old_zoom:
                         old_tw = max(18, int(BASE_TILE_W * old_zoom))
                         old_th = max(16, int(BASE_TILE_H * old_zoom))
-                        old_ox = (VIEWPORT_CENTER_X - int(10 * old_tw)) + state.cam_pan_x
-                        old_oy = (VIEWPORT_CENTER_Y - int(13 * old_th)) + state.cam_pan_y
+                        old_ox = (VIEWPORT_CENTER_X - int(MAP_CENTER_COL * old_tw)) + state.cam_pan_x
+                        old_oy = (VIEWPORT_CENTER_Y - int(MAP_CENTER_ROW * old_th)) + state.cam_pan_y
                         
                         mx, my = mouse_pos
                         gc = (mx - old_ox) / old_tw
@@ -165,8 +165,8 @@ def run_game():
                         
                         new_tw = max(18, int(BASE_TILE_W * new_zoom))
                         new_th = max(16, int(BASE_TILE_H * new_zoom))
-                        new_def_x = VIEWPORT_CENTER_X - int(10 * new_tw)
-                        new_def_y = VIEWPORT_CENTER_Y - int(13 * new_th)
+                        new_def_x = VIEWPORT_CENTER_X - int(MAP_CENTER_COL * new_tw)
+                        new_def_y = VIEWPORT_CENTER_Y - int(MAP_CENTER_ROW * new_th)
                         
                         new_ox = mx - gc * new_tw
                         new_oy = my - gr * new_th

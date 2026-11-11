@@ -8,7 +8,7 @@ from game.config import (
     WINDOW_WIDTH, WINDOW_HEIGHT, COLOR_OCEAN, COLOR_PANEL_BORDER, COLOR_WESSEX,
     COLOR_DANELAW, COLOR_GOLD, COLOR_TEXT_WHITE, COLOR_TEXT_MUTED,
     COLOR_TEXT_RED, COLOR_TEXT_GREEN, BASE_TILE_W, BASE_TILE_H,
-    VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y,
+    VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y, MAP_CENTER_COL, MAP_CENTER_ROW,
     MAP_VIEWPORT_X, MAP_VIEWPORT_W, PANEL_Y, PANEL_H
 )
 from game.data.provinces import PROVINCES, PROVINCE_FACTION_COLORS
@@ -137,8 +137,8 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
 
     curr_tile_w = max(18, int(BASE_TILE_W * state.zoom))
     curr_tile_h = max(16, int(BASE_TILE_H * state.zoom))
-    default_ox = VIEWPORT_CENTER_X - int(10 * curr_tile_w)
-    default_oy = VIEWPORT_CENTER_Y - int(13 * curr_tile_h)
+    default_ox = VIEWPORT_CENTER_X - int(MAP_CENTER_COL * curr_tile_w)
+    default_oy = VIEWPORT_CENTER_Y - int(MAP_CENTER_ROW * curr_tile_h)
     origin_x = default_ox + state.cam_pan_x
     origin_y = default_oy + state.cam_pan_y
 
