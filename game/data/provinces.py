@@ -8,54 +8,66 @@ import math
 import heapq
 from collections import deque
 from game.config import DATA_DIR
-from game.data.characters import CHARACTERS, INITIAL_CHARACTERS
+from game.data.characters import CHARACTERS, INITIAL_CHARACTERS, get_color
 
 with open(os.path.join(DATA_DIR, "provinces.json"), "r", encoding="utf-8") as f:
     INITIAL_PROVINCES = json.load(f)
 
 PROVINCES = copy.deepcopy(INITIAL_PROVINCES)
-
-# Harmonic Provincial Color Palettes per Faction
-PROVINCE_FACTION_COLORS = {
-    # Holy Kingdom of Solaris (Humans) - Crimson & Gold
-    "char_human": {
-        pid: (200, 42, 45) for pid in PROVINCES
-    },
-    # Ironpeak Dominion (Dwarves) - Slate Steel & Bronze
-    "char_ironpeak": {
-        pid: (52, 72, 95) for pid in PROVINCES
-    },
-    # Sylvandell Sovereignty (Elves) - Deep Emerald & Jade
-    "char_sylvan": {
-        pid: (32, 100, 52) for pid in PROVINCES
-    }
+INITIAL_PROVINCE_COLORS = {
+    pid: list(p.get("color", (150, 150, 150))) for pid, p in INITIAL_PROVINCES.items()
 }
 
-# Apply harmonic colors to initial provinces
-for pid, p in PROVINCES.items():
-    if "color" in p:
-        p["color"] = list(p["color"])
-    else:
-        owner = p.get("owner", "char_human")
-        if owner in PROVINCE_FACTION_COLORS and pid in PROVINCE_FACTION_COLORS[owner]:
-            p["color"] = list(PROVINCE_FACTION_COLORS[owner][pid])
+# Faction color lookup is generated from CHARACTERS metadata, so adding a new
+# ruler to data/characters.json automatically gives them a map color.
+def build_province_faction_colors():
+    return {
+        cid: {pid: get_color(cid) for pid in PROVINCES}
+        for cid in CHARACTERS
+    }
+
+PROVINCE_FACTION_COLORS = build_province_faction_colors()
+
+def get_province_color(pid, default=(150, 150, 150)):
+    p = PROVINCES.get(pid, {})
+    owner = p.get("owner")
+    if owner in CHARACTERS and CHARACTERS[owner].get("color"):
+        return get_color(owner, default)
+    color = p.get("color", INITIAL_PROVINCE_COLORS.get(pid, default))
+    try:
+        return tuple(int(v) for v in color[:3])
+    except Exception:
+        return default
+
+def apply_faction_colors():
+    """Recolors all provinces according to their current owner's data color."""
+    for pid, p in PROVINCES.items():
+        owner = p.get("owner")
+        if owner in CHARACTERS:
+            p["color"] = list(get_province_color(pid))
+        elif "color" in p:
+            p["color"] = list(p["color"])
+        else:
+            p["color"] = list(INITIAL_PROVINCE_COLORS.get(pid, (150, 150, 150)))
+
+def refresh_province_faction_colors():
+    PROVINCE_FACTION_COLORS.clear()
+    PROVINCE_FACTION_COLORS.update(build_province_faction_colors())
+    apply_faction_colors()
+    return PROVINCE_FACTION_COLORS
 
 # Province Adjacency Graph from JSON neighbors
 ADJACENCY = {pid: list(p.get("neighbors", [])) for pid, p in PROVINCES.items()}
 
+apply_faction_colors()
+
 def reset_global_world_data():
-    """Restores PROVINCES and CHARACTERS dictionaries to pristine fantasy state."""
+    """Restores PROVINCES and CHARACTERS dictionaries to pristine scenario state."""
     CHARACTERS.clear()
     CHARACTERS.update(copy.deepcopy(INITIAL_CHARACTERS))
     PROVINCES.clear()
     PROVINCES.update(copy.deepcopy(INITIAL_PROVINCES))
-    for pid, p in PROVINCES.items():
-        if "color" in p:
-            p["color"] = list(p["color"])
-        else:
-            owner = p.get("owner", "char_human")
-            if owner in PROVINCE_FACTION_COLORS and pid in PROVINCE_FACTION_COLORS[owner]:
-                p["color"] = list(PROVINCE_FACTION_COLORS[owner][pid])
+    refresh_province_faction_colors()
 
 def build_dynamic_province_adjacency(cell_to_prov, max_reach=2, extra_connections=None):
     """

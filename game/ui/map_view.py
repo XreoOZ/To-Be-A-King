@@ -5,14 +5,14 @@ import math
 import random
 import pygame
 from game.config import (
-    WINDOW_WIDTH, WINDOW_HEIGHT, COLOR_OCEAN, COLOR_PANEL_BORDER, COLOR_WESSEX,
-    COLOR_DANELAW, COLOR_GOLD, COLOR_TEXT_WHITE, COLOR_TEXT_MUTED,
+    WINDOW_WIDTH, WINDOW_HEIGHT, COLOR_OCEAN, COLOR_PANEL_BORDER,
+    COLOR_GOLD, COLOR_TEXT_WHITE, COLOR_TEXT_MUTED,
     COLOR_TEXT_RED, COLOR_TEXT_GREEN, BASE_TILE_W, BASE_TILE_H,
-    VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y, MAP_CENTER_COL, MAP_CENTER_ROW,
+    VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y,
     MAP_VIEWPORT_X, MAP_VIEWPORT_W, PANEL_Y, PANEL_H
 )
-from game.data.provinces import PROVINCES, PROVINCE_FACTION_COLORS
-from game.data.characters import CHARACTERS
+from game.data.provinces import PROVINCES, PROVINCE_FACTION_COLORS, get_province_color
+from game.data.characters import CHARACTERS, get_color, get_short_name, get_display_name
 from game.data.buildings import BUILDING_SPECS
 from game.core.map import (
     prov_grid_centroids,
@@ -27,6 +27,69 @@ from game.core.assets import (
 from game.systems.economy import get_all_settlement_holdings, sync_province_holdings_stats
 from game.systems.military import is_province_contested
 
+
+_WAGON_SPRITE_CACHE = {}
+
+def get_supply_wagon_sprite(owner_id, is_player, facing_left, target_w=32, target_h=24):
+    key = (owner_id, is_player, facing_left, target_w, target_h)
+    if key in _WAGON_SPRITE_CACHE:
+        return _WAGON_SPRITE_CACHE[key]
+
+    w, h = 32, 24
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
+
+    # Faction colors derived from character data
+    if is_player:
+        col_accent = get_color(owner_id, (215, 45, 45))
+        col_trim = (245, 210, 60)        # Gold
+    else:
+        col_accent = get_color(owner_id, (100, 95, 110))
+        col_trim = (180, 180, 180)
+
+    col_wood = (125, 80, 40)
+    col_dark_wood = (80, 48, 22)
+    col_canopy = (235, 225, 205)
+    col_ox = (135, 90, 55)
+
+    # Draw Draft Beast in front (facing right by default)
+    # Beast body
+    pygame.draw.ellipse(surf, col_ox, (19, 10, 11, 7))
+    pygame.draw.ellipse(surf, (115, 75, 45), (25, 8, 6, 6))  # Head
+    pygame.draw.line(surf, (50, 30, 15), (22, 17), (22, 21), 2)  # Legs
+    pygame.draw.line(surf, (50, 30, 15), (27, 17), (27, 21), 2)
+
+    # Wagon Hitch / Shaft
+    pygame.draw.line(surf, (70, 45, 20), (14, 15), (20, 15), 2)
+
+    # Wagon Bed / Box
+    pygame.draw.rect(surf, col_wood, (2, 11, 15, 6))
+    pygame.draw.rect(surf, col_dark_wood, (2, 11, 15, 6), 1)
+
+    # Canvas Canopy (Arched)
+    pygame.draw.ellipse(surf, col_canopy, (2, 4, 15, 11))
+    # Faction decorative stripe on canopy
+    pygame.draw.line(surf, col_accent, (4, 9), (15, 9), 2)
+    pygame.draw.rect(surf, col_canopy, (2, 9, 15, 4))
+    pygame.draw.ellipse(surf, (195, 180, 155), (2, 4, 15, 11), 1)
+
+    # Spoked Wagon Wheels
+    # Rear Wheel
+    pygame.draw.circle(surf, col_dark_wood, (5, 18), 4)
+    pygame.draw.circle(surf, (160, 110, 60), (5, 18), 3)
+    pygame.draw.circle(surf, (50, 35, 20), (5, 18), 1)
+    # Front Wheel
+    pygame.draw.circle(surf, col_dark_wood, (14, 18), 4)
+    pygame.draw.circle(surf, (160, 110, 60), (14, 18), 3)
+    pygame.draw.circle(surf, (50, 35, 20), (14, 18), 1)
+
+    if facing_left:
+        surf = pygame.transform.flip(surf, True, False)
+
+    if target_w != 32 or target_h != 24:
+        surf = pygame.transform.smoothscale(surf, (target_w, target_h))
+
+    _WAGON_SPRITE_CACHE[key] = surf
+    return surf
 _HORSE_SPRITE_CACHE = {}
 
 def get_horse_courier_sprite(owner_id, is_player, facing_left, frame_idx, target_w=32, target_h=24):
@@ -47,22 +110,12 @@ def get_horse_courier_sprite(owner_id, is_player, facing_left, frame_idx, target
         if is_player:
             col_horse = (175, 125, 75)      # Chestnut
             col_mane = (75, 45, 20)
-            col_rider = (215, 45, 45)       # Crimson Solaris
+            col_rider = get_color(owner_id, (215, 45, 45))
             col_trim = (245, 210, 60)       # Gold
-        elif owner_id == "ruler_ironpeak":
-            col_horse = (130, 135, 145)     # Steel-grey
-            col_mane = (50, 55, 65)
-            col_rider = (45, 75, 115)       # Navy / Steel
-            col_trim = (190, 205, 225)      # Silver
-        elif owner_id == "ruler_sylvandell":
-            col_horse = (150, 115, 75)      # Bay
-            col_mane = (45, 65, 40)
-            col_rider = (35, 115, 60)       # Forest Green
-            col_trim = (215, 185, 95)       # Bronze
         else:
             col_horse = (140, 130, 120)
             col_mane = (60, 55, 50)
-            col_rider = (90, 85, 100)
+            col_rider = get_color(owner_id, (90, 85, 100))
             col_trim = (200, 200, 200)
 
         col_skin = (235, 190, 150)
@@ -137,8 +190,10 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
 
     curr_tile_w = max(18, int(BASE_TILE_W * state.zoom))
     curr_tile_h = max(16, int(BASE_TILE_H * state.zoom))
-    default_ox = VIEWPORT_CENTER_X - int(MAP_CENTER_COL * curr_tile_w)
-    default_oy = VIEWPORT_CENTER_Y - int(MAP_CENTER_ROW * curr_tile_h)
+    map_center_col = (len(raw_grid[0]) - 1) / 2 if raw_grid else 0
+    map_center_row = (len(raw_grid) - 1) / 2
+    default_ox = VIEWPORT_CENTER_X - int(map_center_col * curr_tile_w)
+    default_oy = VIEWPORT_CENTER_Y - int(map_center_row * curr_tile_h)
     origin_x = default_ox + state.cam_pan_x
     origin_y = default_oy + state.cam_pan_y
 
@@ -187,7 +242,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     
             prov_id  = cell_to_prov.get((c, r))
             prov_info = PROVINCES.get(prov_id)
-            owner = prov_info.get("owner", "char_human") if prov_info else "char_human"
+            owner = prov_info.get("owner") if prov_info else None
             col = PROVINCE_FACTION_COLORS.get(owner, {}).get(prov_id)
             if not col:
                 col = tuple(prov_info["color"]) if prov_info else (150, 150, 150)
@@ -201,11 +256,18 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     
             # Draw full tile (no 1-px gap → seamless within province)
             pygame.draw.rect(screen, col, (cell_x, cell_y, curr_tile_w, curr_tile_h))
+
+            # Vassal territory highlight (when hovering a vassal card in left panel)
+            if hasattr(state, 'hovered_vassal_tiles') and (c, r) in state.hovered_vassal_tiles:
+                hl_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
+                hl_surf.fill((255, 255, 100, 100))  # Bright yellow semi-transparent
+                screen.blit(hl_surf, (cell_x, cell_y))
+                pygame.draw.rect(screen, (255, 230, 50), (cell_x, cell_y, curr_tile_w, curr_tile_h), 2)
     
             # Contested Province Hatching (Diagonal Striped Hazard Pattern ala CK2)
             is_contested, occupier = is_province_contested(state, prov_id)
             if is_contested:
-                stripe_col = (220, 50, 50) if occupier == state.player_id else (45, 65, 95)
+                stripe_col = get_color(occupier, (220, 50, 50))
                 stripe_surf = pygame.Surface((curr_tile_w, curr_tile_h), pygame.SRCALPHA)
                 for off in range(-curr_tile_h, curr_tile_w + curr_tile_h, 8):
                     pygame.draw.line(stripe_surf, (*stripe_col, 140), (off, 0), (off + curr_tile_h, curr_tile_h), 2)
@@ -261,10 +323,13 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                                 f_edit["tiles"].append(t_coord)
                                 state.logs.append(f"Assigned unclaimed tile {t_coord} to {f_edit['name']} ({len(f_edit['tiles'])} tiles)!")
                 elif not state.build_mode:
-                    # CK2 style: Left-clicking a province inspects that province and unselects armies!
+                    # CK2 style: Left-clicking an empty tile inspects that province and unselects armies.
+                    # If this tile contains player armies, do NOT clear army selection so unit clicks work!
                     state.selected_province = prov_id
-                    state.selected_army_id = None
-                    state.selected_army_ids = []
+                    has_armies_here = any(a.owner == state.player_id and getattr(a, "tile", None) == (c, r) and a.troops > 0 for a in state.armies)
+                    if not has_armies_here:
+                        state.selected_army_id = None
+                        state.selected_army_ids = []
                     state.selected_settlement = None
                     state.selected_vassal_idx = None
                     state.fief_page = 0
@@ -561,11 +626,13 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                 mini_f = pygame.transform.smoothscale(occ_flag, (12, 14))
                 screen.blit(mini_f, (cx + cw - 12, cy - 8))
     
-        # Click city to inspect settlement details (only when not building or editing fiefs)!
-        if mouse_clicked and is_city_hover and not state.build_mode and not state.editing_fief_id:
+        # Click city to inspect settlement details (only when not building or editing fiefs and no army is clicked)!
+        has_armies_on_holding = any(a.owner == state.player_id and getattr(a, "tile", None) in h_tiles and a.troops > 0 for a in state.armies)
+        if mouse_clicked and is_city_hover and not state.build_mode and not state.editing_fief_id and not has_armies_on_holding:
             state.selected_settlement = h["primary_tile"]
             state.selected_province = h["province"]
             state.selected_army_id = None
+            state.selected_army_ids = []
     
     # -----------------------------------------------------------
     # PASS 4: Build Mode Hover & Placement Ghost (Modular Preview)
@@ -738,7 +805,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                 state.build_mode = False
     
     active_player_cap = state.get_realm_capital(state.player_id)
-    active_enemy_cap = state.get_realm_capital(state.enemy_id)
+    active_ai_caps = {state.get_realm_capital(cid) for cid in state.get_active_rulers(include_player=False)}
 
     # Province Name Labels (Medieval Plaque / Banner)
     for pid, (lx, ly) in province_anchors.items():
@@ -746,7 +813,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
         if p_data:
             short_name = p_data["name"].split()[0]
             is_player_cap = (pid == active_player_cap)
-            is_enemy_cap = (pid == active_enemy_cap)
+            is_enemy_cap = (pid in active_ai_caps)
             if is_player_cap or is_enemy_cap:
                 short_name = f"★ {short_name}"
 
@@ -881,177 +948,430 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                     pygame.draw.circle(screen, arrow_col, dst, 3)
     
     # ---------------------------------------------------------
-    # DRAW ARMIES ON MAP (Waving War Banners & Troop Standard)
+    # ---------------------------------------------------------
+    # DRAW ARMIES ON MAP (Waving War Banners & CK2 Unit Clusters)
     # ---------------------------------------------------------
     anim_ticks = pygame.time.get_ticks()
+    tile_scale = curr_tile_w / BASE_TILE_W
+    right_click_handled = False
+    menu_just_opened = False
 
-    
-    for army in state.armies:
+    # Partition armies: moving hosts vs stationary tile clusters
+    moving_armies = []
+    stationary_clusters = {}  # (tile, owner) -> list of armies
+
+    for a in state.armies:
+        if a.troops <= 0:
+            continue
+        if a.is_moving and not a.in_battle and getattr(a, "next_tile", None):
+            moving_armies.append(a)
+        else:
+            t = getattr(a, "tile", get_province_capital_tile(a.province))
+            stationary_clusters.setdefault((t, a.owner), []).append(a)
+
+    # 1. RENDER MOVING ARMIES (Smooth 60 FPS sub-day position interpolation)
+    for army in moving_armies:
         tc, tr = getattr(army, "tile", get_province_capital_tile(army.province))
-        cx = origin_x + (tc * curr_tile_w) + (curr_tile_w // 2)
-        cy = origin_y + (tr * curr_tile_h) + (curr_tile_h // 2)
-    
-        # If moving, interpolate position smoothly along route at 60 FPS
-        if army.is_moving and getattr(army, "next_tile", None) and not army.in_battle:
-            nc, nr = army.next_tile
-            nx = origin_x + (nc * curr_tile_w) + (curr_tile_w // 2)
-            ny = origin_y + (nr * curr_tile_h) + (curr_tile_h // 2)
-            # Smooth 60 FPS sub-day position interpolation
-            eff_prog = army.move_progress + (sub_day * getattr(army, "move_speed", 100.0))
-            pct = min(1.0, max(0.0, eff_prog / 100.0))
-            cx = int(cx + (nx - cx) * pct)
-            cy = int(cy + (ny - cy) * pct)
-    
+        cur_ax = origin_x + (tc * curr_tile_w) + (curr_tile_w // 2)
+        cur_ay = origin_y + (tr * curr_tile_h) + (curr_tile_h // 2)
+        nc, nr = army.next_tile
+        nx = origin_x + (nc * curr_tile_w) + (curr_tile_w // 2)
+        ny = origin_y + (nr * curr_tile_h) + (curr_tile_h // 2)
+        eff_prog = army.move_progress + (sub_day * getattr(army, "move_speed", 100.0))
+        pct = min(1.0, max(0.0, eff_prog / 100.0))
+        cx = int(cur_ax + (nx - cur_ax) * pct)
+        cy = int(cur_ay + (ny - cur_ay) * pct)
+
         is_player = (army.owner == state.player_id)
-        is_sel_army = (army.id == state.selected_army_id or army.id in state.selected_army_ids)
-    
-        # Current tile scale relative to base tile size (tracks camera zoom perfectly!)
-        tile_scale = curr_tile_w / BASE_TILE_W
-    
-        # RTS Golden Ground Selection Ring (scaled to 1.4 tiles)
-        if is_sel_army:
+        is_sel = (army.id == state.selected_army_id or army.id in getattr(state, "selected_army_ids", []))
+
+        if is_sel:
             ring_w = int(curr_tile_w * 1.4)
             ring_h = int(curr_tile_h * 0.42)
             sel_surf = pygame.Surface((ring_w, ring_h), pygame.SRCALPHA)
             pygame.draw.ellipse(sel_surf, (240, 195, 50, 190), (0, 0, ring_w, ring_h), 2)
             screen.blit(sel_surf, (cx - ring_w // 2, cy - ring_h // 2))
-    
-        # -------------------------------------------------------------
-        # STANDARDIZED 2-TILE BANNER HIERARCHY:
-        # Entire unit cluster is dynamically scaled to fit within ~2 tiles width
-        # across all zoom levels, keeping all standards visible and proportional.
-        # -------------------------------------------------------------
-        n_sub = len(army.sub_flags)
-    
-        # Main banner dimensions
-        if n_sub == 0:
-            cw_main = max(16, int(26 * tile_scale))
-            ch_main = max(11, int(18 * tile_scale))
-            pole_h_main = max(22, int(34 * tile_scale))
-        else:
-            cw_main = max(15, int(22 * tile_scale))
-            ch_main = max(10, int(15 * tile_scale))
-            pole_h_main = max(20, int(30 * tile_scale))
-    
-        # Sub-banner dimensions (scaled slightly if army has many merged contingents)
-        if n_sub <= 2:
-            sub_factor = 1.0
-        else:
-            sub_factor = max(0.68, 1.0 - (n_sub - 2) * 0.05)
-    
-        cw_sub = max(9, int(14 * tile_scale * sub_factor))
-        ch_sub = max(6, int(10 * tile_scale * sub_factor))
-        pole_h_sub = max(13, int(20 * tile_scale * sub_factor))
-    
-        banner_draw_queue = []
-        # Grand standard in center (dy = 0)
-        banner_draw_queue.append((0, True, army.flag_origin, cx, cy, 0, cw_main, ch_main, pole_h_main))
-    
-        # Sub contingents encircling the grand standard within the 2-tile footprint
-        for idx, sf in enumerate(army.sub_flags):
-            side = -1 if (idx % 2 == 0) else 1
-            rank = idx // 2
-            
-            if rank == 0:
-                dx = int(side * curr_tile_w * 0.28)
-                dy = int(2 * tile_scale)
-            elif rank == 1:
-                dx = int(side * curr_tile_w * 0.52)
-                dy = int(-3 * tile_scale)
-            elif rank == 2:
-                dx = int(side * curr_tile_w * 0.70)
-                dy = int(1 * tile_scale)
-            elif rank == 3:
-                dx = int(side * curr_tile_w * 0.38)
-                dy = int(-8 * tile_scale)
-            else:
-                dx = int(side * curr_tile_w * (0.50 + (rank % 3) * 0.12))
-                dy = int(-6 * tile_scale)
-    
-            banner_draw_queue.append((dy, False, sf, cx + dx, cy + dy, (idx + 1) * 750, cw_sub, ch_sub, pole_h_sub))
-    
-        # Sort by depth so background banners render behind foreground banners
-        banner_draw_queue.sort(key=lambda b: b[0])
-    
-        for dy, is_main, f_id, px, py, t_off, b_cw, b_ch, b_ph in banner_draw_queue:
-            c_surf = get_scaled_banner_cloth(f_id, b_cw, b_ch, is_large=is_main)
-            draw_waving_banner(screen, c_surf, px, py, pole_h=b_ph, ticks=anim_ticks + t_off, amp=max(1.2, (3.0 if is_main else 1.8) * (b_cw / 30.0)), freq=0.25 if is_main else 0.30, is_main=is_main)
-    
-        # -------------------------------------------------------------
-        # Sleek Troop Count Pill Under Standard Base (No Clunky Red Box)
-        # -------------------------------------------------------------
+
+        cw_main = max(16, int(24 * tile_scale))
+        ch_main = max(11, int(17 * tile_scale))
+        pole_h_main = max(22, int(32 * tile_scale))
+
+        c_surf = get_scaled_banner_cloth(army.flag_origin, cw_main, ch_main, is_large=True)
+        draw_waving_banner(screen, c_surf, cx, cy, pole_h=pole_h_main, ticks=anim_ticks, amp=max(1.2, 3.0 * (cw_main / 30.0)), freq=0.25, is_main=True)
+
         txt_badge = f"{army.troops:,}"
-        if army.in_battle:
-            txt_badge = f"⚔ {army.troops:,}"
-            p_bg = (185, 35, 35)
-            p_border = (255, 220, 50)
-        elif army.courier_en_route:
-            txt_badge = f"✉ Summons ({army.courier_days_left}d)"
-            p_bg = (55, 42, 18)
-            p_border = (245, 205, 70)
-        elif army.is_mustering:
-            txt_badge = f" {army.muster_days}d ({army.troops:,})"
-            p_bg = (65, 52, 20)
-            p_border = COLOR_GOLD
+        if getattr(army, "is_starving", False):
+            txt_badge = f"☠ STARVING ({army.troops:,})"
+            p_bg = (165, 22, 22); p_border = (255, 65, 65)
         elif army.is_demobilizing:
             txt_badge = f"◆ HOME ({army.troops:,})"
-            p_bg = (30, 48, 70)
-            p_border = (120, 180, 240)
-        elif getattr(army, "siege_prep_days", 0) > 0:
-            txt_badge = f"⛺ Prep {army.siege_prep_days}d"
-            p_bg = (140, 75, 20)
-            p_border = (255, 200, 70)
-        elif getattr(army, "siege_packup_days", 0) > 0:
-            txt_badge = f"⛺ Pack {army.siege_packup_days}d"
-            p_bg = (110, 50, 20)
-            p_border = (220, 140, 50)
-        elif army.is_sieging:
-            if army.siege_target_name:
-                clean_name = army.siege_target_name
-                for pfx in ["Royal City of ", "Royal Citadel of ", "Royal Castle of ", "Royal Borough of ", "Royal "]:
-                    clean_name = clean_name.replace(pfx, "")
-                t_str = clean_name[:12]
-            else:
-                t_str = "City"
-            txt_badge = f"⚑ {army.siege_progress}% {t_str}"
-            p_bg = (155, 85, 25)
-            p_border = COLOR_GOLD
-        elif is_sel_army:
-            p_bg = (175, 30, 30) if is_player else (35, 55, 95)
-            p_border = COLOR_GOLD
+            p_bg = (30, 48, 70); p_border = (120, 180, 240)
+        elif getattr(army, "is_expeditionary", False):
+            txt_badge = f"🏕 {army.troops:,} (Exped)"
+            p_bg = (55, 42, 20); p_border = (245, 185, 55)
+        elif is_sel:
+            p_bg = (175, 30, 30) if is_player else (35, 55, 95); p_border = COLOR_GOLD
         else:
-            p_bg = (24, 28, 38)
-            p_border = (165, 45, 45) if is_player else (65, 95, 145)
-    
-        lbl = font_xs.render(txt_badge, True, COLOR_TEXT_WHITE if not is_sel_army else (255, 235, 140))
+            p_bg = (24, 28, 38); p_border = (165, 45, 45) if is_player else (65, 95, 145)
+
+        lbl = font_xs.render(txt_badge, True, COLOR_TEXT_WHITE if not is_sel else (255, 235, 140))
         tw = lbl.get_width()
         pw = max(int(36 * tile_scale), tw + 8)
         ph = 16
         px_pill = cx - pw // 2
         py_pill = cy + max(2, int(4 * tile_scale))
-    
+
         pill_surf = pygame.Surface((pw, ph), pygame.SRCALPHA)
         pill_surf.fill((*p_bg, 225))
-        pygame.draw.rect(pill_surf, p_border, (0, 0, pw, ph), 2 if is_sel_army else 1, border_radius=4)
+        pygame.draw.rect(pill_surf, p_border, (0, 0, pw, ph), 2 if is_sel else 1, border_radius=4)
         screen.blit(pill_surf, (px_pill, py_pill))
         screen.blit(lbl, (px_pill + (pw - tw) // 2, py_pill + 1))
-    
-        # Hitbox covering all banners + pill for natural mouse selection
+
+        hit_rect = pygame.Rect(min(cx - 2, px_pill) - 4, cy - pole_h_main - 6, max(cw_main + 4, pw) + 8, (py_pill + ph + 4) - (cy - pole_h_main - 6))
+        is_hov = hit_rect.collidepoint(mouse_pos)
+        if mouse_clicked and is_hov:
+            state.selected_army_id = army.id
+            state.selected_army_ids = [army.id]
+            state.selected_province = army.province
+        if right_clicked and is_hov and is_player:
+            right_click_handled = True
+            state.selected_army_id = army.id
+            state.selected_army_ids = [army.id]
+            state.selected_province = army.province
+            state.siege_context_menu = {
+                "tile": (tc, tr),
+                "pos": mouse_pos,
+                "name": army.name,
+                "is_hostile_holding": False,
+                "armies": [army.id]
+            }
+            menu_just_opened = True
+
+    # 2. RENDER STATIONARY TILE CLUSTERS (CK2 Multi-Army Stacking & Visual Mini-Banners)
+    for (tile, owner), cluster in stationary_clusters.items():
+        tc, tr = tile
+        cx = origin_x + (tc * curr_tile_w) + (curr_tile_w // 2)
+        cy = origin_y + (tr * curr_tile_h) + (curr_tile_h // 2)
+        is_player = (owner == state.player_id)
+        is_sel_cluster = any(a.id == state.selected_army_id or a.id in getattr(state, "selected_army_ids", []) for a in cluster)
+
+        if is_sel_cluster:
+            ring_w = int(curr_tile_w * 1.4)
+            ring_h = int(curr_tile_h * 0.42)
+            sel_surf = pygame.Surface((ring_w, ring_h), pygame.SRCALPHA)
+            pygame.draw.ellipse(sel_surf, (240, 195, 50, 190), (0, 0, ring_w, ring_h), 2)
+            screen.blit(sel_surf, (cx - ring_w // 2, cy - ring_h // 2))
+
+        n_hosts = len(cluster)
+        total_troops = sum(a.troops for a in cluster)
+
+        # Pick primary host: currently selected host, or host with largest army
+        primary_army = next((a for a in cluster if a.id == state.selected_army_id or a.id in getattr(state, "selected_army_ids", [])), None)
+        if not primary_army:
+            primary_army = max(cluster, key=lambda a: a.troops)
+        other_armies = [a for a in cluster if a != primary_army]
+
+        # Standard size for primary grand standard
+        cw_main = max(16, int(24 * tile_scale))
+        ch_main = max(11, int(17 * tile_scale))
+        pole_h_main = max(22, int(32 * tile_scale))
+
+        # Compact size for surrounding mini-banners (scaled down to ~55-60%)
+        cw_mini = max(9, int(13 * tile_scale))
+        ch_mini = max(6, int(9 * tile_scale))
+        pole_h_mini = max(13, int(19 * tile_scale))
+
+        banner_draw_queue = []
+        if n_hosts == 2:
+            # 2 Armies: Display TWO full side-by-side banners so both are prominent and clickable!
+            a_left, a_right = cluster[0], cluster[1]
+            dx_step = max(14, int(16 * tile_scale))
+            banner_draw_queue.append((0, True, a_left.flag_origin, cx - dx_step, cy, 0, cw_main, ch_main, pole_h_main, a_left))
+            banner_draw_queue.append((0, True, a_right.flag_origin, cx + dx_step, cy, 650, cw_main, ch_main, pole_h_main, a_right))
+        elif n_hosts == 3:
+            # 3 Armies: Display THREE distinct banners side-by-side
+            dx_step = max(11, int(14 * tile_scale))
+            banner_draw_queue.append((-1, True, cluster[0].flag_origin, cx - dx_step, cy - 2, 0, cw_main, ch_main, pole_h_main, cluster[0]))
+            banner_draw_queue.append((0, True, cluster[1].flag_origin, cx, cy, 650, cw_main, ch_main, pole_h_main, cluster[1]))
+            banner_draw_queue.append((1, True, cluster[2].flag_origin, cx + dx_step, cy - 2, 1300, cw_main, ch_main, pole_h_main, cluster[2]))
+        else:
+            # 1 or >3 Armies: Primary in center, surrounding mini-banners around
+            banner_draw_queue.append((0, True, primary_army.flag_origin, cx, cy, 0, cw_main, ch_main, pole_h_main, primary_army))
+            max_spread = min(int(curr_tile_w * 0.40), max(16, int(26 * tile_scale)))
+            for idx, o_army in enumerate(other_armies):
+                side = -1 if (idx % 2 == 0) else 1
+                rank = idx // 2
+                dx = int(side * min(max_spread, (rank + 1) * 6 * tile_scale))
+                dy = int(((idx % 3) - 1) * 3 * tile_scale)
+                t_off = (idx + 1) * 650
+                banner_draw_queue.append((dy, False, o_army.flag_origin, cx + dx, cy + dy, t_off, cw_mini, ch_mini, pole_h_mini, o_army))
+
+            # If primary army has merged sub_flags, also display them compactly
+            for idx, sf in enumerate(getattr(primary_army, "sub_flags", [])):
+                side = 1 if (idx % 2 == 0) else -1
+                rank = (idx // 2) + 1
+                dx = int(side * min(max_spread, (rank + 1) * 6 * tile_scale))
+                dy = int(-4 * tile_scale)
+                t_off = (idx + 5) * 500
+                banner_draw_queue.append((dy, False, sf, cx + dx, cy + dy, t_off, cw_mini, ch_mini, pole_h_mini, primary_army))
+
+        # Sort banners by depth (back to front)
+        banner_draw_queue.sort(key=lambda b: b[0])
+
+        banner_clicked = False
+        for dy, is_main, f_id, px, py, t_off, b_cw, b_ch, b_ph, b_army in banner_draw_queue:
+            c_surf = get_scaled_banner_cloth(f_id, b_cw, b_ch, is_large=is_main)
+            draw_waving_banner(screen, c_surf, px, py, pole_h=b_ph, ticks=anim_ticks + t_off, amp=max(1.2, (3.0 if is_main else 1.8) * (b_cw / 30.0)), freq=0.25 if is_main else 0.30, is_main=is_main)
+
+            # Highlight selected army banner with a golden base ring and pole star!
+            cur_sel = getattr(state, "selected_army_ids", [])
+            is_this_sel = (b_army.id in cur_sel) or (b_army.id == state.selected_army_id and len(cur_sel) <= 1)
+            if is_this_sel and b_army.owner == state.player_id:
+                rw = max(18, int(b_cw * 1.3))
+                rh = max(8, int(b_ph * 0.32))
+                r_surf = pygame.Surface((rw, rh), pygame.SRCALPHA)
+                pygame.draw.ellipse(r_surf, (255, 215, 50, 210), (0, 0, rw, rh), 2)
+                screen.blit(r_surf, (px - rw // 2, py - rh // 2))
+                star_lbl = font_xs.render("★", True, COLOR_GOLD)
+                screen.blit(star_lbl, (px - star_lbl.get_width() // 2, py - b_ph - 14))
+
+            # Direct click on individual banner selects THAT specific army!
+            b_flag_rect = pygame.Rect(px - 3, py - b_ph - 4, b_cw + 6, b_ph + 6)
+            if mouse_clicked and b_flag_rect.collidepoint(mouse_pos) and b_army.owner == state.player_id and not banner_clicked:
+                state.selected_army_id = b_army.id
+                state.selected_army_ids = [b_army.id]
+                state.selected_province = b_army.province
+                state.selected_settlement = None
+                banner_clicked = True
+
+        # -------------------------------------------------------------
+        # UNIFIED CK2 TROOP COUNT PILL BADGE:
+        # '(unit count) total men' format (e.g. '(11) 3,248 Men')
+        # -------------------------------------------------------------
+        any_battle = any(a.in_battle for a in cluster)
+        any_starving = any(getattr(a, "is_starving", False) for a in cluster)
+        any_sieging = any(a.is_sieging for a in cluster)
+        any_exped = any(getattr(a, "is_expeditionary", False) for a in cluster)
+        any_mustering = any(a.is_mustering for a in cluster)
+        any_demobilizing = any(a.is_demobilizing for a in cluster)
+
+        if n_hosts > 1:
+            # Multi-army stack format
+            if any_battle:
+                txt_badge = f"⚔ ({n_hosts}) {total_troops:,} Men"
+                p_bg = (185, 35, 35); p_border = (255, 220, 50)
+            elif any_starving:
+                txt_badge = f"☠ STARVING ({n_hosts}) {total_troops:,} Men"
+                p_bg = (165, 22, 22); p_border = (255, 65, 65)
+            elif any_sieging:
+                s_prog = max(getattr(a, "siege_progress", 0) for a in cluster)
+                txt_badge = f"⚑ {s_prog}% ({n_hosts}) {total_troops:,} Men"
+                p_bg = (155, 85, 25); p_border = COLOR_GOLD
+            elif any_exped:
+                txt_badge = f"🏕 ({n_hosts}) {total_troops:,} Men"
+                p_bg = (55, 42, 20); p_border = (245, 185, 55)
+            elif any_mustering:
+                txt_badge = f"⛺ ({n_hosts}) {total_troops:,} Men"
+                p_bg = (65, 52, 20); p_border = COLOR_GOLD
+            elif any_demobilizing:
+                txt_badge = f"◆ HOME ({n_hosts}) {total_troops:,} Men"
+                p_bg = (30, 48, 70); p_border = (120, 180, 240)
+            elif is_sel_cluster:
+                cur_ids = getattr(state, "selected_army_ids", [])
+                p_hosts = [a for a in cluster if a.owner == state.player_id]
+                if len(cur_ids) == 1 and cur_ids[0] in [a.id for a in p_hosts]:
+                    sel_h = next(a for a in p_hosts if a.id == cur_ids[0])
+                    idx_h = p_hosts.index(sel_h) + 1
+                    txt_badge = f"★ [{idx_h}/{n_hosts}] {sel_h.name[:12]}: {sel_h.troops:,}"
+                elif len(cur_ids) == len(p_hosts) and len(p_hosts) > 1:
+                    txt_badge = f"★ ALL ({n_hosts}) {total_troops:,} Men"
+                else:
+                    txt_badge = f"({n_hosts}) {total_troops:,} Men"
+                p_bg = (175, 30, 30) if is_player else (35, 55, 95); p_border = COLOR_GOLD
+            else:
+                txt_badge = f"({n_hosts}) {total_troops:,} Men"
+                p_bg = (24, 28, 38); p_border = (165, 45, 45) if is_player else (65, 95, 145)
+        else:
+            # Single army format
+            a_single = cluster[0]
+            if a_single.in_battle:
+                txt_badge = f"⚔ {a_single.troops:,}"
+                p_bg = (185, 35, 35); p_border = (255, 220, 50)
+            elif getattr(a_single, "is_starving", False):
+                txt_badge = f"☠ STARVING ({a_single.troops:,}) -5/d"
+                p_bg = (165, 22, 22); p_border = (255, 65, 65)
+            elif a_single.courier_en_route:
+                txt_badge = f"✉ Summons ({a_single.courier_days_left}d)"
+                p_bg = (55, 42, 18); p_border = (245, 205, 70)
+            elif a_single.is_mustering:
+                txt_badge = f" {a_single.muster_days}d ({a_single.troops:,})"
+                p_bg = (65, 52, 20); p_border = COLOR_GOLD
+            elif a_single.is_demobilizing:
+                txt_badge = f"◆ HOME ({a_single.troops:,})"
+                p_bg = (30, 48, 70); p_border = (120, 180, 240)
+            elif getattr(a_single, "siege_prep_days", 0) > 0:
+                txt_badge = f"⛺ Prep {a_single.siege_prep_days}d"
+                p_bg = (140, 75, 20); p_border = (255, 200, 70)
+            elif getattr(a_single, "siege_packup_days", 0) > 0:
+                txt_badge = f"⛺ Pack {a_single.siege_packup_days}d"
+                p_bg = (110, 50, 20); p_border = (220, 140, 50)
+            elif a_single.is_sieging:
+                clean_name = a_single.siege_target_name or "City"
+                for pfx in ["Royal City of ", "Royal Citadel of ", "Royal Castle of ", "Royal Borough of ", "Royal "]:
+                    clean_name = clean_name.replace(pfx, "")
+                txt_badge = f"⚑ {a_single.siege_progress}% {clean_name[:12]}"
+                p_bg = (155, 85, 25); p_border = COLOR_GOLD
+            elif getattr(a_single, "is_expeditionary", False):
+                txt_badge = f"🏕 {a_single.troops:,} (Exped)"
+                p_bg = (55, 42, 20); p_border = (245, 185, 55)
+            elif is_sel_cluster:
+                txt_badge = f"{a_single.troops:,}"
+                p_bg = (175, 30, 30) if is_player else (35, 55, 95); p_border = COLOR_GOLD
+            else:
+                txt_badge = f"{a_single.troops:,}"
+                p_bg = (24, 28, 38); p_border = (165, 45, 45) if is_player else (65, 95, 145)
+
+        lbl = font_xs.render(txt_badge, True, COLOR_TEXT_WHITE if not is_sel_cluster else (255, 235, 140))
+        tw = lbl.get_width()
+        pw = max(int(36 * tile_scale), tw + 10)
+        ph = 17
+        px_pill = cx - pw // 2
+        py_pill = cy + max(2, int(4 * tile_scale))
+
+        pill_surf = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        pill_surf.fill((*p_bg, 225))
+        pygame.draw.rect(pill_surf, p_border, (0, 0, pw, ph), 2 if is_sel_cluster else 1, border_radius=4)
+        screen.blit(pill_surf, (px_pill, py_pill))
+        screen.blit(lbl, (px_pill + (pw - tw) // 2, py_pill + 1))
+
+        # Unified Hitbox covering all cluster banners + count pill
         all_x = [cx, cx + cw_main, px_pill, px_pill + pw]
-        for dy_val, is_m, sf, b_px, b_py, t_off, b_cw, b_ch, b_ph in banner_draw_queue:
+        for dy_val, is_m, sf, b_px, b_py, t_off, b_cw, b_ch, b_ph, *extra in banner_draw_queue:
             all_x.extend([b_px - 2, b_px + b_cw + 2])
         min_x = min(all_x) - 4
         max_x = max(all_x) + 4
         hit_rect = pygame.Rect(min_x, cy - pole_h_main - 6, max_x - min_x, (py_pill + ph + 4) - (cy - pole_h_main - 6))
-    
-        is_badge_hover = hit_rect.collidepoint(mouse_pos)
-    
-        # Click banner or count pill to select army
-        if mouse_clicked and is_badge_hover:
-            state.selected_army_id = army.id
-            state.selected_province = army.province
-    
-    # -------------------------------------------------------------
+
+        # Compute clicked tile to ensure clicks on adjacent tiles never get falsely intercepted
+        mx_cur, my_cur = mouse_pos
+        c_col = int((mx_cur - origin_x) // curr_tile_w)
+        c_row = int((my_cur - origin_y) // curr_tile_h)
+        pill_rect = pygame.Rect(px_pill, py_pill, pw, ph)
+        is_badge_hover = (hit_rect.collidepoint(mouse_pos) or pill_rect.collidepoint(mouse_pos)) and ((c_col, c_row) == tile)
+
+        # Left Click: Cycle through individual armies in cluster (Host 1 -> Host 2 -> ALL -> Host 1)
+        if mouse_clicked and is_badge_hover and not banner_clicked:
+            p_hosts = [a for a in cluster if a.owner == state.player_id]
+            if len(p_hosts) > 1:
+                cur_sel_ids = getattr(state, "selected_army_ids", [])
+                if len(cur_sel_ids) == 1 and cur_sel_ids[0] in [a.id for a in p_hosts]:
+                    cur_idx = [a.id for a in p_hosts].index(cur_sel_ids[0])
+                    if cur_idx + 1 < len(p_hosts):
+                        next_army = p_hosts[cur_idx + 1]
+                        state.selected_army_id = next_army.id
+                        state.selected_army_ids = [next_army.id]
+                    else:
+                        # Reached end of single armies -> select ALL
+                        state.selected_army_id = p_hosts[0].id
+                        state.selected_army_ids = [a.id for a in p_hosts]
+                elif len(cur_sel_ids) == len(p_hosts):
+                    # Currently ALL selected -> cycle back to first single army
+                    next_army = p_hosts[0]
+                    state.selected_army_id = next_army.id
+                    state.selected_army_ids = [next_army.id]
+                else:
+                    # None or other -> select first single army
+                    next_army = p_hosts[0]
+                    state.selected_army_id = next_army.id
+                    state.selected_army_ids = [next_army.id]
+                sel_obj = next((a for a in cluster if a.id == state.selected_army_id), None)
+                if sel_obj:
+                    state.selected_province = sel_obj.province
+                state.selected_settlement = None
+            elif p_hosts:
+                state.selected_army_id = p_hosts[0].id
+                state.selected_army_ids = [p_hosts[0].id]
+                state.selected_province = p_hosts[0].province
+                state.selected_settlement = None
+
+        # Right Click on cluster: Open Tactical Context Menu immediately (1-Click Guarantee!)
+        if right_clicked and is_badge_hover and is_player:
+            right_click_handled = True
+            if len(getattr(state, "selected_army_ids", [])) != 1:
+                state.selected_army_id = primary_army.id
+                state.selected_army_ids = [a.id for a in cluster if a.owner == state.player_id]
+            state.selected_province = primary_army.province
+            state.selected_settlement = None
+
+            settlement = state.settlements.get(tile)
+            target_prov_id = cell_to_prov.get(tile)
+            prov = PROVINCES.get(target_prov_id)
+            is_hostile_holding = False
+            if settlement and prov:
+                occ = settlement.get("occupied_by")
+                if state.are_hostile(state.player_id, prov["owner"]):
+                    if occ != state.player_id:
+                        is_hostile_holding = True
+                elif occ is not None and state.are_hostile(state.player_id, occ):
+                    is_hostile_holding = True
+
+            state.siege_context_menu = {
+                "tile": tile,
+                "pos": mouse_pos,
+                "name": settlement.get("name", primary_army.name) if settlement else primary_army.name,
+                "is_hostile_holding": is_hostile_holding,
+                "armies": [a.id for a in cluster if a.owner == state.player_id]
+            }
+            menu_just_opened = True
+
+    # 3. DIRECT MAP RIGHT-CLICK DISPATCHER (1-Click Responsive Orders Anywhere on Map)
+    if right_clicked and not right_click_handled and map_bg_rect.collidepoint(mouse_pos):
+        # Check if clicking inside open context menu
+        ctx_menu = getattr(state, "siege_context_menu", None)
+        # Determine clicked tile
+        mx, my = mouse_pos
+        col_idx = int((mx - origin_x) // curr_tile_w)
+        row_idx = int((my - origin_y) // curr_tile_h)
+        click_tile = (col_idx, row_idx)
+
+        armies_to_order = []
+        if getattr(state, "selected_army_ids", None):
+            armies_to_order = [a for a in state.armies if a.id in state.selected_army_ids and a.owner == state.player_id and a.troops > 0]
+        elif getattr(state, "selected_army_id", None):
+            s_single = next((a for a in state.armies if a.id == state.selected_army_id and a.owner == state.player_id and a.troops > 0), None)
+            if s_single:
+                armies_to_order = [s_single]
+
+        if armies_to_order and click_tile in cell_to_prov:
+            is_standing_on = any(getattr(a, "tile", None) == click_tile for a in armies_to_order)
+            settlement = state.settlements.get(click_tile)
+            target_prov_id = cell_to_prov.get(click_tile)
+            prov = PROVINCES.get(target_prov_id)
+            is_hostile_holding = False
+            if settlement and prov:
+                occ = settlement.get("occupied_by")
+                if state.are_hostile(state.player_id, prov["owner"]):
+                    if occ != state.player_id:
+                        is_hostile_holding = True
+                elif occ is not None and state.are_hostile(state.player_id, occ):
+                    is_hostile_holding = True
+
+            if is_standing_on:
+                # Right-clicked directly on the city/camp where armies are standing: open tactical context menu instantly!
+                state.siege_context_menu = {
+                    "tile": click_tile,
+                    "pos": (mx, my),
+                    "name": settlement.get("name", "Host Camp") if settlement else "Host Camp",
+                    "is_hostile_holding": is_hostile_holding,
+                    "armies": [a.id for a in armies_to_order]
+                }
+                menu_just_opened = True
+            else:
+                # March order: Move directly to target tile (NO POPUP!)
+                state.siege_context_menu = None
+                for a_obj in armies_to_order:
+                    state.order_army_march_to_tile(a_obj, click_tile)
+
     # DRAW TRAVELLING ROYAL COURIERS (Riders Galloping Between Shires)
     # -------------------------------------------------------------
     anim_ticks = pygame.time.get_ticks()
@@ -1065,18 +1385,41 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     stagger_step = max(3, int(6 * tile_scale))
 
     for army in state.armies:
-        if army.courier_en_route and army.courier_current_prov and army.courier_next_prov:
-            c_pos = province_anchors.get(army.courier_current_prov)
-            n_pos = province_anchors.get(army.courier_next_prov)
-            dest_pos = province_anchors.get(army.province)
-            if c_pos and n_pos:
-                # 60 FPS continuous sub-day courier gliding
+        if army.courier_en_route:
+            mx, my = None, None
+            dest_pos = None
+            facing_left = False
+            is_player = (army.owner == state.player_id)
+
+            if getattr(army, "courier_tile_path", None):
+                cap_pid = state.get_realm_capital(army.owner)
+                cur_t = getattr(army, "courier_tile", None) or PROV_CAPITAL_TILES.get(cap_pid, (4, 8))
+                next_t = army.courier_tile_path[0] if army.courier_tile_path else army.tile
+                from game.config import DAYS_PER_TILE
+                courier_step = 100.0 / max(1.0, float(DAYS_PER_TILE))
+                eff_c_prog = army.courier_progress + (sub_day * courier_step)
+                pct = min(1.0, max(0.0, eff_c_prog / 100.0))
+                col_f = cur_t[0] + (next_t[0] - cur_t[0]) * pct
+                row_f = cur_t[1] + (next_t[1] - cur_t[1]) * pct
+                base_x = origin_x + col_f * curr_tile_w + curr_tile_w / 2
+                base_y = origin_y + row_f * curr_tile_h + curr_tile_h / 2
+                dest_pos = (int(origin_x + army.tile[0] * curr_tile_w + curr_tile_w / 2), int(origin_y + army.tile[1] * curr_tile_h + curr_tile_h / 2))
+                mx = int(base_x)
+                my = int(base_y)
+                facing_left = (next_t[0] < cur_t[0])
+            elif army.courier_current_prov and army.courier_next_prov:
+                c_pos = province_anchors.get(army.courier_current_prov)
+                n_pos = province_anchors.get(army.courier_next_prov)
+                dest_pos = province_anchors.get(army.province)
+                if not (c_pos and n_pos):
+                    continue
                 from game.config import DAYS_PER_TILE
                 courier_step = 100.0 / max(1.0, float(DAYS_PER_TILE))
                 eff_c_prog = army.courier_progress + (sub_day * courier_step)
                 pct = min(1.0, max(0.0, eff_c_prog / 100.0))
                 base_x = c_pos[0] + (n_pos[0] - c_pos[0]) * pct
                 base_y = c_pos[1] + (n_pos[1] - c_pos[1]) * pct
+                facing_left = (n_pos[0] < c_pos[0])
 
                 # Spread multiple riders sharing the same path side-by-side cleanly
                 hop_key = (army.courier_current_prov, army.courier_next_prov)
@@ -1099,9 +1442,7 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
                     mx = int(base_x)
                     my = int(base_y)
 
-                is_player = (army.owner == state.player_id)
-                facing_left = (n_pos[0] < c_pos[0])
-
+            if mx is not None and my is not None:
                 # Subtle dotted/thin guide line connecting courier to destination
                 if dest_pos:
                     guide_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
@@ -1130,6 +1471,55 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     
     # (No hard victory / defeat banners: dynamic feudal subjugation replaces game over)
     
+    # -------------------------------------------------------------
+    # DRAW SUPPLY WAGONS (Logistics Convoys Rolling to Frontlines)
+    # -------------------------------------------------------------
+    ww = max(18, int(30 * tile_scale))
+    wh = max(12, int(20 * tile_scale))
+
+    for wagon in getattr(state, "supply_wagons", []):
+        next_t = wagon.tile_path[0] if wagon.tile_path else wagon.tile
+        cur_t = wagon.tile
+        pct = min(1.0, max(0.0, wagon.move_progress / 100.0))
+
+        col_f = cur_t[0] + (next_t[0] - cur_t[0]) * pct
+        row_f = cur_t[1] + (next_t[1] - cur_t[1]) * pct
+
+        wx = int(origin_x + col_f * curr_tile_w + curr_tile_w / 2)
+        wy = int(origin_y + row_f * curr_tile_h + curr_tile_h / 2)
+
+        is_player_wagon = (wagon.owner == state.player_id)
+        facing_left = (next_t[0] < cur_t[0])
+
+        # Draw line connecting to destination army
+        t_army = next((a for a in state.armies if a.id == wagon.target_army_id), None)
+        if t_army and getattr(t_army, "tile", None):
+            ax = int(origin_x + t_army.tile[0] * curr_tile_w + curr_tile_w / 2)
+            ay = int(origin_y + t_army.tile[1] * curr_tile_h + curr_tile_h / 2)
+            sup_line_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+            line_col = (245, 195, 60, 70) if is_player_wagon else (100, 165, 240, 70)
+            pygame.draw.line(sup_line_surf, line_col, (wx, wy), (ax, ay), 1)
+            screen.blit(sup_line_surf, (0, 0))
+
+        # Render wagon sprite
+        w_surf = get_supply_wagon_sprite(wagon.owner, is_player_wagon, facing_left, ww, wh)
+        screen.blit(w_surf, (wx - ww // 2, wy - wh // 2))
+
+        # Cargo / Reinforcements pill badge
+        if wagon.reinforcements > 0:
+            c_text = f"📦 +{wagon.reinforcements} men"
+        else:
+            c_text = "📦 Rations"
+
+        c_lbl = font_xs.render(c_text, True, (255, 235, 160) if is_player_wagon else (210, 230, 255))
+        cw = c_lbl.get_width() + 6
+        ch = 14
+        c_surf = pygame.Surface((cw, ch), pygame.SRCALPHA)
+        c_surf.fill((20, 24, 32, 220))
+        pygame.draw.rect(c_surf, COLOR_GOLD if is_player_wagon else (80, 140, 220), (0, 0, cw, ch), 1, border_radius=3)
+        c_surf.blit(c_lbl, (3, 0))
+        screen.blit(c_surf, (wx - cw // 2, wy + wh // 2 + 1))
+
     # ---------------------------------------------------------
     # FLOATING MAP ZOOM & CAMERA CONTROLS HUD
     # ---------------------------------------------------------
@@ -1178,75 +1568,155 @@ def render_map_view(screen, state, mouse_pos, mouse_clicked, right_clicked, mous
     # TERRITORY CONTROL HUD BAR (Floating cleanly on top of map)
     # ---------------------------------------------------------
     total_provs = max(1, len(PROVINCES))
-    solaris_count = state.get_provinces_count("char_human")
-    ironpeak_count = state.get_provinces_count("char_ironpeak")
-    sylvan_count = state.get_provinces_count("char_sylvan")
-    
     bar_x = MAP_VIEWPORT_X + 26
     bar_y = PANEL_Y + 12
     bar_w = MAP_VIEWPORT_W - 52
     bar_h = 24
-    
-    col_solaris = CHARACTERS.get("char_human", {}).get("color", (215, 45, 45))
-    col_ironpeak = CHARACTERS.get("char_ironpeak", {}).get("color", (55, 75, 95))
-    col_sylvan = CHARACTERS.get("char_sylvan", {}).get("color", (35, 105, 55))
-    
+
+    ruler_shares = []
+    for cid in state.get_active_rulers(include_player=True):
+        count = state.get_provinces_count(cid)
+        if count <= 0:
+            continue
+        ruler_shares.append((cid, count, get_color(cid)))
+
     pygame.draw.rect(screen, (25, 30, 40), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
-    sol_w = int((solaris_count / total_provs) * bar_w)
-    iron_w = int((ironpeak_count / total_provs) * bar_w)
-    syl_w = bar_w - (sol_w + iron_w)
-    
-    if sol_w > 0:
-        pygame.draw.rect(screen, col_solaris, (bar_x, bar_y, sol_w, bar_h), border_radius=4)
-    if iron_w > 0:
-        pygame.draw.rect(screen, col_ironpeak, (bar_x + sol_w, bar_y, iron_w, bar_h))
-    if syl_w > 0:
-        pygame.draw.rect(screen, col_sylvan, (bar_x + sol_w + iron_w, bar_y, syl_w, bar_h), border_radius=4)
+    cursor_x = bar_x
+    for idx, (cid, count, color) in enumerate(ruler_shares):
+        seg_w = bar_w - (cursor_x - bar_x) if idx == len(ruler_shares) - 1 else int((count / total_provs) * bar_w)
+        seg_w = max(0, seg_w)
+        radius = 4 if idx in (0, len(ruler_shares) - 1) else 0
+        if seg_w > 0:
+            pygame.draw.rect(screen, color, (cursor_x, bar_y, seg_w, bar_h), border_radius=radius)
+        label = f"{get_short_name(cid).upper()}: {count}"
+        lbl = font_xs.render(label, True, (240, 244, 250))
+        lbl_x = cursor_x + max(4, (seg_w - lbl.get_width()) // 2)
+        if 0 <= lbl_x <= bar_x + bar_w - lbl.get_width():
+            screen.blit(lbl, (lbl_x, bar_y + 4))
+        cursor_x += seg_w
     pygame.draw.rect(screen, COLOR_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=4)
-    
-    s_lbl = font_xs.render(f"SOLARIS: {solaris_count} Prov", True, (255, 235, 235))
-    i_lbl = font_xs.render(f"IRONPEAK: {ironpeak_count} Prov", True, (230, 240, 255))
-    e_lbl = font_xs.render(f"SYLVANDELL: {sylvan_count} Prov", True, (230, 255, 235))
-    
-    screen.blit(s_lbl, (bar_x + 10, bar_y + 4))
-    screen.blit(i_lbl, (bar_x + bar_w // 2 - i_lbl.get_width() // 2, bar_y + 4))
-    screen.blit(e_lbl, (bar_x + bar_w - e_lbl.get_width() - 10, bar_y + 4))
 
     # ---------------------------------------------------------
-    # FLOATING SIEGE CONTEXT MENU (Right-Click "SIEGE THE CASTLE")
+    # FLOATING TACTICAL CONTEXT MENU (Siege / Reorganize / Split / Merge)
     # ---------------------------------------------------------
     if getattr(state, "siege_context_menu", None):
         ctx = state.siege_context_menu
         cx_x, cx_y = ctx["pos"]
-        h_name = ctx.get("name", "Stronghold")
-        
-        m_w, m_h = 240, 68
+        h_name = ctx.get("name", "Host Camp")
+        is_hostile = ctx.get("is_hostile_holding", False)
+        c_tile = ctx.get("tile")
+
+        army_ids = ctx.get("armies", [])
+        p_army = next((a for a in state.armies if a.id in army_ids and a.owner == state.player_id), None)
+
+        menu_items = []
+        same_tile = [ha for ha in state.armies if ha.owner == state.player_id and ha.troops > 0 and getattr(ha, "tile", None) == c_tile and not ha.in_battle]
+        if len(same_tile) > 1:
+            # Individual host pickers so player can choose exactly which host to control!
+            for ha in same_tile:
+                is_this_sel = (ha.id in getattr(state, "selected_army_ids", []) and len(state.selected_army_ids) == 1)
+                star = "★ " if is_this_sel else "  "
+                menu_items.append(("pick_single_" + ha.id, f"{star}SELECT: {ha.name[:11]} ({ha.troops:,}m)", (35, 55, 80) if is_this_sel else (25, 40, 60), COLOR_GOLD if is_this_sel else (80, 130, 190)))
+            tot_same = sum(ha.troops for ha in same_tile)
+            is_all_sel = (len(getattr(state, "selected_army_ids", [])) == len(same_tile))
+            menu_items.append(("pick_all", f"{'★ ' if is_all_sel else '  '}SELECT ALL {len(same_tile)} HOSTS ({tot_same:,}m)", (55, 45, 25), COLOR_GOLD))
+        else:
+            menu_items.append(("march", "➔ MARCH / MOVE HERE", (26, 75, 45), (70, 195, 110)))
+
+        if is_hostile:
+            menu_items.append(("siege", "⚔ SIEGE THE CASTLE", (140, 42, 22), (255, 110, 70)))
+
+        if p_army and not p_army.in_battle and not p_army.is_demobilizing:
+            n_levies = len(getattr(p_army, "sub_units", []))
+            menu_items.append(("reorganize", f"➦ REORGANIZE HOST ({n_levies} Levies)", (35, 75, 120), (100, 175, 255)))
+            if p_army.troops >= 2:
+                menu_items.append(("half", "⚡ SPLIT IN HALF (50/50)", (125, 90, 25), COLOR_GOLD))
+
+        # Check merge
+        same_tile = [ha for ha in state.armies if ha.owner == state.player_id and ha.troops > 0 and getattr(ha, "tile", None) == c_tile and not ha.in_battle]
+        if len(same_tile) > 1:
+            menu_items.append(("merge", f"🛡 MERGE {len(same_tile)} HOSTS HERE", (90, 50, 120), (200, 130, 255)))
+
+        m_w = 260
+        btn_h = 28
+        spacing = 5
+        m_h = 32 + len(menu_items) * (btn_h + spacing) + 6
         m_x = min(map_bg_rect.right - m_w - 12, max(map_bg_rect.left + 12, cx_x - m_w // 2))
         m_y = min(map_bg_rect.bottom - m_h - 12, max(map_bg_rect.top + 12, cx_y - m_h - 10))
-        
+
         menu_rect = pygame.Rect(m_x, m_y, m_w, m_h)
-        pygame.draw.rect(screen, (22, 26, 36), menu_rect, border_radius=6)
+        pygame.draw.rect(screen, (20, 24, 34), menu_rect, border_radius=6)
         pygame.draw.rect(screen, COLOR_GOLD, menu_rect, 1, border_radius=6)
-        
-        header_surf = font_xs.render(f"Target: {h_name[:24]}", True, (240, 220, 160))
-        screen.blit(header_surf, (m_x + 10, m_y + 8))
-        
-        s_btn = pygame.Rect(m_x + 8, m_y + 26, m_w - 16, 32)
-        s_hov = s_btn.collidepoint(mouse_pos)
-        pygame.draw.rect(screen, (140, 45, 25) if s_hov else (100, 32, 18), s_btn, border_radius=4)
-        pygame.draw.rect(screen, (255, 120, 80) if s_hov else (200, 70, 40), s_btn, 1, border_radius=4)
-        s_lbl = font_sm.render("⚔ SIEGE THE CASTLE", True, COLOR_TEXT_WHITE)
-        screen.blit(s_lbl, (s_btn.x + (s_btn.w - s_lbl.get_width()) // 2, s_btn.y + 6))
-        
-        if mouse_clicked:
-            if s_hov:
-                for aid in ctx["armies"]:
-                    a_obj = next((a for a in state.armies if a.id == aid), None)
-                    if a_obj:
-                        state.order_army_siege_holding(a_obj, ctx["tile"])
+
+        header_txt = f"Orders: {h_name[:24]}" if is_hostile else f"Host: {h_name[:24]}"
+        screen.blit(font_xs.render(header_txt, True, (240, 220, 160)), (m_x + 10, m_y + 8))
+
+        by = m_y + 28
+        btn_clicked = False
+        for action_type, label, col_bg, col_border in menu_items:
+            b_rect = pygame.Rect(m_x + 8, by, m_w - 16, btn_h)
+            b_hov = b_rect.collidepoint(mouse_pos)
+
+            c_bg = tuple(min(255, c + 35) for c in col_bg) if b_hov else col_bg
+            pygame.draw.rect(screen, c_bg, b_rect, border_radius=4)
+            pygame.draw.rect(screen, col_border, b_rect, 1, border_radius=4)
+
+            lbl_surf = font_sm.render(label, True, COLOR_TEXT_WHITE)
+            screen.blit(lbl_surf, (b_rect.x + (b_rect.w - lbl_surf.get_width()) // 2, b_rect.y + 4))
+
+            if mouse_clicked and b_hov:
+                btn_clicked = True
+                if action_type.startswith("pick_single_"):
+                    tgt_id = action_type.replace("pick_single_", "")
+                    tgt_a = next((a for a in state.armies if a.id == tgt_id), None)
+                    if tgt_a:
+                        state.selected_army_id = tgt_a.id
+                        state.selected_army_ids = [tgt_a.id]
+                        state.selected_province = tgt_a.province
+                        state.selected_settlement = None
+                        state.logs.append(f"Selected {tgt_a.name} ({tgt_a.troops:,} men). Right-click map to move this host.")
+                elif action_type == "pick_all":
+                    same_hosts = [ha for ha in state.armies if ha.owner == state.player_id and ha.troops > 0 and getattr(ha, "tile", None) == ctx["tile"] and not ha.in_battle]
+                    state.selected_army_ids = [ha.id for ha in same_hosts]
+                    state.selected_army_id = same_hosts[0].id if same_hosts else None
+                    state.selected_settlement = None
+                elif action_type == "march_single":
+                    if p_army:
+                        state.selected_army_id = p_army.id
+                        state.selected_army_ids = [p_army.id]
+                        state.order_army_march_to_tile(p_army, ctx["tile"])
+                elif action_type == "march_all":
+                    same_hosts = [ha for ha in state.armies if ha.owner == state.player_id and ha.troops > 0 and getattr(ha, "tile", None) == ctx["tile"] and not ha.in_battle]
+                    state.selected_army_ids = [ha.id for ha in same_hosts]
+                    for ha in same_hosts:
+                        state.order_army_march_to_tile(ha, ctx["tile"])
+                elif action_type == "march":
+                    for aid in ctx["armies"]:
+                        a_obj = next((a for a in state.armies if a.id == aid), None)
+                        if a_obj:
+                            state.order_army_march_to_tile(a_obj, ctx["tile"])
+                elif action_type == "siege":
+                    for aid in ctx["armies"]:
+                        a_obj = next((a for a in state.armies if a.id == aid), None)
+                        if a_obj:
+                            state.order_army_siege_holding(a_obj, ctx["tile"])
+                elif action_type == "reorganize":
+                    if p_army:
+                        state.split_army_target_id = p_army.id
+                        state.split_selected_units = set()
+                elif action_type == "half":
+                    if p_army:
+                        state.split_army_in_half(p_army.id)
+                elif action_type == "merge":
+                    state.merge_armies_at_tile(ctx["tile"], state.player_id)
+
                 state.siege_context_menu = None
-            elif not menu_rect.collidepoint(mouse_pos):
-                state.siege_context_menu = None
+                break
+
+            by += btn_h + spacing
+
+        if not menu_just_opened and (mouse_clicked or right_clicked) and not menu_rect.collidepoint(mouse_pos) and not btn_clicked:
+            state.siege_context_menu = None
 
     # Unclip screen so right panel and remaining UI render normally across the whole display
     screen.set_clip(None)

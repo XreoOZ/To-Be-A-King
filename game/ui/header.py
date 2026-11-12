@@ -8,6 +8,7 @@ from game.config import (
     COLOR_BUTTON_HOVER, COLOR_BUTTON_ACTIVE, COLOR_PRESTIGE, COLOR_PIETY
 )
 from game.systems.economy import fmt_gold
+from game.data.scenario import get_scenario
 
 def render_header(screen, state, mouse_pos, mouse_clicked, is_popup_active, fonts, icons, on_reset=None):
     font_xs = fonts["xs"]
@@ -26,7 +27,7 @@ def render_header(screen, state, mouse_pos, mouse_clicked, is_popup_active, font
     pygame.draw.rect(screen, COLOR_PANEL_BG, (0, 0, WINDOW_WIDTH, 54))
     pygame.draw.line(screen, COLOR_PANEL_BORDER, (0, 54), (WINDOW_WIDTH, 54), 2)
     
-    t_surf = font_lg.render("CK2: THE WAR FOR BRITAIN", True, COLOR_GOLD)
+    t_surf = font_lg.render(get_scenario().get("title", "CK2-Lite"), True, COLOR_GOLD)
     screen.blit(t_surf, (24, 15))
     
     # Calendar Date Pill Badge

@@ -12,6 +12,10 @@ build/
 dist/
 *.spec
 
+# Local scratch scripts and packaged test builds
+scratch/
+*.zip
+
 # OS / Editor
 .vscode/
 .idea/

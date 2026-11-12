@@ -88,9 +88,9 @@ def sync_province_holdings_stats(state, pid=None, is_init=False):
         else:
             diff = total_garrison - prev_max
             if diff > 0:
-                prov["levies_current"] = min(prov["levies_max"], prov.get("levies_current", 0) + diff)
-            else:
-                prov["levies_current"] = min(prov["levies_max"], max(0, prov.get("levies_current", total_garrison)))
+                prov["levies_current"] = prov.get("levies_current", 0) + diff
+            # Garrison is strictly clamped so it can never exceed physical holding capacity
+            prov["levies_current"] = min(prov["levies_max"], max(0, prov.get("levies_current", 0)))
 
 def get_vassal_landed_status(state, v_dict, prov_id=None):
     """
@@ -98,6 +98,17 @@ def get_vassal_landed_status(state, v_dict, prov_id=None):
     gross monthly income, tax rate (0-90%), tax paid to liege, net savings,
     total garrison, levy rate (0-90%), levy contribution to liege, and household guard.
     """
+    # Tax flow (generic feudal aggregation):
+    #   - A direct Count/Duke pays tax to their liege ruler.
+    #   - A Baron pays tax to their immediate Count; the Count aggregates
+    #     subordinate tax with its own before forwarding the total to the ruler.
+    # The function computes:
+    # - `gross` income from owned settlements.
+    # - `sub_tax_collected` from subordinate Barons (if any).
+    # - `total_gross` = own gross + sub‑tax.
+    # - `tax_paid` = portion of `total_gross` sent to the liege (Count or King).
+    # - `net_savings` = remaining after tax.
+    # - Garrison and levy contributions are similarly aggregated.
     v_name = v_dict["name"]
     v_id = v_dict.get("id")
 
@@ -344,6 +355,8 @@ def get_realm_finances(state, char_id=None):
     if char_id is None:
         char_id = state.player_id
     r_char = CHARACTERS.get(char_id, {})
+    r_name = r_char.get("name", "")
+    clean_rname = state.get_character_clean_name(r_name) if hasattr(state, "get_character_clean_name") else r_name
 
     prov_incomes = []
     total_prov_tax = 0
@@ -363,12 +376,13 @@ def get_realm_finances(state, char_id=None):
     for pid, prov in PROVINCES.items():
         if prov["owner"] == char_id:
             for v in state.vassals.get(pid, []):
-                # Strictly: ONLY Counts and Dukes count towards Vassal Limit! Barons do NOT count!
-                if v.get("rank") in ("count", "duke"):
+                is_direct_to_king = (v.get("is_direct_vassal", True) and v.get("liege_id") in (char_id, None)) or (v.get("liege_id") == char_id)
+                # Strictly: ONLY Direct Counts and Dukes count towards Vassal Limit! Barons and Subordinate Counts do NOT count!
+                if v.get("rank") in ("count", "duke") and is_direct_to_king:
                     direct_vassal_count += 1
 
-                # Both Barons and Counts pay tax directly to King if direct subjects
-                if v.get("is_direct_vassal", True) or v.get("liege_id") == char_id or v.get("rank") == "baron":
+                # Only direct subjects pay tax directly to King (subordinate vassals pay to their immediate Duke/Count)
+                if is_direct_to_king:
                     st = get_vassal_landed_status(state, v, pid)
                     if st["is_landed"] and st["tax_paid"] > 0:
                         total_vassal_tax += st["tax_paid"]
@@ -405,7 +419,12 @@ def get_realm_finances(state, char_id=None):
         prov_owner = PROVINCES.get(pid, {}).get("owner")
         h_owner = sdata.get("owner") or prov_owner
 
-        if h_owner == char_id and sdata.get("is_crown_demesne") and not sdata.get("vassal_id"):
+        is_my_demesne = (
+            (h_owner == char_id or (clean_rname and clean_rname in sdata.get("lord", "")) or sdata.get("vassal_id") in (char_id, f"duke_{char_id}")) and
+            sdata.get("is_crown_demesne") and
+            sdata.get("vassal_id") in (None, char_id, f"duke_{char_id}")
+        )
+        if is_my_demesne:
             seen_crown_hids.add(hid)
             htype = sdata.get("type", "city")
             if htype == "fort":
@@ -470,15 +489,17 @@ def get_realm_finances(state, char_id=None):
 
     tribute_expenses = []
     total_tribute = 0
-    if char_id == state.player_id and getattr(state, "player_liege", None) == state.enemy_id:
-        # Feudal Suzerainty Tax: strictly 20% of player's gross domain income
-        trib = round(total_income * 0.20, 1)
+    liege_id = state.get_liege(char_id) if hasattr(state, "get_liege") else None
+    if liege_id in CHARACTERS:
+        # Feudal Suzerainty Tax: a share of gross domain income, data-driven.
+        rate_pct = int(round(float(getattr(state, "tribute_rate", 0.20)) * 100))
+        trib = round(total_income * float(getattr(state, "tribute_rate", 0.20)), 1)
         total_tribute = trib
-        liege_n = CHARACTERS.get(state.enemy_id, {}).get("name", "High King").split()[0]
+        liege_n = CHARACTERS.get(liege_id, {}).get("name", liege_id)
         tribute_expenses.append({
-            "name": f"Feudal Liege Suzerainty Tax (20%)",
+            "name": f"Feudal Liege Suzerainty Tax ({rate_pct}%)",
             "liege": liege_n,
-            "rate": 20,
+            "rate": rate_pct,
             "cost": trib,
             "base": total_income
         })
@@ -507,3 +528,116 @@ def get_realm_finances(state, char_id=None):
         "total_expense": total_expense,
         "net_monthly": net_monthly
     }
+
+def get_ruler_demesne_stats(state, ruler_id):
+    """
+    Computes comprehensive demesne stats for any ruler (Player or AI):
+    Gross income, maintenance expenses, net monthly balance, standing garrison,
+    monthly recruitment rate, and detailed building counts.
+    """
+    from game.data.buildings import BUILDING_SPECS, get_barrack_stats
+    from game.data.provinces import PROVINCES
+
+    r_char = CHARACTERS.get(ruler_id, {})
+    r_name = r_char.get("name", "")
+    clean_rname = state.get_character_clean_name(r_name) if hasattr(state, "get_character_clean_name") else r_name
+
+    demesne_settlements = []
+    for coord, s in state.settlements.items():
+        prov_owner = PROVINCES.get(s.get("province"), {}).get("owner", s.get("owner"))
+        s_vid = s.get("vassal_id")
+        s_lord = s.get("lord", "")
+        s_owner = s.get("owner")
+
+        is_direct = (
+            (s_vid in (None, ruler_id, f"duke_{ruler_id}") and s_owner == ruler_id) or
+            (s_vid in (ruler_id, f"duke_{ruler_id}")) or
+            (s.get("is_crown_demesne") and (prov_owner == ruler_id or s_owner == ruler_id)) or
+            (r_name and (s_lord == r_name or s_lord == f"{r_name} (Crown Demesne)" or (clean_rname and clean_rname in s_lord)))
+        )
+        if is_direct:
+            demesne_settlements.append((coord, s))
+
+    gross_income = 0.0
+    total_upkeep = 0.0
+    total_garrison = 0
+    total_recruits = 0
+    building_counts = {}
+    by_province = {}
+
+    holdings_detail = []
+    for coord, s in demesne_settlements:
+        stype = s.get("type", "city")
+        lvl = s.get("level", 0)
+        spec = BUILDING_SPECS.get(stype, {})
+
+        if stype == "barrack":
+            bstats = get_barrack_stats(lvl)
+            inc = 0.0
+            upk = float(bstats["upkeep"])
+            garr = bstats["garrison"]
+            rec = bstats["recruits"]
+        else:
+            inc = float(spec.get("income", 0))
+            upk = float(spec.get("upkeep", 0))
+            garr = spec.get("garrison", 100)
+            rec = spec.get("recruits", 3)
+
+        gross_income += inc
+        total_upkeep += upk
+        total_garrison += garr
+        total_recruits += rec
+
+        bname = spec.get("title", stype.capitalize())
+        building_counts[bname] = building_counts.get(bname, 0) + 1
+
+        pid = s.get("province")
+        p_data = by_province.setdefault(pid, {
+            "province": pid,
+            "holdings": [],
+            "gross_income": 0.0,
+            "total_upkeep": 0.0,
+            "total_garrison": 0,
+            "total_recruits": 0,
+            "building_counts": {}
+        })
+        p_data["gross_income"] += inc
+        p_data["total_upkeep"] += upk
+        p_data["total_garrison"] += garr
+        p_data["total_recruits"] += rec
+        p_data["building_counts"][bname] = p_data["building_counts"].get(bname, 0) + 1
+
+        h_info = {
+            "coord": coord,
+            "id": s.get("id"),
+            "name": s.get("name", "Holding"),
+            "type": stype,
+            "title": bname,
+            "province": pid,
+            "level": lvl,
+            "income": inc,
+            "upkeep": upk,
+            "net": inc - upk,
+            "garrison": garr,
+            "recruits": rec
+        }
+        holdings_detail.append(h_info)
+        p_data["holdings"].append(h_info)
+
+    for p in by_province.values():
+        p["net_income"] = round(p["gross_income"] - p["total_upkeep"], 1)
+
+    net_income = round(gross_income - total_upkeep, 1)
+    return {
+        "ruler_id": ruler_id,
+        "holdings_count": len(demesne_settlements),
+        "gross_income": round(gross_income, 1),
+        "total_upkeep": round(total_upkeep, 1),
+        "net_income": net_income,
+        "total_garrison": total_garrison,
+        "total_recruits": total_recruits,
+        "building_counts": building_counts,
+        "holdings": holdings_detail,
+        "by_province": by_province
+    }
+

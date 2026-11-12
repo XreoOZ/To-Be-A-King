@@ -7,11 +7,12 @@ from game.config import (
     WINDOW_WIDTH, WINDOW_HEIGHT, BASE_TILE_H, VIEWPORT_CENTER_Y, COLOR_PANEL_BG, COLOR_PANEL_BORDER,
     COLOR_GOLD, COLOR_TEXT_WHITE, COLOR_TEXT_MUTED, COLOR_TEXT_RED,
     COLOR_TEXT_GREEN, COLOR_BUTTON_NORMAL, COLOR_BUTTON_HOVER,
-    COLOR_BUTTON_ACTIVE, BASE_TILE_W, VIEWPORT_CENTER_X, MAP_CENTER_COL, MAP_CENTER_ROW
+    COLOR_BUTTON_ACTIVE, BASE_TILE_W, VIEWPORT_CENTER_X
 )
-from game.data.characters import CHARACTERS
+from game.data.characters import CHARACTERS, get_display_name, get_personal_name, get_realm_name
 from game.data.provinces import PROVINCES
-from game.core.map import PROV_CAPITAL_TILES, CELL_TO_PROV
+from game.data.scenario import get_scenario
+from game.core.map import PROV_CAPITAL_TILES, CELL_TO_PROV, RAW_GRID
 from game.data.buildings import BUILDING_SPECS
 from game.core.assets import prov_flag_cache
 from game.systems.economy import get_vassal_landed_status, sync_province_holdings_stats, fmt_gold
@@ -56,6 +57,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
     curr_tile_h = max(16, int(BASE_TILE_H * state.zoom))
     curr_tw = curr_tile_w
     curr_th = curr_tile_h
+    map_center_col = (len(RAW_GRID[0]) - 1) / 2 if RAW_GRID else 0
+    map_center_row = (len(RAW_GRID) - 1) / 2
     state.active_modal_rect = None
 
     # ---------------------------------------------------------
@@ -116,9 +119,11 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             p_obj = PROVINCES.get(pid)
             if p_obj:
                 if req_type == "city":
-                    city_title = f"{req['vassal'].split()[1]}'s {random.choice(['Borough', 'Burgh', 'Town', 'Market'])}"
+                    vassal_name = state.get_character_clean_name(req["vassal"]).split()[0]
+                    city_title = f"{vassal_name}'s {random.choice(['Borough', 'Burgh', 'Town', 'Market'])}"
                 else:
-                    city_title = f"{req['vassal'].split()[1]}'s {random.choice(['Keep', 'Castle', 'Fortress'])}"
+                    vassal_name = state.get_character_clean_name(req["vassal"]).split()[0]
+                    city_title = f"{vassal_name}'s {random.choice(['Keep', 'Castle', 'Fortress'])}"
     
                 req["vassal_ref"]["gold"] = max(0, req["vassal_ref"]["gold"] - req_cost)
     
@@ -243,7 +248,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                     f_target["vassal_id"] = c_v["id"]
                     f_target["is_crown_demesne"] = False
                     f_target["is_newly_carved"] = False
-                    v_short_name = c_v["name"].split()[1] if len(c_v["name"].split()) > 1 else c_v["name"]
+                    v_short_name = state.get_character_clean_name(c_v["name"]).split()[0]
                     f_target["name"] = f"Barony of {v_short_name}"
     
                     # Update all city settlements located on this fief to the chosen vassal!
@@ -376,8 +381,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         rk_val = str(v_obj.get("rank", "count" if is_direct else "baron")).lower()
         rk_sym = "🛡" if ("count" in rk_val or "thane" in rk_val or "warden" in rk_val) else ("⚜" if "duke" in rk_val else "🏰")
         screen.blit(font_md.render(f"{rk_sym} {v_obj['name']}", True, (255, 120, 120) if is_enemy else COLOR_GOLD), (pop_x + 90, pop_y + 74))
-        v_religion = "Norse Pagan" if p_owner == state.enemy_id else prov_data.get("faith", "Catholic")
-        v_culture = "Norse" if p_owner == state.enemy_id else prov_data.get("culture", "Anglo-Saxon")
+        v_religion = prov_data.get("faith", prov_data.get("religion", "Unknown Faith"))
+        v_culture = prov_data.get("culture", "Unknown Culture")
         feud_role = "Direct Province Liege" if is_direct else "Sub-Vassal (Barony)"
         rank_str = f"Feudal Rank: {v_obj.get('title', 'Count')} ({feud_role})  •  Faith: {v_religion} ({v_culture})"
         screen.blit(font_xs.render(rank_str, True, COLOR_TEXT_WHITE), (pop_x + 90, pop_y + 98))
@@ -387,7 +392,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         screen.blit(font_xs.render(seat_str, True, (140, 205, 255)), (pop_x + 90, pop_y + 114))
     
         # Feudal Attributes Grid (Martial, Stewardship, Diplomacy, Feudal Oath)
-        oath_val = f"100% ({liege_char['name'].split()[1]})" if is_enemy else "100%"
+        liege_personal_name = get_personal_name(p_owner)
+        oath_val = f"100% ({liege_personal_name})" if is_enemy else "100%"
         oath_sub = "(Enemy)" if is_enemy else "(Faithful)"
         stats_list = [
             ("⚔ Martial", f"{10 + (levies_contrib // 30)}" if is_landed else "8", "(Commands Fyrd)"),
@@ -578,7 +584,11 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
 
             screen.blit(font_xs.render(f"• Household Guards (Kept): {household_guard} Men", True, COLOR_TEXT_WHITE), (rx, col_y + 66))
             screen.blit(font_xs.render(f"• Total Domain Force: {total_garrison} Men", True, (170, 200, 230)), (rx, col_y + 84))
-            service_text = f"• Feudal Service: Pledged to {liege_char['name'].split()[1]}'s banner" if is_enemy else "• Feudal Service: Ready to march on King's call"
+            service_text = (
+                f"• Feudal Service: Pledged to {liege_personal_name}'s banner"
+                if is_enemy
+                else f"• Feudal Service: Ready to march on {get_personal_name(state.player_id)}'s call"
+            )
             screen.blit(font_xs.render(service_text, True, COLOR_TEXT_MUTED), (rx, col_y + 102))
             screen.blit(font_xs.render(f"• Fiefdoms Controlled: {len(held_fiefs)} Fief(s) ({total_held_tiles} Tiles)", True, (150, 215, 255)), (rx, col_y + 120))
         else:
@@ -662,8 +672,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                     if seat_tile:
                         tc, tr = seat_tile
                         state.selected_settlement = (tc, tr)
-                        state.cam_pan_x = int((MAP_CENTER_COL - tc) * curr_tile_w - curr_tile_w // 2)
-                        state.cam_pan_y = int((MAP_CENTER_ROW - tr) * curr_tile_h - curr_tile_h // 2)
+                        state.cam_pan_x = int((map_center_col - tc) * curr_tile_w - curr_tile_w // 2)
+                        state.cam_pan_y = int((map_center_row - tr) * curr_tile_h - curr_tile_h // 2)
                         state.logs.append(f"Centering camera on {v_obj['name']}'s seat at ({tc}, {tr}) in {p_full}.")
                 elif rank_hov:
                     if is_direct:
@@ -713,8 +723,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                     if seat_tile:
                         tc, tr = seat_tile
                         state.selected_settlement = (tc, tr)
-                        state.cam_pan_x = int((MAP_CENTER_COL - tc) * curr_tile_w - curr_tile_w // 2)
-                        state.cam_pan_y = int((MAP_CENTER_ROW - tr) * curr_tile_h - curr_tile_h // 2)
+                        state.cam_pan_x = int((map_center_col - tc) * curr_tile_w - curr_tile_w // 2)
+                        state.cam_pan_y = int((map_center_row - tr) * curr_tile_h - curr_tile_h // 2)
                         state.logs.append(f"Centering camera on {v_obj['name']}'s seat at ({tc}, {tr}) in {p_full}.")
                 elif c_hov:
                     state.inspecting_vassal = None
@@ -754,7 +764,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         # Header Title
         title_text = "SOVEREIGN WARLORD DOSSIER" if is_ruler_enemy else "ROYAL SOVEREIGN DOSSIER"
         screen.blit(font_lg.render(title_text, True, (255, 110, 110) if is_ruler_enemy else COLOR_GOLD), (pop_x + 25, pop_y + 16))
-        screen.blit(font_xs.render(f"Supreme Liege Lord of {r_char['realm']} • AD 867 Campaign", True, COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 44))
+        campaign_label = get_scenario().get("campaign_label") or f"AD {state.year} Campaign"
+        screen.blit(font_xs.render(f"Supreme Liege Lord of {r_char.get('realm', get_realm_name(r_id))} • {campaign_label}", True, COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 44))
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 64), (pop_x + pop_w - 25, pop_y + 64), 1)
     
         # Top Character Banner Section
@@ -828,12 +839,16 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         screen.blit(font_xs.render(f"• Feudal Vassal Tithes: +{total_vassal_tax}g / month", True, COLOR_TEXT_GREEN), (pop_x + 40, col_y + 116))
         screen.blit(font_xs.render(f"  (Taxes levied from {len(r_vassals)} lords via Tax Laws)", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 130))
         screen.blit(font_xs.render(f"• Crown Demesne Holdings: {crown_holdings_count} Direct Seats", True, COLOR_TEXT_WHITE), (pop_x + 40, col_y + 148))
-        screen.blit(font_xs.render(f"• Total Controlled Lands: {len(r_provs)} of 12 Provinces", True, COLOR_GOLD), (pop_x + 40, col_y + 166))
+        screen.blit(font_xs.render(f"• Total Controlled Lands: {len(r_provs)} of {len(PROVINCES)} Provinces", True, COLOR_GOLD), (pop_x + 40, col_y + 166))
         
         p_list_str = ", ".join(r_prov_names[:6]) + ("..." if len(r_prov_names) > 6 else "")
         screen.blit(font_xs.render(f"  ({p_list_str})", True, COLOR_TEXT_MUTED), (pop_x + 40, col_y + 182))
     
-        stance_str = "⚔ AT WAR (Invading Britain)" if is_ruler_enemy else "⚔ AT WAR (Defending England)"
+        region_name = get_scenario().get("region_name", "the realm")
+        if is_ruler_enemy:
+            stance_str = f"⚔ HOSTILE (Rival of {get_display_name(state.player_id)})"
+        else:
+            stance_str = f"⚔ DEFENDING {region_name.upper()}"
         stance_col = (255, 100, 100) if is_ruler_enemy else COLOR_GOLD
         screen.blit(font_xs.render(f"• Feudal Stance: {stance_str}", True, stance_col), (pop_x + 40, col_y + 204))
     
@@ -876,8 +891,8 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
             cap_coord = PROV_CAPITAL_TILES.get(r_cap_pid, (12, 10))
             curr_tw = max(18, int(BASE_TILE_W * state.zoom))
             curr_th = max(16, int(BASE_TILE_H * state.zoom))
-            state.cam_pan_x = int((MAP_CENTER_COL - cap_coord[0]) * curr_tw - curr_tw // 2)
-            state.cam_pan_y = int((MAP_CENTER_ROW - cap_coord[1]) * curr_th - curr_th // 2)
+            state.cam_pan_x = int((map_center_col - cap_coord[0]) * curr_tw - curr_tw // 2)
+            state.cam_pan_y = int((map_center_row - cap_coord[1]) * curr_th - curr_th // 2)
             state.inspecting_ruler = None
             state.logs.append(f"Focusing camera on {r_char['name']}'s seat in {r_cap_name}.")
     
@@ -969,7 +984,7 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
                     v_obj = v
                     break
     
-            v_short = v_name.split()[1] if len(v_name.split()) > 1 else v_name
+            v_short = state.get_character_clean_name(v_name).split()[0]
             if b_type == "city":
                 city_name = f"{v_short}'s {random.choice(['Borough', 'Burgh', 'Town', 'Market'])}"
             elif b_type == "fort":
@@ -1045,9 +1060,9 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
         screen.blit(t_surf, (pop_x + (pop_w - t_surf.get_width()) // 2, pop_y + 24))
         pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 30, pop_y + 64), (pop_x + pop_w - 30, pop_y + 64), 1)
 
-        # Liege & Vassal Portraits / Heraldic Crests
-        liege_cid = state.player_liege or state.enemy_liege or state.player_id
-        vassal_cid = state.player_id if state.player_liege else state.enemy_id
+        # Liege & Vassal Portraits / Heraldic Crests (event IDs are authoritative)
+        liege_cid = ev.get("liege_id") or state.player_liege or state.enemy_liege or state.player_id
+        vassal_cid = ev.get("vassal_id") or (state.player_id if state.player_liege else state.enemy_id)
         left_char = portrait_cache.get(liege_cid)
         right_char = portrait_cache.get(vassal_cid)
         left_coa = coa_cache.get(liege_cid)
@@ -1101,3 +1116,167 @@ def render_modals(screen, state, mouse_pos, modal_mouse_clicked, fonts, portrait
 
         if modal_mouse_clicked and b_hov:
             state.subjugation_event = None
+
+
+    # ---------------------------------------------------------
+    # MODAL: SPLIT / REORGANIZE ARMY MODAL
+    # ---------------------------------------------------------
+    if getattr(state, "split_army_target_id", None):
+        src_army = next((a for a in state.armies if a.id == state.split_army_target_id), None)
+        if src_army:
+            state.rebalance_army_sub_units(src_army)
+        sub_u = getattr(src_army, "sub_units", []) if src_army else []
+        if not src_army:
+            state.split_army_target_id = None
+        else:
+            n_items = max(1, len(sub_u))
+            pop_w = 540
+            pop_h = min(560, max(280, 180 + n_items * 50))
+            pop_x = (WINDOW_WIDTH - pop_w) // 2
+            pop_y = (WINDOW_HEIGHT - pop_h) // 2
+            pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
+            state.active_modal_rect = pop_rect
+
+            # Dimmed backdrop
+            dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+            dim_surf.fill((0, 0, 0, 160))
+            screen.blit(dim_surf, (0, 0))
+
+            # Modal Frame
+            pygame.draw.rect(screen, (22, 26, 36), pop_rect, border_radius=8)
+            pygame.draw.rect(screen, COLOR_GOLD, pop_rect, 2, border_radius=8)
+
+            # Header
+            screen.blit(font_lg.render("➦ REORGANIZE & SPLIT ARMY", True, COLOR_GOLD), (pop_x + 25, pop_y + 20))
+            screen.blit(font_xs.render(f"Source Host: {src_army.name} ({src_army.troops:,} Total Men)", True, COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 48))
+            screen.blit(font_sm.render("Select feudal levies to detach into a new independent host:", True, COLOR_TEXT_WHITE), (pop_x + 25, pop_y + 70))
+            pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 95), (pop_x + pop_w - 25, pop_y + 95), 1)
+
+            if not hasattr(state, "split_selected_units") or state.split_selected_units is None:
+                state.split_selected_units = set()
+
+            # Sub-units List
+            uy = pop_y + 105
+            for u in sub_u:
+                u_id = u.get("id")
+                u_checked = (u_id in state.split_selected_units)
+                u_rect = pygame.Rect(pop_x + 25, uy, pop_w - 50, 42)
+                u_hov = u_rect.collidepoint(mouse_pos)
+
+                bg_col = (45, 65, 95) if u_checked else ((35, 42, 58) if u_hov else (28, 33, 46))
+                pygame.draw.rect(screen, bg_col, u_rect, border_radius=6)
+                pygame.draw.rect(screen, (90, 160, 240) if u_checked else COLOR_PANEL_BORDER, u_rect, 1, border_radius=6)
+
+                # Checkbox box
+                cb_rect = pygame.Rect(u_rect.x + 12, u_rect.y + 11, 20, 20)
+                pygame.draw.rect(screen, (50, 110, 200) if u_checked else (18, 22, 30), cb_rect, border_radius=4)
+                pygame.draw.rect(screen, COLOR_GOLD if u_checked else COLOR_PANEL_BORDER, cb_rect, 1, border_radius=4)
+                if u_checked:
+                    chk_lbl = font_xs.render("✓", True, COLOR_GOLD)
+                    screen.blit(chk_lbl, (cb_rect.x + 5, cb_rect.y + 2))
+
+                # Unit Details
+                screen.blit(font_sm.render(u.get("name", "Levy"), True, COLOR_TEXT_WHITE), (u_rect.x + 42, u_rect.y + 6))
+                src_txt = f"{u.get('troops', 0):,} Men  •  Origin: {u.get('source_type', 'feudal').title()}"
+                screen.blit(font_xs.render(src_txt, True, COLOR_GOLD if u_checked else COLOR_TEXT_MUTED), (u_rect.x + 42, u_rect.y + 22))
+
+                if modal_mouse_clicked and u_hov:
+                    if u_checked:
+                        state.split_selected_units.remove(u_id)
+                    else:
+                        state.split_selected_units.add(u_id)
+
+                uy += 48
+
+            # Action Buttons
+            sel_count = len(state.split_selected_units)
+            can_split = (0 < sel_count < len(sub_u))
+
+            # Split Action Button
+            sp_btn = pygame.Rect(pop_x + 25, pop_y + pop_h - 55, 230, 38)
+            b_sp_hov = sp_btn.collidepoint(mouse_pos) and can_split
+            pygame.draw.rect(screen, (40, 95, 150) if b_sp_hov else ((28, 65, 105) if can_split else (35, 40, 50)), sp_btn, border_radius=6)
+            pygame.draw.rect(screen, (100, 180, 255) if can_split else (60, 65, 75), sp_btn, 1, border_radius=6)
+            sp_txt = f"➦ DETACH ({sel_count} Levies)" if can_split else "SELECT LEVIES"
+            sp_lbl = font_sm.render(sp_txt, True, COLOR_TEXT_WHITE if can_split else (120, 130, 140))
+            screen.blit(sp_lbl, (sp_btn.x + (sp_btn.w - sp_lbl.get_width()) // 2, sp_btn.y + 10))
+            if modal_mouse_clicked and b_sp_hov:
+                state.split_army(src_army.id, list(state.split_selected_units))
+                state.split_army_target_id = None
+                state.split_selected_units = set()
+
+            # Quick 50/50 Split in Half Button
+            half_btn = pygame.Rect(pop_x + 265, pop_y + pop_h - 55, 135, 38)
+            b_half_hov = half_btn.collidepoint(mouse_pos) and src_army.troops >= 2
+            pygame.draw.rect(screen, (130, 95, 30) if b_half_hov else (90, 68, 20), half_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_GOLD, half_btn, 1, border_radius=6)
+            h_lbl = font_sm.render("⚡ 50 / 50 HALF", True, COLOR_GOLD)
+            screen.blit(h_lbl, (half_btn.x + (half_btn.w - h_lbl.get_width()) // 2, half_btn.y + 10))
+            if modal_mouse_clicked and b_half_hov:
+                state.split_army_in_half(src_army.id)
+                state.split_army_target_id = None
+                state.split_selected_units = set()
+
+            # Cancel Button
+            cn_btn = pygame.Rect(pop_x + pop_w - 125, pop_y + pop_h - 55, 100, 38)
+            b_cn_hov = cn_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (75, 35, 35) if b_cn_hov else (55, 28, 28), cn_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_TEXT_RED, cn_btn, 1, border_radius=6)
+            cn_lbl = font_sm.render("CANCEL", True, (240, 220, 220))
+            screen.blit(cn_lbl, (cn_btn.x + (cn_btn.w - cn_lbl.get_width()) // 2, cn_btn.y + 10))
+            if modal_mouse_clicked and b_cn_hov:
+                state.split_army_target_id = None
+                state.split_selected_units = set()
+
+    # ---------------------------------------------------------
+    # MODAL: UNIVERSAL RENAME MODAL
+    # ---------------------------------------------------------
+    if getattr(state, "rename_modal", None) and state.rename_modal.get("active"):
+        pop_w, pop_h = 480, 220
+        pop_x = (WINDOW_WIDTH - pop_w) // 2
+        pop_y = (WINDOW_HEIGHT - pop_h) // 2
+        pop_rect = pygame.Rect(pop_x, pop_y, pop_w, pop_h)
+        state.active_modal_rect = pop_rect
+
+        # Dimmed backdrop
+        dim_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+        dim_surf.fill((0, 0, 0, 160))
+        screen.blit(dim_surf, (0, 0))
+
+        # Modal Frame
+        pygame.draw.rect(screen, (22, 26, 36), pop_rect, border_radius=8)
+        pygame.draw.rect(screen, COLOR_GOLD, pop_rect, 2, border_radius=8)
+
+        etype = state.rename_modal.get("type", "Entity").upper()
+        screen.blit(font_lg.render(f"✎ RENAME {etype}", True, COLOR_GOLD), (pop_x + 25, pop_y + 20))
+        screen.blit(font_xs.render("Type new designation and press Enter or click Save:", True, COLOR_TEXT_MUTED), (pop_x + 25, pop_y + 50))
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (pop_x + 25, pop_y + 70), (pop_x + pop_w - 25, pop_y + 70), 1)
+
+        # Input Box
+        in_rect = pygame.Rect(pop_x + 25, pop_y + 88, pop_w - 50, 42)
+        pygame.draw.rect(screen, (16, 20, 28), in_rect, border_radius=6)
+        pygame.draw.rect(screen, (90, 160, 240), in_rect, 1, border_radius=6)
+
+        cursor_blink = (pygame.time.get_ticks() // 500) % 2 == 0
+        disp_txt = state.rename_modal.get("text", "") + ("|" if cursor_blink else "")
+        screen.blit(font_md.render(disp_txt, True, (240, 245, 255)), (in_rect.x + 12, in_rect.y + 11))
+
+        # Save Button
+        sv_btn = pygame.Rect(pop_x + 25, pop_y + 155, 240, 38)
+        b_sv_hov = sv_btn.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (35, 95, 50) if b_sv_hov else (25, 75, 38), sv_btn, border_radius=6)
+        pygame.draw.rect(screen, COLOR_TEXT_GREEN, sv_btn, 1, border_radius=6)
+        sv_lbl = font_sm.render("💾 SAVE NAME", True, COLOR_TEXT_WHITE)
+        screen.blit(sv_lbl, (sv_btn.x + (sv_btn.w - sv_lbl.get_width()) // 2, sv_btn.y + 10))
+        if modal_mouse_clicked and b_sv_hov:
+            state.commit_rename()
+
+        # Cancel Button
+        cn_btn = pygame.Rect(pop_x + pop_w - 185, pop_y + 155, 160, 38)
+        b_cn_hov = cn_btn.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (75, 35, 35) if b_cn_hov else (55, 28, 28), cn_btn, border_radius=6)
+        pygame.draw.rect(screen, COLOR_TEXT_RED, cn_btn, 1, border_radius=6)
+        cn_lbl = font_sm.render("✖ CANCEL", True, (240, 220, 220))
+        screen.blit(cn_lbl, (cn_btn.x + (cn_btn.w - cn_lbl.get_width()) // 2, cn_btn.y + 10))
+        if modal_mouse_clicked and b_cn_hov:
+            state.rename_modal = None

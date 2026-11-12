@@ -16,6 +16,17 @@ class Army:
         self.sub_flags = []  # List of secondary province flags when merged
         self.crown_troops = 0   # Regular / Crown Demesne troops (costs 1g per 100 soldiers)
         self.vassal_levies = troops  # Feudal Vassal Levies (FREE 0g/m under feudal duty)
+        self.vassal_id = None
+        self.allow_reinforcements = True  # If False, receives rations (anti-starve) but 0 recruits
+        self.sub_units = [
+            {
+                "id": f"{army_id}_sub_1",
+                "name": f"{name} Levy",
+                "troops": troops,
+                "vassal_id": None,
+                "flag": flag_origin or province_id
+            }
+        ] if troops > 0 else []
         
         # Tile Grid coordinates
         self.tile = tile or get_province_capital_tile(province_id)
@@ -45,6 +56,12 @@ class Army:
         self.courier_next_prov = None
         self.courier_progress = 0.0
         self.courier_days_left = 0
+        
+        # Logistics & Expeditionary Campaign System
+        self.is_expeditionary = False      # Outside sovereign/vassal territory
+        self.is_starving = False           # Suffers daily -5 troop starvation when severed
+        self.days_without_supply = 0       # Days since last supply delivery or domestic presence
+        self.supply_line_cut = False       # True if enemy blocks supply corridor
 
     @property
     def is_moving(self):
@@ -88,3 +105,64 @@ class Army:
                 self.tile_path = route[1:]
             else:
                 self.tile_path = []
+
+
+
+    def recalc_troops(self):
+        """Recalculates total troop strength from constituent sub-units."""
+        if self.sub_units:
+            self.troops = sum(u.get("troops", 0) for u in self.sub_units)
+            self.vassal_levies = sum(u.get("troops", 0) for u in self.sub_units if u.get("vassal_id") or u.get("source_type") != "crown")
+            self.crown_troops = sum(u.get("troops", 0) for u in self.sub_units if not u.get("vassal_id") and u.get("source_type") == "crown")
+        return self.troops
+
+    def merge_army(self, other_army):
+        """Merges another army into this host, integrating its sub-units and flags."""
+        if not other_army or other_army == self:
+            return False
+        if not getattr(other_army, "sub_units", None):
+            other_army.sub_units = [{
+                "id": f"{other_army.id}_sub_1",
+                "name": other_army.name,
+                "troops": other_army.troops,
+                "vassal_id": getattr(other_army, "vassal_id", None),
+                "flag": other_army.flag_origin
+            }]
+        self.sub_units.extend(other_army.sub_units)
+        if other_army.flag_origin and other_army.flag_origin not in self.sub_flags and other_army.flag_origin != self.flag_origin:
+            self.sub_flags.append(other_army.flag_origin)
+        for sf in getattr(other_army, "sub_flags", []):
+            if sf not in self.sub_flags and sf != self.flag_origin:
+                self.sub_flags.append(sf)
+        self.recalc_troops()
+        return True
+
+    def split_sub_units(self, unit_ids):
+        """Detaches the specified sub-units from this host and returns them."""
+        detached = [u for u in self.sub_units if u.get("id") in unit_ids]
+        self.sub_units = [u for u in self.sub_units if u.get("id") not in unit_ids]
+        self.recalc_troops()
+        return detached
+
+class SupplyWagon:
+    def __init__(self, wagon_id, owner_id, target_army_id, origin_tile, origin_prov, reinforcements=0, supplies=30):
+        self.id = wagon_id
+        self.owner = owner_id
+        self.target_army_id = target_army_id
+        self.origin_tile = origin_tile
+        self.origin_prov = origin_prov
+        self.tile = origin_tile
+        self.tile_path = []
+        self.move_progress = 0.0
+        self.move_speed = 100.0 / DAYS_PER_KOTAK  # 1 tile per day
+        self.reinforcements = reinforcements
+        self.supplies = supplies
+        self.is_ambushed = False
+
+    @property
+    def is_moving(self):
+        return len(self.tile_path) > 0
+
+    @property
+    def next_tile(self):
+        return self.tile_path[0] if self.tile_path else None

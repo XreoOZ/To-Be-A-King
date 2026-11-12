@@ -9,7 +9,7 @@ from game.config import (
     COLOR_BUTTON_NORMAL, COLOR_BUTTON_HOVER, COLOR_BUTTON_ACTIVE,
     LEVY_RAISE_COOLDOWN_DAYS, BASE_TILE_W, VIEWPORT_CENTER_X
 )
-from game.data.characters import CHARACTERS
+from game.data.characters import CHARACTERS, get_display_name, get_short_name, get_realm_name
 from game.data.provinces import PROVINCES
 from game.data.buildings import BUILDING_SPECS, BARRACK_UPGRADE_COSTS, get_barrack_stats
 from game.core.map import CELL_TO_PROV
@@ -25,6 +25,7 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
     font_sm = fonts["sm"]
     font_md = fonts["md"]
     font_lg = fonts["lg"]
+    font_micro = fonts.get("micro", font_xs)
 
     cell_to_prov = CELL_TO_PROV
 
@@ -42,8 +43,253 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
     sel_prov = PROVINCES.get(state.selected_province)
     sel_army = state.get_selected_army()
     
-    # If a city or holding is specifically selected, display Holding Inspector Card!
-    if state.selected_settlement and state.selected_settlement in state.settlements:
+    # Render Army Command Card!
+    if sel_army and sel_army.owner == state.player_id:
+        # Header with Rename button
+        a_title = font_lg.render(sel_army.name, True, COLOR_GOLD)
+        screen.blit(a_title, (content_x, 80))
+        
+        # Rename Army Button [ ✎ Rename ]
+        rn_btn = pygame.Rect(content_x + content_w - 75, 78, 75, 24)
+        b_rn_hov = rn_btn.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (45, 55, 75) if b_rn_hov else (30, 38, 52), rn_btn, border_radius=4)
+        pygame.draw.rect(screen, (100, 150, 220), rn_btn, 1, border_radius=4)
+        rn_lbl = font_xs.render("✎ Rename", True, (220, 235, 255))
+        screen.blit(rn_lbl, (rn_btn.x + (rn_btn.w - rn_lbl.get_width()) // 2, rn_btn.y + 4))
+        if mouse_clicked and b_rn_hov:
+            state.open_rename_modal("army", sel_army.id, sel_army.name)
+        
+        owner_r = CHARACTERS.get(sel_army.owner, {}).get("realm", "Realm"); sub_title = font_sm.render(f"Strength: {sel_army.troops:,} Men  •  Owner: {owner_r}", True, COLOR_TEXT_WHITE)
+        screen.blit(sub_title, (content_x, 110))
+
+        # Co-located Hosts Quick-Switcher on this tile
+        co_hosts = [a for a in state.armies if a.owner == state.player_id and getattr(a, "tile", None) == sel_army.tile and a.troops > 0]
+        y_offset_after_hosts = 135
+        if len(co_hosts) > 1:
+            screen.blit(font_xs.render(f"Co-located Hosts on Tile ({len(co_hosts)}):", True, COLOR_GOLD), (content_x, 132))
+            hx = content_x
+            n_btn_slots = len(co_hosts) + 1
+            hw = min(110, max(52, (content_w - 4 * n_btn_slots) // n_btn_slots))
+            for ha in co_hosts:
+                is_active_h = (ha.id == sel_army.id and len(getattr(state, "selected_army_ids", [])) <= 1)
+                h_rect = pygame.Rect(hx, 148, hw, 24)
+                is_hr_hov = h_rect.collidepoint(mouse_pos)
+                pygame.draw.rect(screen, (40, 80, 125) if is_active_h else ((35, 45, 60) if is_hr_hov else (24, 30, 42)), h_rect, border_radius=3)
+                pygame.draw.rect(screen, COLOR_GOLD if is_active_h else (70, 110, 160), h_rect, 1, border_radius=3)
+                pfx = "★ " if is_active_h else ""
+                h_lbl = font_micro.render(f"{pfx}{ha.name[:8]}:{ha.troops:,}", True, COLOR_GOLD if is_active_h else COLOR_TEXT_WHITE)
+                screen.blit(h_lbl, (h_rect.x + (h_rect.w - h_lbl.get_width()) // 2, h_rect.y + 5))
+                if mouse_clicked and is_hr_hov:
+                    state.selected_army_id = ha.id
+                    state.selected_army_ids = [ha.id]
+                    state.selected_province = ha.province
+                    state.selected_settlement = None
+                hx += hw + 4
+
+            # Select All Hosts button
+            is_all_active = (len(getattr(state, "selected_army_ids", [])) == len(co_hosts))
+            all_rect = pygame.Rect(hx, 148, hw, 24)
+            is_all_hov = all_rect.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (85, 60, 25) if is_all_active else ((50, 40, 20) if is_all_hov else (32, 28, 20)), all_rect, border_radius=3)
+            pygame.draw.rect(screen, COLOR_GOLD if is_all_active else (140, 110, 50), all_rect, 1, border_radius=3)
+            all_lbl = font_micro.render("ALL HOSTS", True, COLOR_GOLD if is_all_active else (230, 210, 160))
+            screen.blit(all_lbl, (all_rect.x + (all_rect.w - all_lbl.get_width()) // 2, all_rect.y + 5))
+            if mouse_clicked and is_all_hov:
+                state.selected_army_ids = [ha.id for ha in co_hosts]
+                state.selected_army_id = co_hosts[0].id
+                state.selected_settlement = None
+
+            # User guidance tip for separating armies
+            tip_txt = font_micro.render("💡 Select 1 host above, then right-click map to move it.", True, (160, 210, 255))
+            screen.blit(tip_txt, (content_x, 176))
+            y_offset_after_hosts = 194
+    
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, y_offset_after_hosts), (content_x + content_w, y_offset_after_hosts), 1)
+    
+        # Location & Status
+        stat_y = y_offset_after_hosts + 10
+        screen.blit(font_md.render("Host Status", True, COLOR_GOLD), (content_x, stat_y))
+        screen.blit(font_sm.render(f"Current Location: {PROVINCES[sel_army.province]['name']}", True, COLOR_TEXT_WHITE), (content_x, stat_y + 28))
+        
+        if sel_army.in_battle:
+            screen.blit(font_md.render("STATUS: ⚔ IN PITCHED BATTLE!", True, COLOR_TEXT_RED), (content_x, 202))
+        elif getattr(sel_army, "is_starving", False):
+            screen.blit(font_md.render("STATUS: ☠ STARVATION! (-5 men/day)", True, COLOR_TEXT_RED), (content_x, 202))
+            screen.blit(font_xs.render("Rations exhausted! Clear supply corridor to receive wagons!", True, (255, 120, 120)), (content_x, 222))
+        elif getattr(sel_army, "is_expeditionary", False):
+            rem_r = max(0, 35 - sel_army.days_without_supply)
+            if getattr(sel_army, "supply_line_cut", False):
+                screen.blit(font_md.render(f"STATUS: ⚠️ LINE CUT ({rem_r}d Rations Left)", True, (255, 160, 50)), (content_x, 202))
+                screen.blit(font_xs.render("Supply corridor severed! Host eating carried rations.", True, (255, 190, 110)), (content_x, 222))
+            else:
+                screen.blit(font_md.render(f"STATUS: 🏕 EXPEDITIONARY ({rem_r}d Rations)", True, (245, 185, 60)), (content_x, 202))
+                screen.blit(font_xs.render("Supplies intact. Monthly supply convoy en route.", True, COLOR_TEXT_MUTED), (content_x, 222))
+        elif sel_army.courier_en_route:
+            screen.blit(font_md.render(f"STATUS: ROYAL COURIER EN ROUTE ({sel_army.courier_days_left}d left)", True, (255, 215, 80)), (content_x, 202))
+            dest_p = PROVINCES[sel_army.province]["name"].split()[0]
+            cap_pid = state.get_realm_capital(sel_army.owner); cap_p = PROVINCES.get(cap_pid, {}).get("name", "Capital")
+            screen.blit(font_xs.render(f"Decree riding from {cap_p} to {dest_p}.", True, COLOR_TEXT_WHITE), (content_x, 222))
+        elif sel_army.is_mustering:
+            screen.blit(font_md.render(f"STATUS: MUSTERING ({sel_army.muster_days}d left)", True, COLOR_GOLD), (content_x, 202))
+        elif sel_army.is_demobilizing:
+            h_prov = sel_army.flag_origin if sel_army.flag_origin in PROVINCES else sel_army.province
+            home_p = PROVINCES.get(h_prov, {}).get("name", "Homeland").split()[0]
+            screen.blit(font_md.render(f"STATUS: ◆ Returning Home to {home_p}", True, (140, 200, 255)), (content_x, 202))
+        elif getattr(sel_army, "siege_prep_days", 0) > 0:
+            screen.blit(font_md.render(f"STATUS: ⛺ SIEGE PREP ({sel_army.siege_prep_days}d left)", True, (255, 200, 70)), (content_x, 202))
+        elif getattr(sel_army, "siege_packup_days", 0) > 0:
+            screen.blit(font_md.render(f"STATUS: ⛺ BREAKING CAMP ({sel_army.siege_packup_days}d left)", True, (240, 160, 60)), (content_x, 202))
+        elif sel_army.is_sieging:
+            t_lbl = sel_army.siege_target_name or 'Holding'
+            screen.blit(font_md.render(f"STATUS: ⚑ BESIEGING {t_lbl} ({sel_army.siege_progress}%)", True, COLOR_GOLD), (content_x, 202))
+        elif getattr(sel_army, "is_expeditionary", False):
+            screen.blit(font_md.render("STATUS: 🏕 EXPEDITIONARY CAMPAIGN", True, (245, 185, 60)), (content_x, 202))
+            wagons_en_route = [w for w in getattr(state, "supply_wagons", []) if w.target_army_id == sel_army.id]
+            if wagons_en_route:
+                w = wagons_en_route[0]
+                dist = len(w.tile_path)
+                screen.blit(font_xs.render(f"Supply Wagon en route: ~{dist}d away (+{w.reinforcements} recruits).", True, (220, 240, 255)), (content_x, 222))
+            else:
+                screen.blit(font_xs.render("Supply corridor connected. Monthly wagon dispatches on 1st.", True, COLOR_TEXT_MUTED), (content_x, 222))
+        elif sel_army.is_moving:
+            screen.blit(font_sm.render(f"Marching to: {PROVINCES[sel_army.next_province]['name']} ({int(sel_army.move_progress)}%)", True, COLOR_TEXT_WHITE), (content_x, 202))
+        else:
+            screen.blit(font_sm.render("Status: Standing Ready", True, COLOR_TEXT_GREEN), (content_x, 202))
+    
+        # March Instruction Box
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 235), (content_x + content_w, 235), 1)
+        screen.blit(font_md.render("March Orders", True, COLOR_GOLD), (content_x, 245))
+        screen.blit(font_sm.render("Click any province on the map to", True, COLOR_TEXT_MUTED), (content_x, 275))
+        screen.blit(font_sm.render("order this army to march there!", True, COLOR_TEXT_MUTED), (content_x, 295))
+        screen.blit(font_xs.render("• March into enemy land to begin SIEGE.", True, COLOR_GOLD), (content_x, 320))
+        screen.blit(font_xs.render("• March into a hostile army to CLASH.", True, COLOR_TEXT_RED), (content_x, 340))
+    
+        # Action Buttons for Army
+        pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 365), (content_x + content_w, 365), 1)
+        
+        # Siege / Break Siege Action Button (15-Day Cycle)
+        cur_settle = state.settlements.get(sel_army.tile)
+        is_on_hostile_settle = False
+        if cur_settle:
+            p_info = PROVINCES.get(sel_army.province)
+            occ = cur_settle.get("occupied_by")
+            if p_info and state.are_hostile(state.player_id, p_info["owner"]):
+                if occ != state.player_id:
+                    is_on_hostile_settle = True
+            elif occ is not None and state.are_hostile(state.player_id, occ):
+                is_on_hostile_settle = True
+
+        if sel_army.is_sieging or getattr(sel_army, "siege_prep_days", 0) > 0:
+            sg_btn = pygame.Rect(content_x, 330, content_w, 32)
+            b_sg_hov = sg_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (90, 45, 25) if b_sg_hov else (65, 30, 18), sg_btn, border_radius=6)
+            pygame.draw.rect(screen, (220, 110, 60), sg_btn, 1, border_radius=6)
+            sg_txt = font_sm.render("⛺ BREAK SIEGE (15d Pack Up)", True, COLOR_TEXT_WHITE)
+            screen.blit(sg_txt, (sg_btn.x + (sg_btn.w - sg_txt.get_width()) // 2, sg_btn.y + 6))
+            if mouse_clicked and b_sg_hov:
+                state.cancel_army_siege(sel_army)
+        elif is_on_hostile_settle and getattr(sel_army, "siege_packup_days", 0) <= 0:
+            sg_btn = pygame.Rect(content_x, 330, content_w, 32)
+            b_sg_hov = sg_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (140, 45, 25) if b_sg_hov else (100, 32, 18), sg_btn, border_radius=6)
+            pygame.draw.rect(screen, (255, 120, 80) if b_sg_hov else (200, 70, 40), sg_btn, 1, border_radius=6)
+            sg_txt = font_sm.render("⚔ SIEGE THE CASTLE (15d Prep)", True, COLOR_TEXT_WHITE)
+            screen.blit(sg_txt, (sg_btn.x + (sg_btn.w - sg_txt.get_width()) // 2, sg_btn.y + 6))
+            if mouse_clicked and b_sg_hov:
+                state.order_army_siege_holding(sel_army, sel_army.tile)
+        
+        # Action: Reinforcements Toggle Button [ 🔄 Reinforce: ON / 🛑 Stop Reinforce ]
+        reinf_btn = pygame.Rect(content_x, 375, content_w, 32)
+        b_rf_hov = reinf_btn.collidepoint(mouse_pos)
+        is_reinf = getattr(sel_army, "allow_reinforcements", True)
+        rf_bg = (35, 75, 45) if (is_reinf and not b_rf_hov) else ((45, 95, 55) if is_reinf else ((75, 35, 35) if not b_rf_hov else (95, 45, 45)))
+        pygame.draw.rect(screen, rf_bg, reinf_btn, border_radius=6)
+        pygame.draw.rect(screen, (80, 205, 100) if is_reinf else (240, 90, 90), reinf_btn, 1, border_radius=6)
+        rf_txt = "🔄 Reinforcements: ON (Deliver Recruits)" if is_reinf else "🛑 Reinforcements: STOPPED (Rations Only)"
+        rf_lbl = font_xs.render(rf_txt, True, COLOR_TEXT_WHITE)
+        screen.blit(rf_lbl, (reinf_btn.x + (reinf_btn.w - rf_lbl.get_width()) // 2, reinf_btn.y + 7))
+        if mouse_clicked and b_rf_hov:
+            sel_army.allow_reinforcements = not is_reinf
+            st_msg = "resumed receiving reinforcements" if sel_army.allow_reinforcements else "stopped receiving reinforcements (rations only)"
+            state.logs.append(f"Logistics Order: {sel_army.name} {st_msg}.")
+
+        # CK2 Rule: MERGE BUTTON ONLY APPEARS WHEN ARMIES ARE ON THE EXACT SAME TILE!
+        armies_same_tile = [
+            a for a in state.armies 
+            if getattr(a, "tile", None) == sel_army.tile and a.owner == state.player_id 
+            and a.id != sel_army.id and not a.in_battle and not a.is_demobilizing and not getattr(a, "courier_en_route", False)
+        ]
+        btn_y_cursor = 405
+        if armies_same_tile:
+            merge_btn = pygame.Rect(content_x, btn_y_cursor, content_w, 34)
+            b_m_hover = merge_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (140, 105, 30) if b_m_hover else (105, 80, 20), merge_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_GOLD, merge_btn, 1, border_radius=6)
+            m_lbl = font_sm.render(f"⚔ MERGE WITH {len(armies_same_tile)} HOSTS HERE", True, COLOR_GOLD)
+            screen.blit(m_lbl, (merge_btn.x + (merge_btn.w - m_lbl.get_width()) // 2, btn_y_cursor + 8))
+            if mouse_clicked and b_m_hover:
+                state.merge_armies_at_tile(sel_army.tile, state.player_id)
+            btn_y_cursor += 42
+
+        # CK2 Rule: SPLIT / REORGANIZE BUTTON (Dynamic: available for sub-units or 50/50 division)
+        sub_u = getattr(sel_army, "sub_units", [])
+        can_split = (len(sub_u) > 1 or sel_army.troops >= 2) and not sel_army.in_battle and not sel_army.is_demobilizing
+        if can_split:
+            split_btn = pygame.Rect(content_x, btn_y_cursor, content_w, 34)
+            b_sp_hov = split_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(screen, (40, 80, 130) if b_sp_hov else (28, 58, 95), split_btn, border_radius=6)
+            pygame.draw.rect(screen, (100, 175, 255), split_btn, 1, border_radius=6)
+            sp_title = f"➦ SPLIT HOST ({len(sub_u)} Levies)" if len(sub_u) > 1 else "➦ SPLIT HOST IN HALF (50/50)"
+            sp_lbl = font_sm.render(sp_title, True, (215, 235, 255))
+            screen.blit(sp_lbl, (split_btn.x + (split_btn.w - sp_lbl.get_width()) // 2, btn_y_cursor + 8))
+            if mouse_clicked and b_sp_hov:
+                if len(sub_u) > 1:
+                    state.split_army_target_id = sel_army.id
+                    state.split_selected_units = set()
+                else:
+                    state.split_army_in_half(sel_army.id)
+            btn_y_cursor += 42
+    
+        # Disband / Cancel Muster / Cancel Summons Button (NOW DYNAMICALLY POSITIONED BELOW SPLIT!)
+        dis_btn = pygame.Rect(content_x, btn_y_cursor, content_w, 36)
+        b_d_hover = dis_btn.collidepoint(mouse_pos)
+        if sel_army.is_mustering or sel_army.courier_en_route:
+            pygame.draw.rect(screen, (90, 40, 40) if b_d_hover else (70, 30, 30), dis_btn, border_radius=6)
+            pygame.draw.rect(screen, (240, 90, 90), dis_btn, 1, border_radius=6)
+            btn_txt = "CANCEL SUMMONS (Recall Courier)" if sel_army.courier_en_route else "CANCEL MUSTER (Refund Men)"
+            b_lbl = font_md.render(btn_txt, True, (255, 220, 220))
+            screen.blit(b_lbl, (dis_btn.x + (dis_btn.w - b_lbl.get_width()) // 2, btn_y_cursor + 8))
+            if mouse_clicked and b_d_hover:
+                state.disband_army(sel_army)
+        elif sel_army.is_demobilizing:
+            pygame.draw.rect(screen, (40, 90, 140) if b_d_hover else (30, 65, 105), dis_btn, border_radius=6)
+            pygame.draw.rect(screen, (80, 160, 240), dis_btn, 1, border_radius=6)
+            c_lbl = font_md.render("CANCEL DISBAND (Resume War)", True, COLOR_TEXT_WHITE)
+            screen.blit(c_lbl, (dis_btn.x + (dis_btn.w - c_lbl.get_width()) // 2, btn_y_cursor + 8))
+            if mouse_clicked and b_d_hover:
+                sel_army.is_demobilizing = False
+                sel_army.path = []
+                state.logs.append(f"{sel_army.name} cancelled return march and is standing ready.")
+        else:
+            pygame.draw.rect(screen, (80, 35, 35) if b_d_hover else (60, 28, 28), dis_btn, border_radius=6)
+            pygame.draw.rect(screen, COLOR_TEXT_RED, dis_btn, 1, border_radius=6)
+            d_lbl = font_md.render("ORDER DISBAND (Return Home)", True, (255, 220, 220))
+            screen.blit(d_lbl, (dis_btn.x + (dis_btn.w - d_lbl.get_width()) // 2, btn_y_cursor + 8))
+            if mouse_clicked and b_d_hover:
+                state.disband_army(sel_army)
+    
+        btn_y = 485
+        # Deselect Army Button
+        desel_btn = pygame.Rect(content_x, btn_y, content_w, 36)
+        b_ds_hover = desel_btn.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_ds_hover else COLOR_BUTTON_NORMAL, desel_btn, border_radius=6)
+        pygame.draw.rect(screen, COLOR_PANEL_BORDER, desel_btn, 1, border_radius=6)
+        ds_lbl = font_sm.render("Deselect Army (View Province)", True, COLOR_TEXT_MUTED)
+        screen.blit(ds_lbl, (desel_btn.x + (desel_btn.w - ds_lbl.get_width()) // 2, btn_y + 8))
+        if mouse_clicked and b_ds_hover:
+            state.selected_army_id = None
+    
+    elif state.selected_settlement and state.selected_settlement in state.settlements:
         s_coord = state.selected_settlement
         s_data = state.settlements[s_coord]
         p_parent = PROVINCES.get(s_data["province"])
@@ -54,6 +300,15 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
     
         c_head = font_lg.render(s_data["name"], True, COLOR_GOLD)
         screen.blit(c_head, (content_x, 80))
+        
+        rn_s_btn = pygame.Rect(content_x + content_w - 75, 78, 75, 24)
+        b_rns_hov = rn_s_btn.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (45, 55, 75) if b_rns_hov else (30, 38, 52), rn_s_btn, border_radius=4)
+        pygame.draw.rect(screen, (100, 150, 220), rn_s_btn, 1, border_radius=4)
+        rns_lbl = font_xs.render("✎ Rename", True, (220, 235, 255))
+        screen.blit(rns_lbl, (rn_s_btn.x + (rn_s_btn.w - rns_lbl.get_width()) // 2, rn_s_btn.y + 4))
+        if mouse_clicked and b_rns_hov:
+            state.open_rename_modal("settlement", s_coord, s_data["name"])
         
         p_cap = s_data['province'].replace("_", " ").title()
         if h_type == "city":
@@ -76,17 +331,17 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
         cur_y = 216
         if h_type == "city":
             screen.blit(font_sm.render("Economic Income: +3 Gold / month", True, COLOR_TEXT_GREEN), (content_x, cur_y))
-            screen.blit(font_sm.render("Recruitment Rate: +10 Men / month", True, COLOR_TEXT_GREEN), (content_x, cur_y + 22))
+            screen.blit(font_sm.render("Recruitment Rate: +3 Men / month", True, COLOR_TEXT_GREEN), (content_x, cur_y + 22))
             screen.blit(font_sm.render("Local Garrison: 100 Defenders", True, COLOR_TEXT_WHITE), (content_x, cur_y + 44))
             screen.blit(font_xs.render("• Generates gold and recruits to supply and replenish realm fyrd.", True, COLOR_TEXT_MUTED), (content_x, cur_y + 66))
             cur_y += 90
     
         elif h_type == "fort":
             screen.blit(font_sm.render("Economic Income: +1 Gold / month (Tolls)", True, COLOR_TEXT_GREEN), (content_x, cur_y))
-            screen.blit(font_sm.render("Recruitment Rate: +10 Men / month", True, COLOR_TEXT_GREEN), (content_x, cur_y + 22))
+            screen.blit(font_sm.render("Recruitment Rate: +3 Men / month", True, COLOR_TEXT_GREEN), (content_x, cur_y + 22))
             screen.blit(font_sm.render("Local Garrison: 300 Defenders", True, COLOR_TEXT_WHITE), (content_x, cur_y + 44))
             screen.blit(font_sm.render("Fortification: High Defense (Twin Turrets)", True, (160, 210, 255)), (content_x, cur_y + 66))
-            screen.blit(font_xs.render("• Shields the province and trains +10 garrison defenders monthly.", True, COLOR_TEXT_MUTED), (content_x, cur_y + 88))
+            screen.blit(font_xs.render("• Shields the province and trains +3 garrison defenders monthly.", True, COLOR_TEXT_MUTED), (content_x, cur_y + 88))
             cur_y += 112
     
         else: # Barracks
@@ -177,141 +432,6 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
             state.selected_settlement = None
             state.selected_vassal_idx = None
     
-    # If an army is selected, show Army Command Card!
-    elif sel_army and sel_army.owner == state.player_id:
-        # Header
-        a_title = font_lg.render(sel_army.name, True, COLOR_GOLD)
-        screen.blit(a_title, (content_x, 80))
-        
-        owner_r = CHARACTERS.get(sel_army.owner, {}).get("realm", "Realm"); sub_title = font_sm.render(f"Strength: {sel_army.troops:,} Men  •  Owner: {owner_r}", True, COLOR_TEXT_WHITE)
-        screen.blit(sub_title, (content_x, 110))
-    
-        pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 135), (content_x + content_w, 135), 1)
-    
-        # Location & Status
-        screen.blit(font_md.render("Host Status", True, COLOR_GOLD), (content_x, 145))
-        screen.blit(font_sm.render(f"Current Location: {PROVINCES[sel_army.province]['name']}", True, COLOR_TEXT_WHITE), (content_x, 175))
-        
-        if sel_army.in_battle:
-            screen.blit(font_md.render("STATUS: ⚔ IN PITCHED BATTLE!", True, COLOR_TEXT_RED), (content_x, 202))
-        elif sel_army.courier_en_route:
-            screen.blit(font_md.render(f"STATUS: ROYAL COURIER EN ROUTE ({sel_army.courier_days_left}d left)", True, (255, 215, 80)), (content_x, 202))
-            dest_p = PROVINCES[sel_army.province]["name"].split()[0]
-            cap_pid = state.get_realm_capital(sel_army.owner); cap_p = PROVINCES.get(cap_pid, {}).get("name", "Capital")
-            screen.blit(font_xs.render(f"Decree riding from {cap_p} to {dest_p}.", True, COLOR_TEXT_WHITE), (content_x, 222))
-        elif sel_army.is_mustering:
-            screen.blit(font_md.render(f"STATUS: MUSTERING ({sel_army.muster_days}d left)", True, COLOR_GOLD), (content_x, 202))
-        elif sel_army.is_demobilizing:
-            home_p = PROVINCES[sel_army.flag_origin]["name"].split()[0]
-            screen.blit(font_md.render(f"STATUS: ◆ Returning Home to {home_p}", True, (140, 200, 255)), (content_x, 202))
-        elif getattr(sel_army, "siege_prep_days", 0) > 0:
-            screen.blit(font_md.render(f"STATUS: ⛺ SIEGE PREP ({sel_army.siege_prep_days}d left)", True, (255, 200, 70)), (content_x, 202))
-        elif getattr(sel_army, "siege_packup_days", 0) > 0:
-            screen.blit(font_md.render(f"STATUS: ⛺ BREAKING CAMP ({sel_army.siege_packup_days}d left)", True, (240, 160, 60)), (content_x, 202))
-        elif sel_army.is_sieging:
-            t_lbl = sel_army.siege_target_name or 'Holding'
-            screen.blit(font_md.render(f"STATUS: ⚑ BESIEGING {t_lbl} ({sel_army.siege_progress}%)", True, COLOR_GOLD), (content_x, 202))
-        elif sel_army.is_moving:
-            screen.blit(font_sm.render(f"Marching to: {PROVINCES[sel_army.next_province]['name']} ({int(sel_army.move_progress)}%)", True, COLOR_TEXT_WHITE), (content_x, 202))
-        else:
-            screen.blit(font_sm.render("Status: Standing Ready", True, COLOR_TEXT_GREEN), (content_x, 202))
-    
-        # March Instruction Box
-        pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 235), (content_x + content_w, 235), 1)
-        screen.blit(font_md.render("March Orders", True, COLOR_GOLD), (content_x, 245))
-        screen.blit(font_sm.render("Click any province on the map to", True, COLOR_TEXT_MUTED), (content_x, 275))
-        screen.blit(font_sm.render("order this army to march there!", True, COLOR_TEXT_MUTED), (content_x, 295))
-        screen.blit(font_xs.render("• March into enemy land to begin SIEGE.", True, COLOR_GOLD), (content_x, 320))
-        screen.blit(font_xs.render("• March into Viking army to CLASH.", True, COLOR_TEXT_RED), (content_x, 340))
-    
-        # Action Buttons for Army
-        pygame.draw.line(screen, COLOR_PANEL_BORDER, (content_x, 365), (content_x + content_w, 365), 1)
-        
-        # Siege / Break Siege Action Button (15-Day Cycle)
-        cur_settle = state.settlements.get(sel_army.tile)
-        is_on_hostile_settle = False
-        if cur_settle:
-            p_info = PROVINCES.get(sel_army.province)
-            occ = cur_settle.get("occupied_by")
-            if p_info and state.are_hostile(state.player_id, p_info["owner"]):
-                if occ != state.player_id:
-                    is_on_hostile_settle = True
-            elif occ is not None and state.are_hostile(state.player_id, occ):
-                is_on_hostile_settle = True
-
-        if sel_army.is_sieging or getattr(sel_army, "siege_prep_days", 0) > 0:
-            sg_btn = pygame.Rect(content_x, 330, content_w, 32)
-            b_sg_hov = sg_btn.collidepoint(mouse_pos)
-            pygame.draw.rect(screen, (90, 45, 25) if b_sg_hov else (65, 30, 18), sg_btn, border_radius=6)
-            pygame.draw.rect(screen, (220, 110, 60), sg_btn, 1, border_radius=6)
-            sg_txt = font_sm.render("⛺ BREAK SIEGE (15d Pack Up)", True, COLOR_TEXT_WHITE)
-            screen.blit(sg_txt, (sg_btn.x + (sg_btn.w - sg_txt.get_width()) // 2, sg_btn.y + 6))
-            if mouse_clicked and b_sg_hov:
-                state.cancel_army_siege(sel_army)
-        elif is_on_hostile_settle and getattr(sel_army, "siege_packup_days", 0) <= 0:
-            sg_btn = pygame.Rect(content_x, 330, content_w, 32)
-            b_sg_hov = sg_btn.collidepoint(mouse_pos)
-            pygame.draw.rect(screen, (140, 45, 25) if b_sg_hov else (100, 32, 18), sg_btn, border_radius=6)
-            pygame.draw.rect(screen, (255, 120, 80) if b_sg_hov else (200, 70, 40), sg_btn, 1, border_radius=6)
-            sg_txt = font_sm.render("⚔ SIEGE THE CASTLE (15d Prep)", True, COLOR_TEXT_WHITE)
-            screen.blit(sg_txt, (sg_btn.x + (sg_btn.w - sg_txt.get_width()) // 2, sg_btn.y + 6))
-            if mouse_clicked and b_sg_hov:
-                state.order_army_siege_holding(sel_army, sel_army.tile)
-        
-        # Merge button if other armies in same province
-        other_armies = [a for a in state.armies if a.province == sel_army.province and a.owner == state.player_id and a.id != sel_army.id]
-        if other_armies:
-            merge_btn = pygame.Rect(content_x, 385, content_w, 40)
-            b_m_hover = merge_btn.collidepoint(mouse_pos)
-            pygame.draw.rect(screen, (40, 90, 140) if b_m_hover else (30, 65, 105), merge_btn, border_radius=6)
-            pygame.draw.rect(screen, (80, 160, 240), merge_btn, 1, border_radius=6)
-            m_lbl = font_md.render("MERGE WITH OTHER HOSTS", True, COLOR_TEXT_WHITE)
-            screen.blit(m_lbl, (merge_btn.x + (merge_btn.w - m_lbl.get_width()) // 2, 394))
-            if mouse_clicked and b_m_hover:
-                state.merge_armies_in_province(sel_army.province, state.player_id)
-    
-        # Disband / Cancel Muster / Cancel Summons Button
-        if sel_army.is_mustering or sel_army.courier_en_route:
-            dis_btn = pygame.Rect(content_x, 435, content_w, 40)
-            b_d_hover = dis_btn.collidepoint(mouse_pos)
-            pygame.draw.rect(screen, (90, 40, 40) if b_d_hover else (70, 30, 30), dis_btn, border_radius=6)
-            pygame.draw.rect(screen, (240, 90, 90), dis_btn, 1, border_radius=6)
-            btn_txt = "CANCEL SUMMONS (Recall Courier)" if sel_army.courier_en_route else "CANCEL MUSTER (Refund Men)"
-            b_lbl = font_md.render(btn_txt, True, (255, 220, 220))
-            screen.blit(b_lbl, (dis_btn.x + (dis_btn.w - b_lbl.get_width()) // 2, 444))
-            if mouse_clicked and b_d_hover:
-                state.disband_army(sel_army)
-        elif sel_army.is_demobilizing:
-            dis_btn = pygame.Rect(content_x, 435, content_w, 40)
-            b_d_hover = dis_btn.collidepoint(mouse_pos)
-            pygame.draw.rect(screen, (40, 90, 140) if b_d_hover else (30, 65, 105), dis_btn, border_radius=6)
-            pygame.draw.rect(screen, (80, 160, 240), dis_btn, 1, border_radius=6)
-            c_lbl = font_md.render("CANCEL DISBAND (Resume War)", True, COLOR_TEXT_WHITE)
-            screen.blit(c_lbl, (dis_btn.x + (dis_btn.w - c_lbl.get_width()) // 2, 444))
-            if mouse_clicked and b_d_hover:
-                sel_army.is_demobilizing = False
-                sel_army.path = []
-                state.logs.append(f"{sel_army.name} cancelled return march and is standing ready.")
-        else:
-            dis_btn = pygame.Rect(content_x, 435, content_w, 40)
-            b_d_hover = dis_btn.collidepoint(mouse_pos)
-            pygame.draw.rect(screen, (80, 35, 35) if b_d_hover else (60, 28, 28), dis_btn, border_radius=6)
-            pygame.draw.rect(screen, COLOR_TEXT_RED, dis_btn, 1, border_radius=6)
-            d_lbl = font_md.render("ORDER DISBAND (Return Home)", True, (255, 220, 220))
-            screen.blit(d_lbl, (dis_btn.x + (dis_btn.w - d_lbl.get_width()) // 2, 444))
-            if mouse_clicked and b_d_hover:
-                state.disband_army(sel_army)
-    
-        # Deselect Army Button
-        desel_btn = pygame.Rect(content_x, 485, content_w, 36)
-        b_ds_hover = desel_btn.collidepoint(mouse_pos)
-        pygame.draw.rect(screen, COLOR_BUTTON_HOVER if b_ds_hover else COLOR_BUTTON_NORMAL, desel_btn, border_radius=6)
-        pygame.draw.rect(screen, COLOR_PANEL_BORDER, desel_btn, 1, border_radius=6)
-        ds_lbl = font_sm.render("Deselect Army (View Province)", True, COLOR_TEXT_MUTED)
-        screen.blit(ds_lbl, (desel_btn.x + (desel_btn.w - ds_lbl.get_width()) // 2, 493))
-        if mouse_clicked and b_ds_hover:
-            state.selected_army_id = None
-    
     elif sel_prov:
         owner_char = CHARACTERS.get(sel_prov["owner"], CHARACTERS[state.player_id])
         is_vassal_seat = (getattr(state, "player_liege", None) is not None and (
@@ -323,12 +443,12 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
         # Province Header
         p_title = font_lg.render(sel_prov["name"], True, COLOR_GOLD)
         screen.blit(p_title, (content_x, 75))
-        sub_title = font_xs.render(f"Culture: {sel_prov['culture']}  •  Faith: {sel_prov['religion']}", True, COLOR_TEXT_MUTED)
+        sub_title = font_xs.render(f"Culture: {sel_prov.get('culture', 'Unknown')}  •  Faith: {sel_prov.get('faith', sel_prov.get('religion', 'Unknown'))}", True, COLOR_TEXT_MUTED)
         screen.blit(sub_title, (content_x, 102))
 
         # Realm Capital Status Badge / Change Capital Button
         active_player_cap = state.get_realm_capital(state.player_id)
-        active_enemy_cap = state.get_realm_capital(state.enemy_id)
+        active_ai_caps = {state.get_realm_capital(cid) for cid in state.get_active_rulers(include_player=False)}
         
         if state.selected_province == active_player_cap:
             cap_rect = pygame.Rect(content_x + content_w - 150, 73, 150, 26)
@@ -351,11 +471,13 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
             pygame.draw.rect(screen, COLOR_GOLD, cap_rect, 1, border_radius=4)
             lbl = font_xs.render("★ VASSAL DUCHY SEAT", True, COLOR_GOLD)
             screen.blit(lbl, (cap_rect.x + (cap_rect.w - lbl.get_width()) // 2, cap_rect.y + 5))
-        elif state.selected_province == active_enemy_cap:
+        elif state.selected_province in active_ai_caps:
             cap_rect = pygame.Rect(content_x + content_w - 150, 73, 150, 26)
             pygame.draw.rect(screen, (55, 25, 25), cap_rect, border_radius=4)
             pygame.draw.rect(screen, (220, 80, 80), cap_rect, 1, border_radius=4)
-            lbl = font_xs.render("★ ENEMY CAPITAL", True, (255, 160, 160))
+            rival_owner = sel_prov.get("owner")
+            rival_label = get_short_name(rival_owner).upper() if rival_owner in CHARACTERS else "RIVAL"
+            lbl = font_xs.render(f"★ {rival_label} CAPITAL", True, (255, 160, 160))
             screen.blit(lbl, (cap_rect.x + (cap_rect.w - lbl.get_width()) // 2, cap_rect.y + 5))
     
         # CLEAN TAB NAVIGATION BAR (Province Overview | Buildings | Vassals | Fiefs)
@@ -431,7 +553,27 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                 raise_btn = pygame.Rect(content_x, 345, content_w, 40)
                 b_r_hov = raise_btn.collidepoint(mouse_pos) and can_raise
                 
-                if is_p_cd:
+                has_field_army = any(a.owner == state.player_id and a.troops > 0 and not getattr(a, "is_demobilizing", False) for a in state.armies)
+                has_expeditionary = any(a.owner == state.player_id and a.troops > 0 and getattr(a, "is_expeditionary", False) for a in state.armies)
+                
+                # Supply countdown only runs when armies are outside domestic province (Expeditionary)!
+                if has_expeditionary:
+                    days_left = state.get_next_supply_days(state.player_id)
+                    pygame.draw.rect(screen, (34, 46, 64) if b_r_hov else (26, 35, 50), raise_btn, border_radius=6)
+                    pygame.draw.rect(screen, (90, 160, 240) if b_r_hov else (65, 120, 185), raise_btn, 1, border_radius=6)
+                    sup_lbl = font_md.render(f"Next Supply in : {days_left} d", True, (220, 238, 255))
+                    screen.blit(sup_lbl, (raise_btn.x + (raise_btn.w - sup_lbl.get_width()) // 2, 354))
+                    if mouse_clicked and b_r_hov:
+                        state.logs.append(f"Expeditionary host in foreign lands! Next supply wagon arrives in {days_left} days.")
+                elif has_field_army:
+                    # Armies are at home / domestic!
+                    pygame.draw.rect(screen, (28, 48, 38) if b_r_hov else (20, 36, 28), raise_btn, border_radius=6)
+                    pygame.draw.rect(screen, (70, 185, 110), raise_btn, 1, border_radius=6)
+                    hm_lbl = font_sm.render("🏰 Domestic Supplies: Intact (At Home)", True, (200, 255, 215))
+                    screen.blit(hm_lbl, (raise_btn.x + (raise_btn.w - hm_lbl.get_width()) // 2, 356))
+                    if mouse_clicked and b_r_hov:
+                        state.logs.append("Armies are currently within domestic borders. Rations drawn locally from royal granaries.")
+                elif is_p_cd:
                     m_left = (p_cd + 29) // 30
                     pygame.draw.rect(screen, (38, 42, 50), raise_btn, border_radius=6)
                     pygame.draw.rect(screen, (60, 65, 78), raise_btn, 1, border_radius=6)
@@ -847,7 +989,7 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                                     v["tax_contribution"] = st_v["tax_paid"]
                                     v["levy_contribution"] = st_v["levy_contribution"]
     
-                        # 3. Retain the fief as Crown Demesne (King Alfred is now the direct holder!)
+                        # 3. Retain the fief as Crown Demesne (ruler is now the direct holder!)
                         f_data["holder"] = state.player["name"]
                         f_data["vassal_id"] = None
                         f_data["is_crown_demesne"] = True
@@ -892,8 +1034,10 @@ def render_right_panel(screen, state, mouse_pos, mouse_clicked, fonts, coa_cache
                 elif mouse_clicked and n_hov and state.fief_page < total_pages - 1:
                     state.fief_page += 1
         else:
-            # Enemy Province Instructions
-            screen.blit(font_md.render("Viking Controlled Territory", True, COLOR_TEXT_RED), (content_x, 415))
+            # Foreign (AI-controlled) Province Instructions
+            foreign_owner = sel_prov.get("owner")
+            foreign_label = get_realm_name(foreign_owner, "Foreign Controlled Territory") if foreign_owner in CHARACTERS else "Foreign Controlled Territory"
+            screen.blit(font_md.render(f"{foreign_label}", True, COLOR_TEXT_RED), (content_x, 415))
             screen.blit(font_sm.render("To conquer this province:", True, COLOR_TEXT_MUTED), (content_x, 445))
             screen.blit(font_xs.render("1. Raise levies from your provinces.", True, COLOR_TEXT_WHITE), (content_x, 470))
             screen.blit(font_xs.render("2. Rally & merge your hosts into an army.", True, COLOR_TEXT_WHITE), (content_x, 490))

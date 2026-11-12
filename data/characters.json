@@ -2,12 +2,18 @@
   "char_human": {
     "id": "char_human",
     "name": "King Alden 'the Sun-Forged'",
+    "personal_name": "Alden 'the Sun-Forged'",
+    "honorific": "King",
+    "short_name": "Solaris",
     "title": "High King of Solaris",
     "dynasty": "House of Solaris",
     "realm": "Holy Kingdom of Solaris",
+    "duchy_title": "Duchy of Solaris",
     "culture": "Solaris Human",
     "faith": "Church of Light",
+    "gender": "male",
     "province": "solaris_prime",
+    "capital_province": "solaris_prime",
     "martial": 18,
     "stewardship": 16,
     "diplomacy": 15,
@@ -28,17 +34,29 @@
     "portrait": "portrait_alfred.png",
     "coa": "coa_wessex.png",
     "color": [215, 45, 45],
-    "traits": ["Sun-Forged", "Just", "Valiant", "Defender of Light"]
+    "traits": ["Sun-Forged", "Just", "Valiant", "Defender of Light"],
+    "naming": {
+      "count_title": "Count",
+      "baron_title": "Baron",
+      "first_names": ["Gareth", "Valerius", "Julian", "Tristan", "Aiden", "Lucian", "Rowan", "Evander", "Bastian", "Dorian", "Cassian", "Brandon"],
+      "epithets": ["the Bold", "Sun-Blessed", "of the Marches", "the Pious", "the Stalwart", "Golden-Blade", "the Wise", "Light-Bearer"]
+    }
   },
   "char_ironpeak": {
     "id": "char_ironpeak",
     "name": "High Thane Thoradin 'Ironbreaker'",
+    "personal_name": "Thoradin 'Ironbreaker'",
+    "honorific": "High Thane",
+    "short_name": "Ironpeak",
     "title": "Grand Thane of Ironpeak",
     "dynasty": "Clan Ironbreaker",
     "realm": "Ironpeak Dominion",
+    "duchy_title": "Duchy of Ironpeak",
     "culture": "Mountain Dwarf",
     "faith": "Ancestor Forge",
+    "gender": "male",
     "province": "iron_citadel",
+    "capital_province": "iron_citadel",
     "martial": 19,
     "stewardship": 17,
     "diplomacy": 11,
@@ -59,17 +77,29 @@
     "portrait": "portrait_halfden.png",
     "coa": "coa_danelaw.png",
     "color": [55, 75, 95],
-    "traits": ["Ironbreaker", "Master Smith", "Stubborn", "Fortress Builder"]
+    "traits": ["Ironbreaker", "Master Smith", "Stubborn", "Fortress Builder"],
+    "naming": {
+      "count_title": "Thane",
+      "baron_title": "Hearth-Warden",
+      "first_names": ["Thorin", "Balgor", "Grom", "Durnik", "Krag", "Thrum", "Barek", "Hulgar", "Moradin", "Brond", "Orrik", "Kazador"],
+      "epithets": ["Iron-Fist", "Stone-Shield", "Anvil-Breaker", "Deep-Dweller", "the Unyielding", "Onyx-Eye", "Crag-Strider", "Forge-Keeper"]
+    }
   },
   "char_sylvan": {
     "id": "char_sylvan",
     "name": "Queen Aerith 'the Whisperer'",
+    "personal_name": "Aerith 'the Whisperer'",
+    "honorific": "Queen",
+    "short_name": "Sylvandell",
     "title": "Sylvan Archon of Sylvandell",
     "dynasty": "House of Sylvandell",
     "realm": "Sylvandell Sovereignty",
+    "duchy_title": "Duchy of Sylvandell",
     "culture": "Sylvan Elf",
     "faith": "World Tree",
+    "gender": "female",
     "province": "eloria_heart",
+    "capital_province": "eloria_heart",
     "martial": 14,
     "stewardship": 15,
     "diplomacy": 18,
@@ -90,6 +120,12 @@
     "portrait": "portrait_rhodri.png",
     "coa": "coa_scotland.png",
     "color": [35, 105, 55],
-    "traits": ["Whisperer", "Ancient Wisdom", "Forest Warden", "Mystic"]
+    "traits": ["Whisperer", "Ancient Wisdom", "Forest Warden", "Mystic"],
+    "naming": {
+      "count_title": "Warden",
+      "baron_title": "Elder",
+      "first_names": ["Faeron", "Sylas", "Caelum", "Elidor", "Thalor", "Vesper", "Lirion", "Ithil", "Faelar", "Erydor", "Orion", "Bryn"],
+      "epithets": ["Whisper-Wind", "Green-Bough", "Silver-Leaf", "the Swift", "Moon-Watcher", "Shadow-Stalker", "Ever-Green", "Star-Gazer"]
+    }
   }
 }

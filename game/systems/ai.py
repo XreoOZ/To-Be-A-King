@@ -4,7 +4,7 @@ Scalable to multiple AI factions without hardcoded names or flavor strings.
 """
 import random
 from game.data.provinces import PROVINCES, ADJACENCY, find_shortest_path
-from game.data.characters import CHARACTERS
+from game.data.characters import CHARACTERS, get_display_name, get_realm_name, get_short_name
 from game.data.buildings import BUILDING_SPECS
 from game.core.map import CELL_TO_PROV, PROV_TO_TILES, get_province_capital_tile
 from game.systems.economy import get_vassal_landed_status, sync_province_holdings_stats
@@ -15,11 +15,13 @@ def standardize_realm_laws(state, ruler_id):
     Uniformly standardizes an AI ruler's vassals' feudal obligations (Tax & Levies).
     Ensures AI forces maintain uniform 20% levies, 20% tax across their feudal subjects (matching physical holdings).
     """
+    tax_rate = int(getattr(state, "ai_vassal_tax_rate", 20))
+    levy_rate = int(getattr(state, "ai_vassal_levy_rate", 20))
     realm_provs = [pid for pid, p in PROVINCES.items() if p.get("owner") == ruler_id]
     for pid in realm_provs:
         for v in state.vassals.get(pid, []):
-            v["tax_rate"] = 20
-            v["levy_rate"] = 20
+            v["tax_rate"] = tax_rate
+            v["levy_rate"] = levy_rate
             v["tax_locked"] = True
             v["levy_locked"] = True
             st = get_vassal_landed_status(state, v, pid)
@@ -27,8 +29,17 @@ def standardize_realm_laws(state, ruler_id):
             v["levy_contribution"] = st["levy_contribution"]
         sync_province_holdings_stats(state, pid)
 
+def standardize_all_ai_laws(state):
+    """Applies standardized feudal obligations to every living AI realm."""
+    ai_rulers = getattr(state, "ai_rulers", None)
+    if not ai_rulers:
+        ai_rulers = [cid for cid in CHARACTERS if cid != state.player_id]
+    for ruler_id in ai_rulers:
+        if ruler_id in CHARACTERS and CHARACTERS[ruler_id].get("alive", True):
+            standardize_realm_laws(state, ruler_id)
+
 def standardize_enemy_ai_laws(state):
-    """Backwards-compatible wrapper for enemy ruler."""
+    """Backwards-compatible wrapper for the primary AI rival."""
     standardize_realm_laws(state, state.enemy_id)
 
 def evaluate_target_province(state, target_pid, friendly_provs, hostile_armies, ruler_id):
@@ -72,10 +83,6 @@ def evaluate_target_province(state, target_pid, friendly_provs, hostile_armies, 
 
     return score
 
-def evaluate_saxon_target(state, target_pid, danelaw_provs, player_armies):
-    """Backwards-compatible wrapper."""
-    return evaluate_target_province(state, target_pid, danelaw_provs, player_armies, state.enemy_id)
-
 def run_realm_ai(state, ruler_id):
     """
     Master Tactical & Strategic AI for any AI Ruler (parameterized by ruler_id).
@@ -93,20 +100,16 @@ def run_realm_ai(state, ruler_id):
     if not ruler or not ruler.get("alive", True):
         return
 
-    # Check if this realm is a vassal of the player or another liege in peace
-    if ruler.get("liege") == state.player_id:
-        return
-
-    # Check if the player is a peaceful vassal of this liege
-    if getattr(state, "player_liege", None) == ruler_id and getattr(state, "war_status", "war") == "vassalage":
-        # AI does not wage war against its own vassal in peacetime!
+    # A vassalized AI ruler does not wage war on its own liege.
+    liege_id = state.get_liege(ruler_id)
+    if liege_id == state.player_id and state.war_status == "vassalage":
         for a in list(state.armies):
             if a.owner == ruler_id and not getattr(a, "is_demobilizing", False) and not a.in_battle:
                 state.disband_army(a)
         return
 
-    # Check if this liege is a peaceful vassal of the player
-    if getattr(state, "enemy_liege", None) == state.player_id and getattr(state, "war_status", "war") == "vassalage":
+    # A liege does not wage war against a peaceful player vassal.
+    if state.get_liege(state.player_id) == ruler_id and state.war_status == "vassalage":
         for a in list(state.armies):
             if a.owner == ruler_id and not getattr(a, "is_demobilizing", False) and not a.in_battle:
                 state.disband_army(a)
@@ -116,8 +119,8 @@ def run_realm_ai(state, ruler_id):
     if not realm_provs:
         return
 
-    r_name = ruler["name"].split()[0]
-    realm_name = ruler.get("realm", "the realm")
+    r_name = get_display_name(ruler_id)
+    realm_name = get_realm_name(ruler_id, "the realm")
 
     # 1. Standardize AI realm feudal laws
     standardize_realm_laws(state, ruler_id)
@@ -299,38 +302,49 @@ def run_realm_ai(state, ruler_id):
 
             # STEP 2: RALLY DI SATU TITIK PALING AMAN -> KE LOKASI PALING DEKAT DENGAN LAWAN DI PERBATASAN
             if ready_armies:
-                ready_armies.sort(key=lambda x: x.troops, reverse=True)
-                main_host = ready_armies[0]
+                # Expeditionary / Sieging hosts NEVER abort campaigns to run back for border alerts!
+                expeditionary_hosts = [
+                    a for a in ready_armies
+                    if a.province not in realm_provs or getattr(a, "is_sieging", False) or getattr(a, "siege_prep_days", 0) > 0 or getattr(a, "siege_intent", False) or getattr(a, "siege_packup_days", 0) > 0
+                ]
+                defense_hosts = [a for a in ready_armies if a not in expeditionary_hosts]
 
-                # Concentration check: Once assembled at safe rally point (>= 45% of total field troops or 1 main host),
-                # advance directly to the frontier defense tile to block/guard the border line!
-                main_at_safe = (getattr(main_host, "tile", None) == safe_rally_tile)
-                main_at_border = (getattr(main_host, "tile", None) == defense_staging_tile)
-                is_concentrated = (main_host.troops >= total_my_field * 0.45) or (len(ready_armies) <= 1)
-                should_advance_to_border = is_concentrated or main_at_safe or main_at_border or (safe_rally_tile == defense_staging_tile)
+                if defense_hosts:
+                    defense_hosts.sort(key=lambda x: x.troops, reverse=True)
+                    main_host = defense_hosts[0]
 
-                target_destination = defense_staging_tile if should_advance_to_border else safe_rally_tile
+                    # Concentration check: Once assembled at safe rally point (>= 45% of total field troops or 1 main host),
+                    # advance directly to the frontier defense tile to block/guard the border line!
+                    main_at_safe = (getattr(main_host, "tile", None) == safe_rally_tile)
+                    main_at_border = (getattr(main_host, "tile", None) == defense_staging_tile)
+                    is_concentrated = (main_host.troops >= total_my_field * 0.45) or (len(defense_hosts) <= 1)
+                    should_advance_to_border = is_concentrated or main_at_safe or main_at_border or (safe_rally_tile == defense_staging_tile)
 
-                # Main host leads the march to target destination
-                if getattr(main_host, "tile", None) == target_destination:
-                    if main_host.is_moving:
-                        main_host.tile_path = []
-                        main_host.move_progress = 0.0
-                else:
-                    if not main_host.is_moving or (main_host.tile_path and main_host.tile_path[-1] != target_destination):
-                        state.order_army_march_to_tile(main_host, target_destination)
+                    target_destination = defense_staging_tile if should_advance_to_border else safe_rally_tile
 
-                # All other ready detachments march to join main_host directly
-                join_target = getattr(main_host, "tile", None) or target_destination
-                for sub_a in ready_armies[1:]:
-                    if getattr(sub_a, "tile", None) == join_target:
-                        if sub_a.is_moving:
-                            sub_a.tile_path = []
-                            sub_a.move_progress = 0.0
+                    # Main defense host leads the march to target destination
+                    if getattr(main_host, "tile", None) == target_destination:
+                        if main_host.is_moving:
+                            main_host.tile_path = []
+                            main_host.move_progress = 0.0
                     else:
-                        if not sub_a.is_moving or (sub_a.tile_path and sub_a.tile_path[-1] != join_target):
-                            state.order_army_march_to_tile(sub_a, join_target)
+                        if not main_host.is_moving or (main_host.tile_path and main_host.tile_path[-1] != target_destination):
+                            state.order_army_march_to_tile(main_host, target_destination)
 
+                    # All other ready detachments march to join main_host directly
+                    join_target = getattr(main_host, "tile", None) or target_destination
+                    for sub_a in defense_hosts[1:]:
+                        if getattr(sub_a, "tile", None) == join_target:
+                            if sub_a.is_moving:
+                                sub_a.tile_path = []
+                                sub_a.move_progress = 0.0
+                        else:
+                            if not sub_a.is_moving or (sub_a.tile_path and sub_a.tile_path[-1] != join_target):
+                                state.order_army_march_to_tile(sub_a, join_target)
+
+                # If there are expeditionary hosts, let them continue their siege operations uninterrupted!
+                if not expeditionary_hosts:
+                    return
             return
 
     # Dynamic Demobilization & Peacetime Economy for Unofficial Peace
@@ -353,7 +367,7 @@ def run_realm_ai(state, ruler_id):
             return
 
     # 4. Smart Mobilization Logic
-    cooldown = getattr(state, "enemy_raise_cooldown", 0) if ruler_id == state.enemy_id else 0
+    cooldown = state.get_raise_cooldown(ruler_id) if hasattr(state, "get_raise_cooldown") else 0
     should_mobilize = False
     has_active_threat_or_target = bool(hostile_armies or hostile_provs or has_invasion or has_border_threat)
     if cooldown <= 0 and has_active_threat_or_target:
@@ -414,11 +428,17 @@ def run_realm_ai(state, ruler_id):
     total_field_troops = sum(a.troops for a in my_armies)
 
     # 7. Safe Rally & Concentration Phase
-    hosts_away_from_rally = [a for a in ready_hosts if getattr(a, "tile", None) != safe_rally_tile and not a.is_sieging]
-    
-    is_assembled = (len(my_armies) == 1) or (
-        main_host.troops >= total_field_troops * 0.80 and not hosts_away_from_rally
-    )
+    is_main_in_siege = getattr(main_host, "is_sieging", False) or getattr(main_host, "siege_prep_days", 0) > 0 or getattr(main_host, "siege_intent", False) or getattr(main_host, "siege_packup_days", 0) > 0
+    is_main_in_enemy_land = (main_host.province not in realm_provs)
+
+    # If main host is already conducting a siege or offensive campaign in enemy land, do NOT recall it!
+    if is_main_in_enemy_land or is_main_in_siege:
+        is_assembled = True
+    else:
+        hosts_away_from_rally = [a for a in ready_hosts if getattr(a, "tile", None) != safe_rally_tile and not a.is_sieging and getattr(a, "siege_prep_days", 0) <= 0]
+        is_assembled = (len(my_armies) == 1) or (
+            main_host.troops >= total_field_troops * 0.70 and not hosts_away_from_rally
+        )
 
     has_urgent_siege = any(ha.is_sieging for ha in all_threat_armies)
     can_sally_emergency = has_invasion and (main_host.troops >= total_threat_troops * 0.85 or has_urgent_siege)
@@ -427,14 +447,14 @@ def run_realm_ai(state, ruler_id):
         # Mandatory Rally: All warbands converge on safe_rally_tile before launching maneuvers
         for a in ready_hosts:
             a_tile = getattr(a, "tile", None)
-            if a_tile != safe_rally_tile and not a.is_moving and not a.is_sieging:
+            if a_tile != safe_rally_tile and not a.is_moving and not a.is_sieging and getattr(a, "siege_prep_days", 0) <= 0:
                 state.order_army_march_to_tile(a, safe_rally_tile)
                 p_from = PROVINCES.get(a.province, {}).get("name", "Province").split()[0]
                 p_to = PROVINCES[rally_prov]["name"].split()[0]
                 state.logs.append(f"⚔ Feudal Muster: {a.name} ({a.troops:,} men) marching from {p_from} to safe staging point in {p_to}.")
         return
 
-    # If assembled, any detached minor reinforcements continue marching towards main_host
+    # If assembled, any detached minor reinforcements continue marching towards main_host to consolidate
     target_follow_tile = getattr(main_host, "tile", safe_rally_tile)
     for sub_a in ready_hosts[1:]:
         if getattr(sub_a, "tile", None) != target_follow_tile and not sub_a.is_moving and not sub_a.is_sieging:
@@ -442,9 +462,17 @@ def run_realm_ai(state, ruler_id):
 
     # 8. Grand Strategic Maneuvers
 
+    # TACTICAL PRIORITY 0: SIEGE COMMITMENT (No half-hearted aborts!)
+    # Once a siege is started or being prepped, commit until holding falls, unless our own capital is in mortal peril.
+    if is_main_in_siege:
+        critical_home_emergency = has_invasion and (rally_prov in invading_threats) and (total_threat_troops >= 350)
+        if not critical_home_emergency:
+            # Maintain active siege! Minor reinforcements will march to our position and merge automatically.
+            return
+
     # TACTICAL CHECK 1: AMBUSH ISOLATED ENEMY DETACHMENTS
     isolated_targets = [ha for ha in hostile_armies if ha.troops < 250 and main_host.troops >= ha.troops * 1.3]
-    if isolated_targets and not main_host.is_sieging and not has_invasion:
+    if isolated_targets and not is_main_in_siege and not has_invasion and not is_main_in_enemy_land:
         chosen_prey = min(isolated_targets, key=lambda ha: (getattr(ha, "tile", (0, 0))[0] - getattr(main_host, "tile", (0, 0))[0])**2 + (getattr(ha, "tile", (0, 0))[1] - getattr(main_host, "tile", (0, 0))[1])**2)
         prey_tile = getattr(chosen_prey, "tile", get_province_capital_tile(chosen_prey.province))
         if getattr(main_host, "tile", None) != prey_tile and not main_host.is_moving:
@@ -458,29 +486,35 @@ def run_realm_ai(state, ruler_id):
         invading_armies = invading_threats[target_inv_prov]
         inv_troops = sum(ia.troops for ia in invading_armies)
 
-        if main_host.troops >= inv_troops * 0.75:
+        # If already deep in enemy lands and invasion is minor, continue conquest; otherwise defend home!
+        if is_main_in_enemy_land and target_inv_prov != rally_prov and inv_troops < 250:
+            pass  # Do not recall the offensive force for small skirmishers
+        elif main_host.troops >= inv_troops * 0.75:
             # Favorable or equal battle: march to confront invaders!
             target_tile = getattr(invading_armies[0], "tile", get_province_capital_tile(target_inv_prov))
-            if not main_host.is_moving and getattr(main_host, "tile", None) != target_tile:
+            if not main_host.is_moving and getattr(main_host, "tile", None) != target_tile and not is_main_in_siege:
                 state.order_army_march_to_tile(main_host, target_tile)
                 state.logs.append(f"⚔ Counter-Attack: {r_name} leads {main_host.troops:,} men to confront enemy forces in {PROVINCES[target_inv_prov]['name']}!")
+                return
         else:
             # Severely Outnumbered: Diversionary Flank
             hostile_provs = [pid for pid, p in PROVINCES.items() if getattr(state, "are_hostile", lambda o1, o2: o1 != o2)(ruler_id, p.get("owner"))]
             undefended_enemy = [pid for pid in hostile_provs if not any(ha.province == pid for ha in hostile_armies)]
-            if undefended_enemy and not main_host.is_moving:
+            if undefended_enemy and not main_host.is_moving and not is_main_in_siege:
                 flank_target = undefended_enemy[0]
                 flank_tile = get_province_capital_tile(flank_target)
                 state.order_army_march_to_tile(main_host, flank_tile)
                 state.logs.append(f"⚔ Diversionary Maneuver: Outnumbered at home, {r_name} flanks the hostile host to strike undefended {PROVINCES[flank_target]['name']}!")
+                return
             else:
                 cap_tile = get_province_capital_tile(rally_prov)
-                if getattr(main_host, "tile", None) != cap_tile and not main_host.is_moving:
+                if getattr(main_host, "tile", None) != cap_tile and not main_host.is_moving and not is_main_in_siege:
                     state.order_army_march_to_tile(main_host, cap_tile)
                     state.logs.append(f"⚔ Defensive Stand: {r_name} falls back to fortified {PROVINCES[rally_prov]['name']} to hold the stronghold.")
+                    return
 
-    # TACTICAL CHECK 3: BORDER MANEUVERS
-    elif has_border_threat:
+    # TACTICAL CHECK 3: BORDER MANEUVERS (Only when at home and NOT on active campaign in enemy land!)
+    elif has_border_threat and not is_main_in_enemy_land and not is_main_in_siege:
         target_border = list(threatened_borders.keys())[0]
         opposing_armies = threatened_borders.get(target_border, [])
         opp_troops = sum(oa.troops for oa in opposing_armies)
@@ -495,14 +529,16 @@ def run_realm_ai(state, ruler_id):
         if getattr(main_host, "tile", None) != closest_border_tile and not main_host.is_moving:
             state.order_army_march_to_tile(main_host, closest_border_tile)
             state.logs.append(f"⚔ Border Patrol: {r_name} moves {main_host.troops:,} warriors to border outpost in {PROVINCES[target_border]['name']}.")
+            return
         elif getattr(main_host, "tile", None) == closest_border_tile and not main_host.is_moving:
             if opposing_armies and (main_host.troops >= opp_troops * 0.75 or main_host.troops >= 350):
                 target_enemy_tile = getattr(opposing_armies[0], "tile", get_province_capital_tile(opposing_armies[0].province))
                 target_enemy_prov = opposing_armies[0].province
                 state.order_army_march_to_tile(main_host, target_enemy_tile)
                 state.logs.append(f"⚔ Strategic Sally: {r_name} advances across the border into {PROVINCES[target_enemy_prov]['name']} to engage the enemy host!")
+                return
 
-    # TACTICAL CHECK 4: STRATEGIC OFFENSIVE CAMPAIGN
+    # TACTICAL CHECK 4: STRATEGIC OFFENSIVE CAMPAIGN (Dedicated, decisive conquest)
     else:
         if main_host.troops >= 200 and not main_host.is_moving:
             if main_host.province not in realm_provs:
@@ -542,5 +578,5 @@ def run_realm_ai(state, ruler_id):
                     state.logs.append(f"⚔ Stand Down: All objectives completed. {r_name} demobilizes the army to garrison.")
 
 def run_viking_ai(state):
-    """Backwards-compatible wrapper calling run_realm_ai for the enemy faction."""
+    """Backwards-compatible wrapper: runs the primary AI rival."""
     run_realm_ai(state, state.enemy_id)

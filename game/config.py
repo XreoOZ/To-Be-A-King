@@ -32,7 +32,7 @@ MAP_CENTER_ROW = 7
 # Travel & Simulation Constants
 DAYS_PER_TILE = 5  # Number of in-game days it takes to traverse one province
 DAYS_PER_KOTAK = 1.0  # Number of in-game days it takes to traverse one tile (kotak)
-LEVY_RAISE_COOLDOWN_DAYS = 90  # 3 months cooldown between levy summons (prevents spam)
+LEVY_RAISE_COOLDOWN_DAYS = 0  # 3 months cooldown between levy summons (prevents spam)
 
 # Colors
 COLOR_BG = (20, 24, 32)
@@ -50,9 +50,7 @@ COLOR_BUTTON_HOVER = (65, 75, 98)
 COLOR_BUTTON_ACTIVE = (90, 105, 135)
 COLOR_OCEAN = (18, 32, 54)
 
-# Realm Theme Colors
-COLOR_WESSEX = (195, 35, 35)      # Saxon Crimson
-COLOR_DANELAW = (55, 75, 100)     # Norse Iron Slate
+# Realm theme colors are data-driven per character (see game/data/characters.py).
 
 # Base Directories
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,6 +72,7 @@ def get_fonts():
     available_sysfonts = pygame.font.get_fonts()
     font_name = "segoeuisymbol" if "segoeuisymbol" in available_sysfonts else "segoeui"
     return {
+        "micro": pygame.font.SysFont(font_name, 10, bold=True),
         "xs": pygame.font.SysFont(font_name, 12, bold=True),
         "sm": pygame.font.SysFont(font_name, 14),
         "md": pygame.font.SysFont(font_name, 17, bold=True),

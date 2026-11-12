@@ -5,7 +5,7 @@ import os
 import math
 import pygame
 from game.config import ASSETS_DIR, COLOR_GOLD
-from game.data.characters import CHARACTERS
+from game.data.characters import CHARACTERS, get_color
 
 def load_image(subpath, size=None):
     full_path = os.path.join(ASSETS_DIR, subpath)
@@ -38,24 +38,64 @@ prov_flag_cache = {}
 portrait_cache = {}
 coa_cache = {}
 
+def make_default_portrait(color, size=(80, 80)):
+    """Generated portrait placeholder tinted with the ruler's faction color."""
+    surf = pygame.Surface(size, pygame.SRCALPHA)
+    w, h = size
+    surf.fill((34, 30, 28))
+    pygame.draw.circle(surf, tuple(color), (w // 2, int(h * 0.38)), int(w * 0.22))
+    pygame.draw.ellipse(surf, tuple(color), (int(w * 0.16), int(h * 0.60), int(w * 0.68), int(h * 0.50)))
+    pygame.draw.rect(surf, COLOR_GOLD, (0, 0, w, h), 1, border_radius=3)
+    return surf
+
 def init_asset_caches():
     """Initializes all image caches after pygame display is set."""
     global prov_flag_cache, portrait_cache, coa_cache
-    for cid, char in CHARACTERS.items():
-        pfile = char.get("portrait", "portrait_default.png")
-        portrait_cache[cid] = load_image(os.path.join("portraits", pfile), (80, 80))
-        cfile = char.get("coa", "coa_wessex.png")
-        coa_cache[cid] = load_image(os.path.join("heraldry", cfile), (36, 42))
-
     from game.data.provinces import PROVINCES
+    prov_flag_cache.clear()
+    portrait_cache.clear()
+    coa_cache.clear()
+    _cloth_scaled_cache.clear()
+    for cid, char in CHARACTERS.items():
+        color = get_color(cid)
+        pfile = char.get("portrait")
+        if pfile and os.path.exists(os.path.join(ASSETS_DIR, "portraits", pfile)):
+            portrait_cache[cid] = load_image(os.path.join("portraits", pfile), (80, 80))
+        else:
+            portrait_cache[cid] = make_default_portrait(color, (80, 80))
+
+        cfile = char.get("coa")
+        if cfile and os.path.exists(os.path.join(ASSETS_DIR, "heraldry", cfile)):
+            coa_cache[cid] = load_image(os.path.join("heraldry", cfile), (36, 42))
+        else:
+            coa_cache[cid] = pygame.transform.smoothscale(make_heraldic_shield(color), (36, 42))
+
     for pid, pdata in PROVINCES.items():
         pcol = tuple(pdata.get("color", (120, 120, 120)))
         prov_flag_cache[pid] = make_heraldic_shield(pcol)
 
 def make_banner_cloth(pid, width, height, is_large=True):
     from game.data.provinces import PROVINCES
-    pdata = PROVINCES.get(pid, {})
-    bg = tuple(pdata.get("color", (120, 30, 30)))
+    if pid in PROVINCES:
+        pdata = PROVINCES.get(pid, {})
+        bg = tuple(pdata.get("color", (120, 30, 30)))
+        is_vassal = False
+    else:
+        # Distinctive Vassal Heraldry Palette
+        vassal_hues = [
+            (35, 75, 140),   # Royal Azure
+            (90, 40, 110),   # Imperial Purple
+            (40, 95, 55),    # Emerald Forest
+            (145, 45, 45),   # Crimson
+            (150, 105, 30),  # Amber Gold
+            (45, 95, 120),   # Teal
+            (125, 70, 40),   # Bronze
+            (65, 80, 105),   # Steel Navy
+        ]
+        h_idx = abs(hash(str(pid))) % len(vassal_hues)
+        bg = vassal_hues[h_idx]
+        is_vassal = True
+
     surf = pygame.Surface((width, height), pygame.SRCALPHA)
     surf.fill(bg)
 
@@ -65,6 +105,24 @@ def make_banner_cloth(pid, width, height, is_large=True):
         eh = int(height * 0.78)
         scaled_emblem = pygame.transform.smoothscale(emblem, (ew, eh))
         surf.blit(scaled_emblem, (2, (height - eh) // 2))
+    elif is_vassal:
+        # Draw feudal charge / bend / cross on vassal banner
+        v_idx = abs(hash(str(pid))) % 4
+        chg_col = (255, 225, 100) if v_idx % 2 == 0 else (240, 240, 245)
+        if v_idx == 0:
+            # Pale / Vertical band
+            pygame.draw.rect(surf, chg_col, (int(width * 0.35), 0, max(2, int(width * 0.25)), height))
+        elif v_idx == 1:
+            # Fess / Horizontal band
+            pygame.draw.rect(surf, chg_col, (0, int(height * 0.35), width, max(2, int(height * 0.30))))
+        elif v_idx == 2:
+            # Cross
+            pygame.draw.rect(surf, chg_col, (int(width * 0.35), 0, max(2, int(width * 0.22)), height))
+            pygame.draw.rect(surf, chg_col, (0, int(height * 0.38), width, max(2, int(height * 0.25))))
+        else:
+            # Saltire / Chevron
+            pygame.draw.line(surf, chg_col, (0, 0), (width, height), 2)
+            pygame.draw.line(surf, chg_col, (0, height), (width, 0), 2)
 
     pygame.draw.line(surf, COLOR_GOLD, (0, 0), (width, 0), 1)
     pygame.draw.line(surf, COLOR_GOLD, (0, height - 1), (width, height - 1), 1)

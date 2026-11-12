@@ -1,0 +1,32 @@
+{
+  "id": "era_of_kings",
+  "title": "CK2: ERA OF KINGS",
+  "window_title": "CK2-Lite: Era of Kings",
+  "subtitle": "The Continent of Aethelgard",
+  "campaign_label": "AD 1000 Campaign",
+  "region_name": "Aethelgard",
+  "chronicle_heading": "Chronicle of Aethelgard",
+  "map_file": "fantasy_map.json",
+  "start_date": {
+    "year": 1000,
+    "month": 1,
+    "day": 1
+  },
+  "player_id": "char_human",
+  "ai_rulers": [
+    "char_ironpeak",
+    "char_sylvan"
+  ],
+  "vassal_limit": 5,
+  "tribute_rate": 0.2,
+  "default_vassal_tax_rate": 10,
+  "default_vassal_levy_rate": 20,
+  "ai_vassal_tax_rate": 20,
+  "ai_vassal_levy_rate": 20,
+  "zoom": 0.85,
+  "intro_logs": [
+    "Era of Kings: The continent of Aethelgard rests in delicate peace.",
+    "Three sovereigns hold power: Solaris (Human), Ironpeak (Dwarf), and Sylvandell (Elf).",
+    "Muster levies from your baronies, balance your treasury, and guide your realm to glory!"
+  ]
+}

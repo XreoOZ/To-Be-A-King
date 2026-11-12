@@ -1,6 +1,5 @@
 """
-CK2-Lite: Britain AD 867 (Modular Architecture Edition)
-Kingdom of Wessex (Saxons) vs The Danelaw (Vikings)
+CK2-Lite (Modular Architecture Edition)
 
 Main Entry Point
 """
@@ -29,8 +28,8 @@ from game.config import (
     LEVY_RAISE_COOLDOWN_DAYS, COLOR_BG, COLOR_PANEL_BG, COLOR_PANEL_BORDER,
     COLOR_GOLD, COLOR_PRESTIGE, COLOR_PIETY, COLOR_TEXT_WHITE,
     COLOR_TEXT_MUTED, COLOR_TEXT_RED, COLOR_TEXT_GREEN, COLOR_BUTTON_NORMAL,
-    COLOR_BUTTON_HOVER, COLOR_BUTTON_ACTIVE, COLOR_OCEAN, COLOR_WESSEX,
-    COLOR_DANELAW, BASE_TILE_W, BASE_TILE_H, VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y, MAP_CENTER_COL, MAP_CENTER_ROW,
+    COLOR_BUTTON_HOVER, COLOR_BUTTON_ACTIVE, COLOR_OCEAN,
+    BASE_TILE_W, BASE_TILE_H, VIEWPORT_CENTER_X, VIEWPORT_CENTER_Y,
     PANEL_L_X, PANEL_L_W, PANEL_R_X, PANEL_R_W, MAP_VIEWPORT_X, MAP_VIEWPORT_W, PANEL_Y, PANEL_H,
     maximize_window, get_fonts
 )
@@ -58,12 +57,15 @@ from game.systems.economy import (
 )
 from game.systems.military import get_siegeable_holdings, is_province_contested
 from game.systems.ai import standardize_enemy_ai_laws
+from game.data.scenario import get_scenario
 
 from game.ui.header import render_header
 from game.ui.left_panel import render_left_panel
 from game.ui.map_view import render_map_view
 from game.ui.right_panel import render_right_panel
 from game.ui.modals import render_modals
+from game.ui.main_menu import render_main_menu
+from game.core.world_generator import generate_world, install_generated_world
 
 # Global screen reference
 screen = None
@@ -74,12 +76,11 @@ def run_game():
     pygame.font.init()
 
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SCALED | pygame.RESIZABLE)
-    pygame.display.set_caption("CK2-Lite: The War for Britain (Army Raising & Rally Edition)")
+    pygame.display.set_caption(get_scenario().get("window_title", "CK2-Lite"))
     maximize_window()
     clock = pygame.time.Clock()
 
     fonts = get_fonts()
-    init_asset_caches()
 
     icons = {
         "gold": load_image(os.path.join("icons", "gold.png"), (24, 24)),
@@ -91,11 +92,25 @@ def run_game():
         "speed_fast": load_image(os.path.join("icons", "speed_fast.png"), (24, 24)),
     }
 
-    banner_cloth_large = {pid: make_banner_cloth(pid, 32, 22, is_large=True) for pid in prov_flag_cache}
-    banner_cloth_small = {pid: make_banner_cloth(pid, 18, 13, is_large=False) for pid in prov_flag_cache}
+    state = None
+    game_started = False
+    menu_stage = "main"
+    world_size = 10
+    banner_cloth_large = {}
+    banner_cloth_small = {}
 
-    state = GameState()
-    setup_province_starter_cities(state)
+    def start_campaign():
+        nonlocal state, game_started, banner_cloth_large, banner_cloth_small
+        world = generate_world(world_size)
+        install_generated_world(world)
+        pygame.display.set_caption(get_scenario().get("window_title", "CK2-Lite"))
+        init_asset_caches()
+        banner_cloth_large = {pid: make_banner_cloth(pid, 32, 22, is_large=True) for pid in prov_flag_cache}
+        banner_cloth_small = {pid: make_banner_cloth(pid, 18, 13, is_large=False) for pid in prov_flag_cache}
+        state = GameState()
+        state.min_zoom = float(get_scenario().get("min_zoom", state.min_zoom))
+        setup_province_starter_cities(state)
+        game_started = True
 
     map_viewport = pygame.Rect(MAP_VIEWPORT_X, PANEL_Y, MAP_VIEWPORT_W, PANEL_H)
 
@@ -110,10 +125,39 @@ def run_game():
         right_clicked = False
         mouse_down = pygame.mouse.get_pressed()[0]
 
+        if not game_started:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    if menu_stage == "character":
+                        menu_stage = "main"
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    buttons = render_main_menu(screen, fonts, mouse_pos, menu_stage, world_size)
+                    if menu_stage == "main":
+                        if buttons["play_menu"].collidepoint(event.pos):
+                            menu_stage = "character"
+                        elif buttons["exit"].collidepoint(event.pos):
+                            running = False
+                    else:
+                        for size in (10, 20, 30):
+                            if buttons[f"size_{size}"].collidepoint(event.pos):
+                                world_size = size
+                                break
+                        if buttons["back"].collidepoint(event.pos):
+                            menu_stage = "main"
+                        elif buttons["start"].collidepoint(event.pos):
+                            start_campaign()
+            render_main_menu(screen, fonts, mouse_pos, menu_stage, world_size)
+            pygame.display.flip()
+            continue
+
         curr_tile_w = max(18, int(BASE_TILE_W * state.zoom))
         curr_tile_h = max(16, int(BASE_TILE_H * state.zoom))
-        default_ox = VIEWPORT_CENTER_X - int(MAP_CENTER_COL * curr_tile_w)
-        default_oy = VIEWPORT_CENTER_Y - int(MAP_CENTER_ROW * curr_tile_h)
+        map_center_col = (len(RAW_GRID[0]) - 1) / 2 if RAW_GRID else 0
+        map_center_row = (len(RAW_GRID) - 1) / 2
+        default_ox = VIEWPORT_CENTER_X - int(map_center_col * curr_tile_w)
+        default_oy = VIEWPORT_CENTER_Y - int(map_center_row * curr_tile_h)
         origin_x = default_ox + state.cam_pan_x
         origin_y = default_oy + state.cam_pan_y
 
@@ -156,8 +200,8 @@ def run_game():
                     if new_zoom != old_zoom:
                         old_tw = max(18, int(BASE_TILE_W * old_zoom))
                         old_th = max(16, int(BASE_TILE_H * old_zoom))
-                        old_ox = (VIEWPORT_CENTER_X - int(MAP_CENTER_COL * old_tw)) + state.cam_pan_x
-                        old_oy = (VIEWPORT_CENTER_Y - int(MAP_CENTER_ROW * old_th)) + state.cam_pan_y
+                        old_ox = (VIEWPORT_CENTER_X - int(map_center_col * old_tw)) + state.cam_pan_x
+                        old_oy = (VIEWPORT_CENTER_Y - int(map_center_row * old_th)) + state.cam_pan_y
                         
                         mx, my = mouse_pos
                         gc = (mx - old_ox) / old_tw
@@ -165,8 +209,8 @@ def run_game():
                         
                         new_tw = max(18, int(BASE_TILE_W * new_zoom))
                         new_th = max(16, int(BASE_TILE_H * new_zoom))
-                        new_def_x = VIEWPORT_CENTER_X - int(MAP_CENTER_COL * new_tw)
-                        new_def_y = VIEWPORT_CENTER_Y - int(MAP_CENTER_ROW * new_th)
+                        new_def_x = VIEWPORT_CENTER_X - int(map_center_col * new_tw)
+                        new_def_y = VIEWPORT_CENTER_Y - int(map_center_row * new_th)
                         
                         new_ox = mx - gc * new_tw
                         new_oy = my - gr * new_th
@@ -225,6 +269,26 @@ def run_game():
                     box_end   = None
 
             elif event.type == pygame.KEYDOWN:
+                # 1. Handle Universal Rename Keyboard Input
+                if getattr(state, "rename_modal", None) and state.rename_modal.get("active"):
+                    if event.key == pygame.K_ESCAPE:
+                        state.rename_modal = None
+                    elif event.key == pygame.K_RETURN:
+                        state.commit_rename()
+                    elif event.key == pygame.K_BACKSPACE:
+                        state.rename_modal["text"] = state.rename_modal["text"][:-1]
+                    else:
+                        if len(event.unicode) > 0 and event.unicode.isprintable() and len(state.rename_modal.get("text", "")) < 32:
+                            state.rename_modal["text"] += event.unicode
+                    continue
+
+                # 2. Handle Split Modal Keyboard Input
+                if getattr(state, "split_army_target_id", None):
+                    if event.key == pygame.K_ESCAPE:
+                        state.split_army_target_id = None
+                        state.split_selected_units = set()
+                    continue
+
                 is_popup_open = bool(state.vassal_build_requests or state.granting_fief_id or state.inspecting_vassal or state.inspecting_ruler or state.vassal_build_confirm)
                 if is_popup_open:
                     if event.key == pygame.K_ESCAPE:
@@ -291,46 +355,7 @@ def run_game():
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
             state.cam_pan_y -= pan_step
 
-        if right_clicked:
-            armies_to_order = []
-            if state.selected_army_ids:
-                armies_to_order = [a for a in state.armies if a.id in state.selected_army_ids and a.owner == state.player_id]
-            elif state.selected_army_id:
-                sel_single = next((a for a in state.armies if a.id == state.selected_army_id and a.owner == state.player_id), None)
-                if sel_single:
-                    armies_to_order = [sel_single]
-
-            if armies_to_order:
-                mx, my = mouse_pos
-                col_idx = int((mx - origin_x) // curr_tile_w)
-                row_idx = int((my - origin_y) // curr_tile_h)
-                target_tile = (col_idx, row_idx)
-                if target_tile in CELL_TO_PROV:
-                    settlement = state.settlements.get(target_tile)
-                    target_prov_id = CELL_TO_PROV.get(target_tile)
-                    prov = PROVINCES.get(target_prov_id)
-                    is_hostile_holding = False
-                    if settlement and prov:
-                        occ = settlement.get("occupied_by")
-                        if state.are_hostile(state.player_id, prov["owner"]):
-                            if occ != state.player_id:
-                                is_hostile_holding = True
-                        elif occ is not None and state.are_hostile(state.player_id, occ):
-                            is_hostile_holding = True
-
-                    # If army is ALREADY standing on this hostile holding, open 'SIEGE THE CASTLE' context menu!
-                    is_standing_on = any(getattr(a, "tile", None) == target_tile for a in armies_to_order)
-                    if is_hostile_holding and is_standing_on:
-                        state.siege_context_menu = {
-                            "tile": target_tile,
-                            "pos": (mx, my),
-                            "name": settlement.get("name", "Stronghold"),
-                            "armies": [a.id for a in armies_to_order]
-                        }
-                    else:
-                        state.siege_context_menu = None
-                        for army_obj in armies_to_order:
-                            state.order_army_march_to_tile(army_obj, target_tile)
+        # Tactical right-clicks and march orders are handled authoritatively in render_map_view with pixel-perfect hitboxes
 
         if state.speed > 0:
             state.tick_timer += dt

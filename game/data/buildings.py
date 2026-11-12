@@ -6,25 +6,25 @@ BUILDING_SPECS = {
     "city": {
         "name": "City",
         "title": "Commercial Town",
-        "desc": "+3g Income, +100 Garrison, +10 Recruits/mo",
+        "desc": "+3g Income, +100 Garrison, +3 Recruits/mo",
         "tiles": 1,
         "cost": 600,
         "income": 3,
         "upkeep": 0,
         "garrison": 100,
-        "recruits": 10,
+        "recruits": 3,
         "icon": "[City]"
     },
     "fort": {
         "name": "Fort",
         "title": "Stone Fortress",
-        "desc": "+1g Income, +300 Garrison, +10 Recruits/mo",
+        "desc": "+1g Income, +300 Garrison, +3 Recruits/mo",
         "tiles": 2,
         "cost": 1000,
         "income": 1,
         "upkeep": 0,
         "garrison": 300,
-        "recruits": 10,
+        "recruits": 3,
         "icon": "[Fort]"
     },
     "barrack": {

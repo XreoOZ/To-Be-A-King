@@ -1,0 +1,64 @@
+================================================================================
+   👑 CK2-LITE: CONTINENT OF AETHELGARD (ERA OF KINGS) - TESTER BUILD 👑
+================================================================================
+
+Halo Tester!
+Selamat datang di playtest CK2-Lite: Grand Strategy & Feudal Medieval Simulator.
+
+--------------------------------------------------------------------------------
+CARA MEMULAI GAME:
+--------------------------------------------------------------------------------
+1. Ekstrak file zip ini ke folder mana saja di komputer kamu.
+2. Buka folder dan langsung jalankan:
+      👉 CK2Lite.exe
+3. Game langsung berjalan tanpa perlu install Python, pip, atau software apa pun!
+
+--------------------------------------------------------------------------------
+PANDUAN KONTROL & NAVIGASI:
+--------------------------------------------------------------------------------
+• KLIK KIRI:
+  - Memilih provinsi untuk melihat detail demesne, holding (kota, benteng, barak), dan vassal.
+  - Memilih pasukan Anda di peta.
+  - Menekan tombol-tombol antarmuka (Panel Kiri, Panel Kanan, Header).
+
+• KLIK KANAN:
+  - Menggerakkan pasukan yang sedang dipilih ke tile / kotak tujuan.
+  - Mengarahkan pasukan untuk menyerang musuh yang berada di tile tujuan.
+  - Memerintahkan pengepungan benteng/holding jika berdiri di atas holding musuh.
+
+• ZOOM & KAMERA:
+  - Scroll Roda Mouse (Scroll Up/Down) untuk Zoom In dan Zoom Out peta.
+  - Widget HUD kamera di pojok kanan atas peta untuk menggeser (Pan) dan Reset Zoom (⟲).
+
+• WAKTU & KECEPATAN (HEADER BAR):
+  - Spacebar atau tombol Kecepatan: Pause (0), Normal (1x), Fast (2x), Ultra (3x).
+  - Tombol RESET (↺) di kanan atas: Me-reset permainan kembali ke 1 Januari 867.
+
+--------------------------------------------------------------------------------
+FITUR UTAMA YANG DAPAT DIUJI:
+--------------------------------------------------------------------------------
+1. TIGA KERAJAAN BERDAULAT:
+   - Kerajaan Solaris (Human / Anda - Faksi Merah Emas, Ibu kota: Solaris Prime)
+   - Dominion Ironpeak (Dwarf - Faksi Biru Baja, Ibu kota: Iron Citadel)
+   - Kerajaan Sylvandell (Elf - Faksi Hijau Hutan, Ibu kota: Eloria Heart)
+
+2. KURIR KUDA KERAJAAN (ROYAL COURIER SYSTEM):
+   - Pasukan tidak muncul seketika! Saat Anda memanggil pasukan (*Raise Levies*),
+     penunggang kuda kurir animasi akan berderap dari ibu kota mengantarkan surat titah.
+   - Waktu perjalanan dan hari yang tersisa ditampilkan di bawah kuda.
+   - Ukuran kuda dan badge otomatis proporsional mengikuti zoom kamera.
+
+3. DIPLOMASI BILATERAL & PERBATASAN:
+   - Permainan dimulai dalam kondisi DAMAI (Peacetime).
+   - Anda dapat menyatakan perang lewat tab DIPLOMACY di panel kiri, ATAU
+     dengan sengaja melintasi perbatasan wilayah asing (*Border Incursion*).
+   - Setiap kerajaan merespons secara independen: Anda bisa berperang dengan 1 musuh
+     atau menghadapi 2 kerajaan sekaligus!
+
+4. PERTEMPURAN & PENGEPUNGAN (TACTICAL SIEGE):
+   - Jika dua pasukan bermusuhan berada di kotak yang sama, pertempuran otomatis pecah!
+   - Pasukan dengan stat Martial tinggi dan jumlah lebih besar memiliki keunggulan taktis.
+   - Duduki seluruh kota dan benteng di suatu provinsi musuh untuk menaklukkannya!
+
+Selamat bermain dan mohon kabari jika menemukan bug atau memiliki saran! ⚔️🛡️
+================================================================================

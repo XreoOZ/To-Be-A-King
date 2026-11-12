@@ -6,109 +6,120 @@ import os
 import json
 from collections import deque
 from game.config import ASSETS_DIR
+from game.data.scenario import get_scenario
 
-# Load Fantasy Continent Map specification
-map_path = os.path.join(ASSETS_DIR, "map", "fantasy_map.json")
+# Load the map selected by the active scenario definition.
+_map_file = get_scenario().get("map_file") or "fantasy_map.json"
+map_path = os.path.join(ASSETS_DIR, "map", _map_file)
 if not os.path.exists(map_path):
-    map_path = os.path.join(ASSETS_DIR, "map", "britain_map.json")
+    raise FileNotFoundError(
+        f"Scenario map '{_map_file}' was not found at '{map_path}'. "
+        "Check the map_file value in data/scenario.json."
+    )
 
 with open(map_path, "r", encoding="utf-8") as f:
     MAP_DATA = json.load(f)
 
-RAW_GRID = MAP_DATA["raw_grid"]
-char_to_prov = MAP_DATA.get("char_to_prov", {})
-
+RAW_GRID = list(MAP_DATA["raw_grid"])
+char_to_prov = dict(MAP_DATA.get("char_to_prov", {}))
 CELL_TO_PROV = {}
 PROV_TO_TILES = {}
-
-for r, row in enumerate(RAW_GRID):
-    for c, ch in enumerate(row):
-        if ch == ".":
-            continue
-        if char_to_prov and ch in char_to_prov:
-            prov_id = char_to_prov[ch]
-        else:
-            # Fallback legacy Britain letters
-            if ch == "H": prov_id = "highlands"
-            elif ch == "S": prov_id = "strathclyde"
-            elif ch in ("T", "L"): prov_id = "lothian"
-            elif ch == "B": prov_id = "bernicia"
-            elif ch == "D": prov_id = "deira"
-            elif ch == "Y": prov_id = "jorvik"
-            elif ch == "M": prov_id = "mercia"
-            elif ch == "E": prov_id = "east_anglia"
-            elif ch == "W": prov_id = "wales" if r <= 17 else "wessex"
-            elif ch == "K": prov_id = "kent_essex"
-            elif ch == "C": prov_id = "cornwall"
-            else: prov_id = "wessex"
-            
-        CELL_TO_PROV[(c, r)] = prov_id
-        PROV_TO_TILES.setdefault(prov_id, []).append((c, r))
-
-# Precompute Capital Tile for each province
 PROV_CAPITAL_TILES = {}
-for pid, tiles in PROV_TO_TILES.items():
-    t_sorted = sorted(tiles)
-    PROV_CAPITAL_TILES[pid] = t_sorted[len(t_sorted) // 2]
+prov_grid_centroids = {}
+border_grid_centroids = {}
+TILE_ADJACENCY = {}
+
+
+def apply_map_data(map_data):
+    """Rebuilds all map indexes while preserving references imported by game modules."""
+    global char_to_prov
+
+    new_map_data = dict(map_data)
+    new_raw_grid = list(new_map_data["raw_grid"])
+    MAP_DATA.clear()
+    MAP_DATA.update(new_map_data)
+    RAW_GRID[:] = new_raw_grid
+    char_to_prov = dict(new_map_data.get("char_to_prov", {}))
+
+    cell_to_prov = {}
+    prov_to_tiles = {}
+    for r, row in enumerate(RAW_GRID):
+        for c, ch in enumerate(row):
+            prov_id = char_to_prov.get(ch)
+            if ch == "." or prov_id is None:
+                continue
+            cell_to_prov[(c, r)] = prov_id
+            prov_to_tiles.setdefault(prov_id, []).append((c, r))
+
+    CELL_TO_PROV.clear()
+    CELL_TO_PROV.update(cell_to_prov)
+    PROV_TO_TILES.clear()
+    PROV_TO_TILES.update(prov_to_tiles)
+
+    from game.data.provinces import PROVINCES, ADJACENCY, build_dynamic_province_adjacency
+
+    capitals = {}
+    for pid, tiles in PROV_TO_TILES.items():
+        declared = (PROVINCES.get(pid) or {}).get("capital_tile")
+        if declared and tuple(declared) in tiles:
+            capitals[pid] = tuple(declared)
+        else:
+            capitals[pid] = sorted(tiles)[len(tiles) // 2]
+    PROV_CAPITAL_TILES.clear()
+    PROV_CAPITAL_TILES.update(capitals)
+
+    centroids = {}
+    for (c, r), pid in CELL_TO_PROV.items():
+        sx, sy, count = centroids.get(pid, (0, 0, 0))
+        centroids[pid] = (sx + c, sy + r, count + 1)
+    prov_grid_centroids.clear()
+    prov_grid_centroids.update({
+        pid: (sx / count, sy / count)
+        for pid, (sx, sy, count) in centroids.items()
+    })
+
+    border_sums = {}
+    for (c, r), pid_a in CELL_TO_PROV.items():
+        for dc in range(-2, 3):
+            for dr in range(-2, 3):
+                if (dc == 0 and dr == 0) or (abs(dc) + abs(dr) > 2):
+                    continue
+                pid_b = CELL_TO_PROV.get((c + dc, r + dr))
+                if pid_b and pid_b != pid_a:
+                    pair = (pid_a, pid_b)
+                    sx, sy, count = border_sums.get(pair, (0.0, 0.0, 0))
+                    border_sums[pair] = (
+                        sx + (c + (c + dc)) / 2.0,
+                        sy + (r + (r + dr)) / 2.0,
+                        count + 1,
+                    )
+    border_grid_centroids.clear()
+    border_grid_centroids.update({
+        pair: (sx / count, sy / count)
+        for pair, (sx, sy, count) in border_sums.items()
+    })
+
+    tile_adjacency = {tile: set() for tile in CELL_TO_PROV}
+    for c, r in CELL_TO_PROV:
+        for dc in (-1, 0, 1):
+            for dr in (-1, 0, 1):
+                if (dc or dr) and (c + dc, r + dr) in CELL_TO_PROV:
+                    tile_adjacency[(c, r)].add((c + dc, r + dr))
+    TILE_ADJACENCY.clear()
+    TILE_ADJACENCY.update(tile_adjacency)
+
+    adjacency = build_dynamic_province_adjacency(CELL_TO_PROV, max_reach=1)
+    ADJACENCY.clear()
+    ADJACENCY.update(adjacency)
 
 def get_province_capital_tile(pid):
     if pid in PROV_CAPITAL_TILES:
         return PROV_CAPITAL_TILES[pid]
     if pid in PROV_TO_TILES and PROV_TO_TILES[pid]:
         return sorted(PROV_TO_TILES[pid])[0]
-    return (11, 10)
+    return (0, 0)
 
-# Compute province centroids in grid units
-prov_grid_sum = {}
-for (c, r), pid in CELL_TO_PROV.items():
-    if pid not in prov_grid_sum:
-        prov_grid_sum[pid] = [0, 0, 0]
-    prov_grid_sum[pid][0] += c
-    prov_grid_sum[pid][1] += r
-    prov_grid_sum[pid][2] += 1
-
-prov_grid_centroids = {}
-for pid, (sc, sr, count) in prov_grid_sum.items():
-    prov_grid_centroids[pid] = (sc / count, sr / count)
-
-border_grid_sums = {}
-for (c, r), pid_a in CELL_TO_PROV.items():
-    for dc in range(-2, 3):
-        for dr in range(-2, 3):
-            if (dc == 0 and dr == 0) or (abs(dc) + abs(dr) > 2):
-                continue
-            pid_b = CELL_TO_PROV.get((c + dc, r + dr))
-            if pid_b and pid_b != pid_a:
-                pair_key = (pid_a, pid_b)
-                if pair_key not in border_grid_sums:
-                    border_grid_sums[pair_key] = [0.0, 0.0, 0]
-                border_grid_sums[pair_key][0] += (c + (c + dc)) / 2.0
-                border_grid_sums[pair_key][1] += (r + (r + dr)) / 2.0
-                border_grid_sums[pair_key][2] += 1
-
-border_grid_centroids = {}
-for pair_key, (sc, sr, count) in border_grid_sums.items():
-    border_grid_centroids[pair_key] = (sc / count, sr / count)
-
-# Build Seamless 8-Way Tile Adjacency across pure continental landmass
-TILE_ADJACENCY = {t: set() for t in CELL_TO_PROV}
-for (c, r) in CELL_TO_PROV:
-    for dc in (-1, 0, 1):
-        for dr in (-1, 0, 1):
-            if dc == 0 and dr == 0:
-                continue
-            nt = (c + dc, r + dr)
-            if nt in CELL_TO_PROV:
-                TILE_ADJACENCY[(c, r)].add(nt)
-
-# Synchronize full dynamic 8-way province adjacency from the active tile map grid
-try:
-    from game.data.provinces import build_dynamic_province_adjacency, ADJACENCY
-    dyn_adj = build_dynamic_province_adjacency(CELL_TO_PROV, max_reach=1)
-    ADJACENCY.clear()
-    ADJACENCY.update(dyn_adj)
-except Exception:
-    pass
+apply_map_data(MAP_DATA)
 
 def find_shortest_tile_path(start_tile, goal_tile, owner=None):
     """

@@ -4,10 +4,15 @@ Generates mock/dummy blocky retro assets:
 - UI Icons (Gold, Prestige, Piety, Troops, Speed, etc.)
 - Heraldry / Shields (Coats of Arms)
 - Character Portraits (Blocky medieval portraits)
-- Britain Province Grid & Map Preview
+- Province Grid & Map Preview
+
+Legacy demo art only. Runtime falls back to procedurally generated art when a
+specific asset is missing, so the game never depends on these files. Campaign
+data under data/ is hand-authored and is never rewritten here.
 """
 
 import os
+import sys
 import json
 from PIL import Image, ImageDraw, ImageFont
 
@@ -626,254 +631,11 @@ def generate_map_assets():
         json.dump(map_data, f, indent=2)
 
 # -------------------------------------------------------------
-# 5. INITIAL GAME DATABASE (Provinces & Characters)
+# 5. GAME DATABASE
 # -------------------------------------------------------------
-def generate_game_data():
-    characters = {
-        "char_alfred": {
-            "id": "char_alfred",
-            "name": "Alfred 'the Great'",
-            "title": "King of Wessex",
-            "dynasty": "House of Wessex",
-            "realm": "wessex",
-            "portrait": "portrait_alfred.png",
-            "coa": "coa_wessex.png",
-            "age": 22,
-            "alive": True,
-            "stats": {"diplomacy": 14, "martial": 16, "stewardship": 15, "intrigue": 11, "learning": 18},
-            "gold": 120,
-            "prestige": 250,
-            "piety": 180,
-            "traits": ["Brave", "Just", "Scholar"]
-        },
-        "char_burgred": {
-            "id": "char_burgred",
-            "name": "Burgred",
-            "title": "King of Mercia",
-            "dynasty": "House of Mercia",
-            "realm": "mercia",
-            "portrait": "portrait_burgred.png",
-            "coa": "coa_mercia.png",
-            "age": 41,
-            "alive": True,
-            "stats": {"diplomacy": 11, "martial": 9, "stewardship": 12, "intrigue": 8, "learning": 9},
-            "gold": 80,
-            "prestige": 140,
-            "piety": 90,
-            "traits": ["Craven", "Content"]
-        },
-        "char_halfden": {
-            "id": "char_halfden",
-            "name": "Halfdan Ragnarsson",
-            "title": "Jarl of Jorvik & Northumbria",
-            "dynasty": "Ragnarsson",
-            "realm": "danelaw",
-            "portrait": "portrait_halfden.png",
-            "coa": "coa_danelaw.png",
-            "age": 35,
-            "alive": True,
-            "stats": {"diplomacy": 8, "martial": 19, "stewardship": 10, "intrigue": 14, "learning": 6},
-            "gold": 210,
-            "prestige": 400,
-            "piety": 50,
-            "traits": ["Viking", "Fierce", "Ambitious"]
-        },
-        "char_rhodri": {
-            "id": "char_rhodri",
-            "name": "Rhodri the Great",
-            "title": "King of Gwynedd & Powys",
-            "dynasty": "Aberffraw",
-            "realm": "wales",
-            "portrait": "portrait_rhodri.png",
-            "coa": "coa_wales.png",
-            "age": 48,
-            "alive": True,
-            "stats": {"diplomacy": 13, "martial": 15, "stewardship": 12, "intrigue": 10, "learning": 12},
-            "gold": 90,
-            "prestige": 210,
-            "piety": 130,
-            "traits": ["Proud", "Diligent"]
-        },
-        "char_constantine": {
-            "id": "char_constantine",
-            "name": "Causantín mac Cináeda",
-            "title": "King of the Picts & Alba",
-            "dynasty": "Alpin",
-            "realm": "scotland",
-            "portrait": "portrait_constantine.png",
-            "coa": "coa_scotland.png",
-            "age": 31,
-            "alive": True,
-            "stats": {"diplomacy": 10, "martial": 14, "stewardship": 11, "intrigue": 12, "learning": 10},
-            "gold": 110,
-            "prestige": 190,
-            "piety": 110,
-            "traits": ["Stubborn", "Hunter"]
-        }
-    }
-
-    provinces = {
-        "wessex": {
-            "id": "wessex",
-            "name": "Wessex",
-            "owner": "char_alfred",
-            "culture": "Anglo-Saxon",
-            "religion": "Catholic",
-            "tax": 16,
-            "levies_max": 2200,
-            "levies_current": 2200,
-            "color": [195, 30, 30]
-        },
-        "kent_essex": {
-            "id": "kent_essex",
-            "name": "Kent & Essex",
-            "owner": "char_alfred",
-            "culture": "Anglo-Saxon",
-            "religion": "Catholic",
-            "tax": 12,
-            "levies_max": 1400,
-            "levies_current": 1400,
-            "color": [215, 60, 60]
-        },
-        "cornwall": {
-            "id": "cornwall",
-            "name": "Cornwall",
-            "owner": "char_alfred",
-            "culture": "Cornish",
-            "religion": "Catholic",
-            "tax": 7,
-            "levies_max": 800,
-            "levies_current": 800,
-            "color": [175, 50, 70]
-        },
-        "mercia": {
-            "id": "mercia",
-            "name": "Mercia",
-            "owner": "char_burgred",
-            "culture": "Anglo-Saxon",
-            "religion": "Catholic",
-            "tax": 13,
-            "levies_max": 1600,
-            "levies_current": 1600,
-            "color": [210, 170, 40]
-        },
-        "east_anglia": {
-            "id": "east_anglia",
-            "name": "East Anglia",
-            "owner": "char_burgred",
-            "culture": "Anglo-Saxon",
-            "religion": "Catholic",
-            "tax": 10,
-            "levies_max": 1200,
-            "levies_current": 1200,
-            "color": [220, 120, 40]
-        },
-        "jorvik": {
-            "id": "jorvik",
-            "name": "Jorvik",
-            "owner": "char_halfden",
-            "culture": "Norse",
-            "religion": "Norse Pagan",
-            "tax": 15,
-            "levies_max": 2000,
-            "levies_current": 2000,
-            "color": [70, 70, 75]
-        },
-        "bernicia": {
-            "id": "bernicia",
-            "name": "Bernicia",
-            "owner": "char_halfden",
-            "culture": "Anglo-Saxon",
-            "religion": "Catholic",
-            "tax": 9,
-            "levies_max": 1100,
-            "levies_current": 1100,
-            "color": [160, 45, 45]
-        },
-        "gwynedd": {
-            "id": "gwynedd",
-            "name": "Gwynedd",
-            "owner": "char_rhodri",
-            "culture": "Welsh",
-            "religion": "Catholic",
-            "tax": 8,
-            "levies_max": 900,
-            "levies_current": 900,
-            "color": [35, 140, 65]
-        },
-        "powys": {
-            "id": "powys",
-            "name": "Powys",
-            "owner": "char_rhodri",
-            "culture": "Welsh",
-            "religion": "Catholic",
-            "tax": 7,
-            "levies_max": 800,
-            "levies_current": 800,
-            "color": [50, 160, 80]
-        },
-        "deheubarth": {
-            "id": "deheubarth",
-            "name": "Deheubarth",
-            "owner": "char_rhodri",
-            "culture": "Welsh",
-            "religion": "Catholic",
-            "tax": 7,
-            "levies_max": 850,
-            "levies_current": 850,
-            "color": [65, 175, 95]
-        },
-        "alba": {
-            "id": "alba",
-            "name": "Alba",
-            "owner": "char_constantine",
-            "culture": "Goidelic",
-            "religion": "Catholic",
-            "tax": 11,
-            "levies_max": 1300,
-            "levies_current": 1300,
-            "color": [25, 65, 145]
-        },
-        "highlands": {
-            "id": "highlands",
-            "name": "Highlands",
-            "owner": "char_constantine",
-            "culture": "Pictish",
-            "religion": "Catholic",
-            "tax": 5,
-            "levies_max": 700,
-            "levies_current": 700,
-            "color": [40, 80, 160]
-        },
-        "lothian": {
-            "id": "lothian",
-            "name": "Lothian",
-            "owner": "char_constantine",
-            "culture": "Goidelic",
-            "religion": "Catholic",
-            "tax": 8,
-            "levies_max": 950,
-            "levies_current": 950,
-            "color": [60, 100, 175]
-        },
-        "strathclyde": {
-            "id": "strathclyde",
-            "name": "Strathclyde",
-            "owner": "char_constantine",
-            "culture": "Cumbric",
-            "religion": "Catholic",
-            "tax": 7,
-            "levies_max": 800,
-            "levies_current": 800,
-            "color": [75, 115, 190]
-        }
-    }
-
-    with open(os.path.join(DATA_DIR, "characters.json"), "w", encoding="utf-8") as f:
-        json.dump(characters, f, indent=2)
-
-    with open(os.path.join(DATA_DIR, "provinces.json"), "w", encoding="utf-8") as f:
-        json.dump(provinces, f, indent=2)
+# data/characters.json, data/provinces.json and data/scenario.json are the
+# hand-authored source of truth for the campaign. This asset generator never
+# rewrites them; edit the JSON files directly instead.
 
 if __name__ == "__main__":
     print("Generating UI Icons...")
@@ -891,10 +653,7 @@ if __name__ == "__main__":
     for p in PORTRAIT_DATA:
         make_portrait(p)
 
-    print("Generating Britain Map Grid & Preview...")
+    print("Generating Map Grid & Preview...")
     generate_map_assets()
 
-    print("Generating Database (characters.json, provinces.json)...")
-    generate_game_data()
-
-    print("All mock assets and game data generated successfully!")
+    print("All mock assets generated successfully.")
